@@ -1,0 +1,4 @@
+Tests: installed
+Depends: 0c-ime, 0c-ime-data
+Restrictions: superficial
+Test-Command: test -x /usr/libexec/0c/0c-server && test -f /usr/share/0c/data/manifest.json

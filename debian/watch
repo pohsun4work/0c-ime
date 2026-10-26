@@ -1,0 +1,6 @@
+version=4
+# Upstream publishes a release asset rather than the auto-generated "Source
+# code" archive.  TODO: validate with "uscan --verbose" before the first
+# upload; GitHub's release pages may need downloadurlmangle instead.
+opts="filenamemangle=s%(?:.*/)?0c-ime-([\d.]+)\.tar\.xz%0c-ime-$1.tar.xz%" \
+   https://github.com/0c-biggo/0c-ime/releases/download/v([\d.]+)/0c-ime-[\d.]+\.tar\.xz

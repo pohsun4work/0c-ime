@@ -1,0 +1,65 @@
+Source: 0c-ime
+Section: utils
+Priority: optional
+Maintainer: Kevin Watt <k@funmula.com>
+Build-Depends: debhelper-compat (= 13),
+               golang-go (>= 2:1.26~),
+               golang-github-clipperhouse-uax29-dev,
+               golang-github-godbus-dbus-dev,
+               golang-github-microsoft-go-winio-dev,
+               golang-golang-x-sys-dev,
+               g++,
+               libfcitx5config-dev,
+               libfcitx5core-dev,
+               libfcitx5utils-dev,
+               libibus-1.0-dev,
+               make,
+               pkg-config
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://0c.biggo.com/
+
+Package: 0c-ime
+Architecture: linux-any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         python3,
+         0c-ime-data (= ${source:Version})
+Recommends: python3-numpy,
+            python3-onnxruntime
+Suggests: fcitx5-0c,
+          ibus-0c
+Description: Zhuyin (Bopomofo) input method engine
+ 0c-ime (靈犀注音) is a Traditional Chinese Zhuyin input method.  This package
+ contains the shared engine, the update helper and the MCP command-line tool
+ used by the desktop shells.
+ .
+ Neural candidate selection and punctuation are optional; without the
+ separately packaged models the statistical engine is used.
+
+Package: 0c-ime-data
+Architecture: all
+Depends: ${misc:Depends}
+Description: dictionary data for the 0c-ime Zhuyin input method
+ This package contains the compiled dictionary, the neural inference worker
+ scripts and the update metadata used by 0c-ime.
+
+Package: fcitx5-0c
+Architecture: linux-any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         fcitx5,
+         0c-ime (= ${binary:Version})
+Description: Fcitx5 input method engine for 0c-ime
+ This package provides the Fcitx5 addon and input method definition for the
+ 0c-ime Zhuyin input method.
+
+Package: ibus-0c
+Architecture: linux-any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         ibus,
+         0c-ime (= ${binary:Version})
+Description: IBus input method engine for 0c-ime
+ This package provides the IBus component and engine binary for the 0c-ime
+ Zhuyin input method.

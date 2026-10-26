@@ -1,0 +1,16 @@
+/.debhelper/
+/debhelper-build-stamp
+/files
+/*.substvars
+/*.debhelper
+/tmp/
+/0c-ime/
+/0c-ime-data/
+/fcitx5-0c/
+/ibus-0c/
+/gocache/
+/*.buildinfo
+/*.changes
+/*.dsc
+/*.debian.tar.*
+/*.orig.tar.*
