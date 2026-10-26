@@ -1,0 +1,27 @@
+Description: use CPPFLAGS and LDFLAGS when building the Fcitx5 addon
+ The shell only used CXXFLAGS, so Debian's hardening CPPFLAGS and LDFLAGS
+ (fortify source, RELRO, BIND_NOW) never reached lib0c.so.
+Author: Kevin Watt <k@funmula.com>
+Forwarded: no
+Last-Update: 2026-10-27
+
+--- a/platforms/linux-fcitx5/Makefile
++++ b/platforms/linux-fcitx5/Makefile
+@@ -6,6 +6,8 @@
+ ROOT     := ../..
+ CXX      ?= g++
+ CXXFLAGS ?= -O2 -g
++CPPFLAGS ?=
++LDFLAGS  ?=
+ SHELL_VERSION ?= development
+ # 系統安裝的位置（src/locate.h）：外殼先找家目錄的官網安裝，再找這裡。根目錄的 make install 依 PREFIX 傳入。
+ ZC_SYSTEM_LIBEXECDIR ?= /usr/libexec/0c
+@@ -31,7 +33,7 @@
+
+ $(BUILD)/lib0c.so: $(CLIENT_SRC) $(ENGINE_SRC) src/*.h
+ 	@mkdir -p $(BUILD)
+-	$(CXX) $(CXXFLAGS) $$(pkg-config --cflags $(FCITX)) -shared -o $@ $(CLIENT_SRC) $(ENGINE_SRC) $$(pkg-config --libs $(FCITX))
++	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $$(pkg-config --cflags $(FCITX)) -shared -o $@ $(CLIENT_SRC) $(ENGINE_SRC) $$(pkg-config --libs $(FCITX)) $(LDFLAGS)
+
+ $(BUILD)/session_test: $(CLIENT_SRC) test/session_test.cpp src/*.h
+ 	@mkdir -p $(BUILD)

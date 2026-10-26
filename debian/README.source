@@ -4,26 +4,44 @@ That asset includes assets/data/ with the compiled dictionary and
 models/pairing.lock.json; a plain Git checkout does not, so run
 "make assets MODELS=0" before testing a build from Git.
 
-The 0c-settings Tauri application is not built by this package yet.  Its
-Rust/Tauri dependency stack is not packaged in Debian, and it is not needed
-for the engine or the Fcitx5/IBus shells.  Add it as another binary package
-once those dependencies are available.
+Dictionary source
+  assets/data is built from the bigram TSVs published in the 0c-ime-data
+  repository (bigram-<date> release); those inputs are not in the upstream
+  tarball (see data/sources/bigram.lock.json and legal/DFSG-free.md).  Debian
+  source completeness may need that component tarball as an additional
+  upstream source.
 
-Go 1.26 or newer is required by go.mod.  The build is driven through the
-upstream Makefile (SETTINGS=0), so the dh-golang addon is not used.  If the
-versions of the packaged Go modules differ from go.sum, adapt the build with
-the Debian Go team's usual module patches (or lower the Go directive
-upstream if the code builds with an older toolchain).
+Go modules
+  go.mod requires Go 1.26.  The build runs through the upstream Makefile with
+  GOPROXY=off, so a clean chroot needs Debian-packaged module sources for
+  uax29/v2, godbus/dbus/v5, go-winio and x/sys.  Some Debian packages may not
+  provide the /v5 or /v2 import paths; patches or a vendor tree will be
+  needed.  This is the main open packaging task.
 
-Tests are disabled by default: the upstream go test suite needs the module
-cache and the dictionary in assets/data.  Enable override_dh_auto_test once
-the module dependencies are pinned for Debian.
+Settings application
+  The 0c-settings Tauri application is not built.  The engine and both desktop
+  shells work without it, but the Fcitx5 menu entry, the IBus <setup> command
+  and the model-download reminder call "0c-update open-settings" and will fail
+  until the application is packaged.
 
-The neural models are non-free (MIT weights, but no training source) and are
-packaged separately as 0c-ime-models in the non-free archive.  They install
-to /usr/share/0c/neural/{select,punct} and are detected as bundled models.
-debian/control will gain "Suggests: 0c-ime-models" once that package is in
-the archive.
+Neural runtime
+  python3-numpy and python3-onnxruntime are recommended, but upstream pins
+  numpy 2.5.3 and onnxruntime 1.30.0 while Debian currently ships older
+  versions.  Verify the worker with the packaged versions, or patch it,
+  before advertising neural selection as supported.
+
+Tests
+  Upstream tests are skipped by default (module dependencies and assets/data).
+  The autopkgtest only checks that the dictionary loads with
+  "0c-server -check-data".  Enable override_dh_auto_test once the Go modules
+  are pinned.
+
+Neural models
+  The models are non-free (MIT weights, but no training source) and are
+  packaged separately as 0c-ime-models in the non-free archive.  They install
+  to /usr/share/0c/neural/{select,punct} and are detected as bundled models.
+  debian/control will gain "Suggests: 0c-ime-models" once that package is in
+  the archive.
 
 Before the first upload, add the ITP bug number to debian/changelog and fill
 in Vcs-Git/Vcs-Browser after creating the packaging repository.

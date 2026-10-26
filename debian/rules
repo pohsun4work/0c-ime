@@ -7,7 +7,7 @@ export GOTOOLCHAIN = local
 export GOPROXY = off
 export GOCACHE = $(CURDIR)/debian/gocache
 
-UPSTREAM_VERSION := $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]*$$//')
+UPSTREAM_VERSION := $(shell dpkg-parsechangelog -SVersion | sed -e 's/^[0-9]*://' -e 's/-[^-]*$$//')
 
 %:
 	dh $@ --buildsystem=makefile
@@ -20,12 +20,20 @@ override_dh_auto_install:
 		FCITX5=1 IBUS=1 SETTINGS=0 MODEL_DOWNLOAD=1
 
 override_dh_auto_clean:
-	rm -rf build debian/gocache
+	# Never remove all of build/: developers keep private work there.
+	rm -rf build/system debian/gocache
 
 override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	@echo "Skipping upstream tests until the Debian Go module dependencies are pinned; see debian/README.source."
 endif
+
+override_dh_compress:
+	# Keep legal documents uncompressed so their relative links work.
+	dh_compress -Xlegal -XLICENSE
+
+override_dh_installchangelogs:
+	dh_installchangelogs CHANGELOG.md
 
 override_dh_missing:
 	dh_missing --fail-missing
