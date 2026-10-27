@@ -21,8 +21,9 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
 
-// DefaultFeed 是正式發布的已簽章索引（S3 bucket 0c-releases，公開路徑 https://s3.biggo.com/0c-releases/<key>）。
-const DefaultFeed = "https://s3.biggo.com/0c-releases/feeds/public-beta.json"
+// DefaultFeed 是 fork 發布的已簽章索引：掛在 GitHub 最新 release 的資產上，
+// 由 .github/workflows/fork-release.yml 產生與續簽。
+const DefaultFeed = "https://github.com/pohsun4work/0c-ime/releases/latest/download/public-beta.json"
 
 // pointerSince 是第一個認得引擎指標的完整安裝版本；更舊的外殼只能以完整安裝更新。
 const pointerSince = "0.1.0-dev.18"
