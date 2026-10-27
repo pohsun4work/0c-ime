@@ -2,23 +2,23 @@ Source: 0c-ime
 Section: utils
 Priority: optional
 Maintainer: Kevin Watt <k@funmula.com>
-Build-Depends: dbus-daemon,
+Build-Depends: dbus-daemon <!nocheck>,
                debhelper-compat (= 13),
                golang-go (>= 2:1.26~),
                golang-github-clipperhouse-uax29-dev,
                golang-github-microsoft-go-winio-dev,
                golang-dbus-dev,
                golang-golang-x-sys-dev,
-               g++,
                libfcitx5config-dev,
                libfcitx5core-dev,
                libfcitx5utils-dev,
                libibus-1.0-dev,
-               make,
-               pkg-config
-Standards-Version: 4.7.0
+               pkgconf,
+               python3 <!nocheck>
+Standards-Version: 4.7.4
 Rules-Requires-Root: no
 Homepage: https://0c.biggo.com/
+XS-Go-Import-Path: github.com/0c-biggo/0c-ime
 Vcs-Browser: https://github.com/0c-biggo/0c-ime/tree/debian/latest
 Vcs-Git: https://github.com/0c-biggo/0c-ime.git -b debian/latest
 
@@ -26,12 +26,13 @@ Package: 0c-ime
 Architecture: linux-any
 Depends: ${misc:Depends},
          ${shlibs:Depends},
-         python3,
          0c-ime-data (= ${source:Version})
-Recommends: python3-numpy,
-            python3-onnxruntime
+Static-Built-Using: ${misc:Static-Built-Using}
 Suggests: fcitx5-0c,
-          ibus-0c
+          ibus-0c,
+          python3,
+          python3-numpy,
+          python3-onnxruntime
 Description: Zhuyin (Bopomofo) input method engine
  0c-ime (靈犀注音) is a Traditional Chinese Zhuyin input method.  This package
  contains the shared engine, the update helper and the MCP command-line tool
@@ -63,6 +64,7 @@ Depends: ${misc:Depends},
          ${shlibs:Depends},
          ibus,
          0c-ime (= ${binary:Version})
+Static-Built-Using: ${misc:Static-Built-Using}
 Description: IBus input method engine for 0c-ime
  This package provides the IBus component and engine binary for the 0c-ime
  Zhuyin input method.

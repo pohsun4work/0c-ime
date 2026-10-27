@@ -2,3 +2,4 @@
 0002-use-debian-go-module-sources.patch
 0003-skip-root-only-settingsapp-test.patch
 0004-go-dynamic-linking.patch
+0005-allow-profile-in-package-mode.patch

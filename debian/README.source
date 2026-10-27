@@ -33,10 +33,12 @@ Settings application
   the application is packaged separately.
 
 Neural runtime
-  python3-numpy and python3-onnxruntime are recommended, but upstream pins
-  numpy 2.5.3 and onnxruntime 1.30.0 while Debian currently ships older
-  versions.  Verify the worker with the packaged versions, or patch it,
-  before advertising neural selection as supported.
+  python3, python3-numpy and python3-onnxruntime are only Suggested: they
+  serve the optional neural models, which are not in main.  Without them the
+  engine reports runtime_missing and keeps using statistical selection.
+  Upstream pins numpy 2.5.3 and onnxruntime 1.30.0; sid's numpy 2.4.6 and
+  onnxruntime 1.23 import and expose the APIs the workers use, but inference
+  with the real models has not been tested yet.
 
 Tests
   "go test -count=1 ./..." runs during the package build with the same

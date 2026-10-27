@@ -1,0 +1,21 @@
+Description: allow input-style profile commands in package-manager mode
+ 0.2.6 added "0c-update profile" for input styles, but the package-manager
+ allowlist was not extended.  A new user starts on the built-in profile,
+ which locks keys such as mixed-input, so "0c-update set" refuses them and
+ the only way out ("profile copy") is refused as package-managed.  The
+ command only edits the user's own settings.json, like "set".
+Author: Kevin Watt <k@funmula.com>
+Forwarded: no
+Last-Update: 2026-10-27
+
+--- a/cmd/0c-update/distribution.go
++++ b/cmd/0c-update/distribution.go
+@@ -19,7 +19,7 @@
+ // packageModeCommands 是套件管理員模式下照常可用的命令（models：#180 的模型下載，Debian 套件不帶模型）；其他（check、download、download-now、apply、install、
+ // verify、rollback、uninstall、schedule、auto、finish、mode、pause、resume、snooze、notify-action、protocol）都拒絕。
+ var packageModeCommands = map[string]bool{
+-	"status": true, "settings": true, "set": true, "models": true, "vocab": true, "api": true, "engine": true, "open-settings": true,
++	"status": true, "settings": true, "set": true, "profile": true, "models": true, "vocab": true, "api": true, "engine": true, "open-settings": true,
+ }
+ 
+ // packageManagedCheck 測試替換用。

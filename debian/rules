@@ -2,34 +2,63 @@
 
 export DH_VERBOSE = 1
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+DPKG_EXPORT_BUILDFLAGS = 1
+include /usr/share/dpkg/architecture.mk
+include /usr/share/dpkg/buildflags.mk
+include /usr/share/dpkg/pkg-info.mk
+
 export GO111MODULE = on
 export GOFLAGS = -mod=readonly
 export CGO_ENABLED = 1
 export GOTOOLCHAIN = local
 export GOPROXY = off
 export GOCACHE = $(CURDIR)/debian/gocache
+# cgo does not read the C build flags; hand them over so the Go binaries get
+# the same hardening as lib0c.so.
+export CGO_CPPFLAGS = $(CPPFLAGS)
+export CGO_CFLAGS = $(CFLAGS)
+export CGO_CXXFLAGS = $(CXXFLAGS)
+export CGO_LDFLAGS = $(LDFLAGS)
 
-UPSTREAM_VERSION := $(shell dpkg-parsechangelog -SVersion | sed -e 's/^[0-9]*://' -e 's/-[^-]*$$//')
+# Upstream versions are plain X.Y.Z; drop any Debian repack suffix (+ds, +dfsg).
+UPSTREAM_VERSION := $(firstword $(subst +, ,$(DEB_VERSION_UPSTREAM)))
+
+# Go supports -buildmode=pie only on these Linux architectures.
+GO_PIE_ARCHES := amd64 arm64 armel armhf i386 loong64 ppc64el riscv64 s390x
+GOBUILDFLAGS := -trimpath $(if $(filter $(DEB_HOST_ARCH),$(GO_PIE_ARCHES)),-buildmode=pie)
+
+MAKE_ARGS := PREFIX=/usr VERSION=$(UPSTREAM_VERSION) GO_MODULE=github.com/0c-biggo/0c-ime \
+	FCITX5=1 IBUS=1 SETTINGS=0
 
 %:
 	dh $@ --buildsystem=makefile
 
 override_dh_auto_build:
-	$(MAKE) build PREFIX=/usr VERSION=$(UPSTREAM_VERSION) GO_MODULE=github.com/0c-biggo/0c-ime \
-		GOBUILDFLAGS="-trimpath -buildmode=pie" FCITX5=1 IBUS=1 SETTINGS=0
+	dh_auto_build -- build $(MAKE_ARGS) GOBUILDFLAGS="$(GOBUILDFLAGS)"
 
 override_dh_auto_install:
-	$(MAKE) install DESTDIR=$(CURDIR)/debian/tmp PREFIX=/usr VERSION=$(UPSTREAM_VERSION) \
-		FCITX5=1 IBUS=1 SETTINGS=0 MODEL_DOWNLOAD=1
+	dh_auto_install -- $(MAKE_ARGS) MODEL_DOWNLOAD=1
 
 override_dh_auto_clean:
 	# Never remove all of build/: developers keep private work there.
-	rm -rf build/system debian/gocache
+	rm -rf build/system debian/gocache debian/.test-home
 
 override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
-	go test -count=1 ./...
+	# buildds run with an unwritable HOME; give the tests their own.
+	mkdir -p debian/.test-home
+	HOME=$(CURDIR)/debian/.test-home XDG_CONFIG_HOME=$(CURDIR)/debian/.test-home/.config \
+		XDG_CACHE_HOME=$(CURDIR)/debian/.test-home/.cache XDG_DATA_HOME=$(CURDIR)/debian/.test-home/.local/share \
+		go test -count=1 ./...
 endif
+
+# Go links these libraries and the toolchain statically into the binaries.
+GO_LIB_PACKAGES := golang-dbus-dev golang-github-clipperhouse-uax29-dev \
+	golang-github-microsoft-go-winio-dev golang-golang-x-sys-dev
+
+override_dh_gencontrol:
+	dh_gencontrol -- "-Vmisc:Static-Built-Using=$$(dpkg-query -W -f '$${source:Package} (= $${source:Version}), ' \
+		$(GO_LIB_PACKAGES) "$$(dpkg -S "$$(readlink -f "$$(command -v go)")" | cut -d: -f1)" | sed 's/, $$//')"
 
 override_dh_compress:
 	# Keep legal documents uncompressed so their relative links work.
@@ -41,6 +70,3 @@ override_dh_installchangelogs:
 override_dh_dwz:
 	# dwz does not understand Go's DWARF 5 .debug_addr sections.
 	@echo "Skipping dwz for Go binaries."
-
-override_dh_missing:
-	dh_missing --fail-missing
