@@ -197,7 +197,7 @@ jobs:
           # signtool verify /pa 要能建出信任鏈，自簽憑證先放進這台 runner 的根憑證。
           Import-Certificate -FilePath platforms/windows/hoshino/codesign.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
           $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1).FullName
-          python scripts/package_windows.py --data assets/data --neural build/neural-windows-amd64 --settings build/settings `
+          python scripts/package_windows.py --data assets/data --neural build/neural-windows-amd64 --settings build/settings/windows-amd64 `
             --release-docs platforms/windows/hoshino --version $env:VERSION --out build/release `
             --signtool $signtool --sign-pfx $pfx --publisher $env:PUBLISHER
           $code = $LASTEXITCODE
