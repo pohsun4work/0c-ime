@@ -11,13 +11,13 @@
    - 同名的 `.sha256`
    - `codesign.cer`
 
-   核對雜湊之後，解壓縮，並把 `codesign.cer` 放進解壓縮出來的目錄。
+   核對雜湊之後解壓縮。`codesign.cer` 留在下載目錄，**不要**放進解壓縮出來的目錄：套件目錄裡只要多一個檔案，`0c-update.exe verify` 就會拒絕。
 2. 以**系統管理員身分**開啟 PowerShell，切換到解壓縮的目錄。
 3. 匯入 fork 的程式碼簽章憑證。這張是自簽憑證，只用來驗證這個 fork 發布的檔案：
 
    ```powershell
-   Import-Certificate -FilePath .\codesign.cer -CertStoreLocation Cert:\LocalMachine\Root
-   Import-Certificate -FilePath .\codesign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+   Import-Certificate -FilePath ..\codesign.cer -CertStoreLocation Cert:\LocalMachine\Root
+   Import-Certificate -FilePath ..\codesign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
    ```
 
 4. 安裝。hoshino 版的版本號比官方同版號「小」（semver 的預發行版本），從官方版換過來時必須加 `-allow-downgrade`：
