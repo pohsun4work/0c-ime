@@ -2028,6 +2028,22 @@ class ReleaseTests(unittest.TestCase):
         exe = struct.unpack("<13I", parse(package_windows.version_info("0c-update.exe", "1.2.3", dll=False))[0][2])
         self.assertEqual((exe[2], exe[3], exe[9]), (1 << 16 | 2, 3 << 16 | 0, 1))
 
+    def test_fork_publisher_and_pfx_signing(self):
+        data = package_windows.version_info("0c-ui.exe", "0.2.6-hoshino.1", False, "Hoshino 0c-ime fork")
+        self.assertIn("Hoshino 0c-ime fork".encode("utf-16-le"), data)
+        self.assertIn("© FUNMULA PTE. LTD.".encode("utf-16-le"), data)  # 著作權維持原作者
+        calls = []
+        args = type("Args", (), {"signtool": "signtool.exe", "sign_pfx": Path("codesign.pfx"), "publisher": "Hoshino 0c-ime fork"})
+        with patch.object(package_windows.subprocess, "run", side_effect=lambda cmd, **kw: calls.append(cmd)), \
+                patch.object(package_windows, "signer", return_value="Hoshino 0c-ime fork"), \
+                patch.dict(os.environ, {"SIGN_PFX_PASSWORD": "secret"}):
+            package_windows.authenticode_sign([Path("0c-ui.exe")], args)
+        self.assertEqual(calls, [["signtool.exe", "sign", "/fd", "SHA256", "/td", "SHA256", "/f", "codesign.pfx", "/p", "secret",
+                                  "/tr", package_windows.PFX_TIMESTAMP_URL, "0c-ui.exe"]])
+        with patch.object(package_windows.subprocess, "run"), patch.object(package_windows, "signer", return_value="FUNMULA PTE. LTD."), \
+                patch.dict(os.environ, {"SIGN_PFX_PASSWORD": "secret"}), self.assertRaises(ValueError):
+            package_windows.authenticode_sign([Path("0c-ui.exe")], args)
+
     def test_authenticode_leaf_signer_ignores_timestamp_chain(self):
         output = """Signing Certificate Chain:
     Issued to: Microsoft Identity Verification Root Certificate Authority 2020

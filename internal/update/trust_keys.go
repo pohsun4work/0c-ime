@@ -5,8 +5,9 @@ import (
 	"encoding/base64"
 )
 
-// 0c-release-2026-09：2026-09-29 產生的正式發行金鑰。
-var releaseKeyText = []string{"p8+04oez+UEucOQTdHmA7sjI1Pixh5Q4VtepvVBqlb0="}
+// hoshino-2026-10：2026-10-28 產生的 fork 發行金鑰，取代官方的 0c-release-2026-09；
+// 私鑰只存在 GitHub environment「release」的 secret，fork 的更新器只接受這把簽的索引。
+var releaseKeyText = []string{"XSWXhXI6nLEIffHczzOw9N5BZk/h3CvCIFmN/fIoQ1o="}
 
 func releaseKeys() []ed25519.PublicKey { return decodeKeys(releaseKeyText) }
 

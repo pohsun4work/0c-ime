@@ -1,0 +1,287 @@
+name: Fork release
+
+# 每 12 小時查一次官方（0c-biggo/0c-ime）的最新 release：有新版就合併、測試、打包、簽章並發布
+# <官方版號>-hoshino.1；沒有新版時只續簽更新索引（剩不到 7 天才簽）。手動執行可勾選 release，
+# 用目前的官方版號發布 fork 自己的修改（hoshino.N 加一）。狀態記在 .github/fork-state.json。
+on:
+  schedule:
+    - cron: '23 3,15 * * *'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 官方沒有新版也發布一版（發布 fork 自己的修改）
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: 0c-biggo/0c-ime
+  FEED_URL: https://github.com/${{ github.repository }}/releases/latest/download/public-beta.json
+  # 腳本讀寫的中文檔案都是 UTF-8；Windows runner 的預設編碼不是。
+  PYTHONUTF8: '1'
+
+jobs:
+  plan:
+    if: github.repository == 'pohsun4work/0c-ime'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      base: ${{ steps.plan.outputs.base }}
+      build: ${{ steps.plan.outputs.build }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_RELEASE: ${{ inputs.release }}
+        run: |
+          upstream=$(jq -r .upstream .github/fork-state.json)
+          build=$(jq -r .build .github/fork-state.json)
+          latest=$(gh release view --repo "$UPSTREAM" --json tagName -q .tagName)
+          if [ -z "$latest" ]; then echo "查不到官方最新 release" >&2; exit 1; fi
+          if [ "$latest" != "$upstream" ]; then mode=merge base=$latest build=1
+          elif [ "$FORCE_RELEASE" = "true" ]; then mode=release base=$upstream build=$((build + 1))
+          else mode=renew base=$upstream
+          fi
+          version="${base#v}-hoshino.$build"
+          printf 'mode=%s\nbase=%s\nbuild=%s\nversion=%s\n' "$mode" "$base" "$build" "$version" >> "$GITHUB_OUTPUT"
+          echo "官方最新 $latest；fork 上次 $upstream；本次 $mode（$version）" >> "$GITHUB_STEP_SUMMARY"
+
+  # 可攜 Python 的 bytecode 要用 Linux 版直譯器編（scripts/prepare_neural.py），所以在 Linux 準備，
+  # 用官方那一版的原始碼，跟官方出貨的 neural/ 相同。
+  neural:
+    needs: plan
+    if: needs.plan.outputs.mode != 'renew'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: 0c-biggo/0c-ime
+          ref: ${{ needs.plan.outputs.base }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - env:
+          BASE: ${{ needs.plan.outputs.base }}
+        run: |
+          python scripts/fetch_assets.py --release "$BASE"
+          python scripts/prepare_neural.py --platform windows-amd64 --dictionary assets/data --models models --out build/neural-windows-amd64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: neural-windows-amd64
+          path: build/neural-windows-amd64
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    needs: [plan, neural]
+    runs-on: windows-2025
+    timeout-minutes: 150
+    # 簽章 secret 只在這個 environment；它只允許 main 分支取用。
+    environment: release
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ needs.plan.outputs.mode }}
+      BASE: ${{ needs.plan.outputs.base }}
+      BUILD: ${{ needs.plan.outputs.build }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: v${{ needs.plan.outputs.version }}
+      PUBLISHER: Hoshino 0c-ime fork
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream release
+        if: env.MODE == 'merge'
+        run: |
+          git remote add upstream "https://github.com/$env:UPSTREAM.git"
+          # 放在獨立的命名空間，避免跟 fork 自己的 tag 撞名。
+          git fetch --no-tags upstream "refs/tags/${env:BASE}:refs/upstream-tags/${env:BASE}"
+          git merge --no-edit "refs/upstream-tags/$env:BASE"
+          if ($LASTEXITCODE -ne 0) {
+            git merge --abort
+            "合併官方 $env:BASE 時發生衝突，需要人工處理。" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            exit 1
+          }
+
+      - name: Test
+        run: |
+          python scripts/check_public_tree.py
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          go test ./...
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          rustup target add i686-pc-windows-msvc
+          Push-Location platforms/windows
+          cargo test --locked
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Pop-Location
+
+      - name: Record state
+        id: state
+        run: |
+          $state = Get-Content .github/fork-state.json -Raw | ConvertFrom-Json
+          # 外殼（TSF DLL、候選窗）有變才發 shell 更新：shell 要系統管理員確認並重新登入，core 在背景完成。
+          $kind = "core"
+          if (-not $state.shell_commit) { $kind = "shell" }
+          else {
+            $changed = git diff --name-only $state.shell_commit HEAD -- platforms/windows/tsf platforms/windows/ui platforms/windows/common platforms/windows/Cargo.toml platforms/windows/Cargo.lock
+            if ($changed) { $kind = "shell" }
+          }
+          $state.upstream = $env:BASE
+          $state.build = [int]$env:BUILD
+          if ($kind -eq "shell") { $state.shell_commit = (git rev-parse HEAD) }
+          $state | ConvertTo-Json | Out-File .github/fork-state.json -Encoding utf8NoBOM
+          git commit -am "release: $env:VERSION"
+          "kind=$kind" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: neural-windows-amd64
+          path: build/neural-windows-amd64
+
+      - name: Build package
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+        run: |
+          python scripts/fetch_assets.py --release $env:BASE
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          python scripts/build_settings_windows.py --version $env:VERSION --out build/settings
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+          # signtool verify /pa 要能建出信任鏈，自簽憑證先放進這台 runner 的根憑證。
+          Import-Certificate -FilePath platforms/windows/hoshino/codesign.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          python scripts/package_windows.py --data assets/data --neural build/neural-windows-amd64 --settings build/settings `
+            --release-docs platforms/windows/hoshino --version $env:VERSION --out build/release `
+            --signtool $signtool --sign-pfx $pfx --publisher $env:PUBLISHER
+          $code = $LASTEXITCODE
+          Remove-Item $pfx
+          if ($code -ne 0) { exit 1 }
+
+      - name: Sign feed and publish
+        env:
+          KIND: ${{ steps.state.outputs.kind }}
+          FEED_SIGNING_KEY: ${{ secrets.FEED_SIGNING_KEY }}
+          PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+        run: |
+          $key = Join-Path $env:RUNNER_TEMP "feed.key"
+          [IO.File]::WriteAllText($key, $env:FEED_SIGNING_KEY)
+          $zip = (Get-ChildItem build/release/*-windows-amd64.zip).FullName
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/$(Split-Path $zip -Leaf)"
+          # 序號用 Unix 時間：一定大於前一份索引，也大於續簽時一次加一的序號。
+          go run ./cmd/0c-release feed -key $key -serial ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -kind $env:KIND -asset "$zip=$url" -out build/release/public-beta.json
+          $code = $LASTEXITCODE
+          Remove-Item $key
+          if ($code -ne 0) { exit 1 }
+          # 合併進來的官方提交若改到 workflow，GITHUB_TOKEN 推不上去，要用有 Workflows 權限的 FORK_PUSH_TOKEN。
+          $token = if ($env:PUSH_TOKEN) { $env:PUSH_TOKEN } else { $env:GH_TOKEN }
+          git push "https://x-access-token:$token@github.com/$env:GITHUB_REPOSITORY.git" HEAD:main
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release create $env:TAG $zip "$zip.sha256" build/release/public-beta.json build/release/public-beta.json.sig platforms/windows/hoshino/codesign.cer `
+            --target (git rev-parse HEAD) --latest --title "靈犀注音 hoshino $env:VERSION" `
+            --notes "官方 $env:BASE 的 hoshino 版（$env:KIND 更新）。第一次安裝請看 platforms/windows/hoshino/INSTALL.md。"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # 「最新 release」的轉址可能晚幾秒才指到新版。
+          foreach ($i in 1..5) {
+            go run ./cmd/0c-release verify -url $env:FEED_URL
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Start-Sleep -Seconds 30
+          }
+          exit 1
+
+  renew:
+    needs: plan
+    if: needs.plan.outputs.mode == 'renew'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - env:
+          FEED_SIGNING_KEY: ${{ secrets.FEED_SIGNING_KEY }}
+          PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+        run: |
+          latest=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)
+          if [ -z "$latest" ]; then echo "fork 還沒有 release，不需續簽。" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          key="$RUNNER_TEMP/feed.key"
+          out="$RUNNER_TEMP/public-beta.json"
+          (umask 077; printf '%s' "$FEED_SIGNING_KEY" > "$key")
+          status=0
+          go run ./cmd/0c-release renew -url "$FEED_URL" -key "$key" -out "$out" || status=$?
+          rm -f "$key"
+          [ "$status" -eq 0 ] || exit "$status"
+          if [ -f "$out" ]; then gh release upload "$latest" "$out" "$out.sig" --clobber --repo "$GITHUB_REPOSITORY"; fi
+          # 公開 repo 60 天沒有活動，GitHub 會停用排程；超過 45 天沒有提交就留一筆紀錄。
+          if [ $(( $(date +%s) - $(git log -1 --format=%ct) )) -gt $(( 45 * 86400 )) ]; then
+            jq --arg d "$(date -u +%F)" '.keepalive = $d' .github/fork-state.json > "$RUNNER_TEMP/state.json"
+            mv "$RUNNER_TEMP/state.json" .github/fork-state.json
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore: keep scheduled fork release active"
+            git push "https://x-access-token:${PUSH_TOKEN:-$GH_TOKEN}@github.com/$GITHUB_REPOSITORY.git" HEAD:main
+          fi
+
+  report:
+    needs: [plan, neural, release, renew]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: |
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "fork release 失敗 in:title" --json number -q '.[0].number')
+          if [ -n "$open" ]; then gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body "又失敗一次：$run"
+          else gh issue create --repo "$GITHUB_REPOSITORY" --title "fork release 失敗" --body "合併、測試、打包或發布失敗，已停止，電腦上維持原本的版本。詳情：$run"
+          fi

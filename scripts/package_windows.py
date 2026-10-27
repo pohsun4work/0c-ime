@@ -66,8 +66,8 @@ def file_version(version):
     return tuple(int(part) for part in version.split("-")[0].split(".")) + (0,)
 
 
-def version_info(name, version, dll):
-    """VS_VERSIONINFO 資源（RT_VERSION）：固定欄位＋一個 zh-TW／UTF-16 字串表。"""
+def version_info(name, version, dll, publisher=PUBLISHER):
+    """VS_VERSIONINFO 資源（RT_VERSION）：固定欄位＋一個 zh-TW／UTF-16 字串表。著作權維持原作者，公司名是這次的發行者。"""
     def pad(data):
         return data + b"\0" * (-len(data) % 4)
 
@@ -85,7 +85,7 @@ def version_info(name, version, dll):
     fixed = struct.pack("<13I", 0xFEEF04BD, 0x00010000, major << 16 | minor, patch << 16 | build,
                         major << 16 | minor, patch << 16 | build, 0x3F, 0, 0x00040004, 2 if dll else 1, 0, 0, 0)
     strings = b"".join(text(k, v) for k, v in (
-        ("CompanyName", PUBLISHER), ("FileDescription", DESCRIPTIONS[name]), ("FileVersion", version),
+        ("CompanyName", publisher), ("FileDescription", DESCRIPTIONS[name]), ("FileVersion", version),
         ("InternalName", name.rsplit(".", 1)[0]), ("LegalCopyright", f"© {PUBLISHER}"),
         ("OriginalFilename", name), ("ProductName", PRODUCT), ("ProductVersion", version)))
     table = node("040404B0", children=strings)
@@ -122,7 +122,7 @@ def existing_version_languages(path):
     return languages
 
 
-def stamp_version(path, version):
+def stamp_version(path, version, publisher=PUBLISHER):
     """以 Win32 UpdateResource 寫入版本資訊；必須在簽章與計算雜湊之前。"""
     import ctypes
     from ctypes import wintypes
@@ -133,7 +133,7 @@ def stamp_version(path, version):
     kernel32.UpdateResourceW.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wintypes.WORD,
                                          ctypes.c_void_p, wintypes.DWORD]
     kernel32.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
-    data = version_info(path.name, version, path.suffix.lower() == ".dll")
+    data = version_info(path.name, version, path.suffix.lower() == ".dll", publisher)
     handle = kernel32.BeginUpdateResourceW(str(path), False)
     if not handle:
         raise OSError(ctypes.get_last_error(), f"無法寫入版本資訊：{path}")
@@ -145,6 +145,7 @@ def stamp_version(path, version):
 
 
 TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
+PFX_TIMESTAMP_URL = "http://timestamp.digicert.com"  # PFX 簽章用的公開 RFC 3161 時間戳伺服器
 PE_SUFFIXES = (".exe", ".dll", ".pyd")
 NEURAL_CRT = ("msvcp140.dll", "msvcp140_1.dll")  # scripts/prepare_neural.py 放在 python.exe 旁
 
@@ -171,14 +172,20 @@ def leaf_signer(output):
 
 
 def authenticode_sign(paths, args):
-    """以 Artifact Signing（signtool＋dlib）簽章並加時間戳，簽完逐檔核對發行者。"""
+    """以 Artifact Signing（signtool＋dlib）或 PFX（fork 的自簽憑證，密碼在 SIGN_PFX_PASSWORD）簽章並加時間戳，
+    簽完逐檔核對發行者。"""
     if not paths:
         return
-    subprocess.run([str(args.signtool), "sign", "/fd", "SHA256", "/tr", TIMESTAMP_URL, "/td", "SHA256",
-                    "/dlib", str(args.sign_dlib), "/dmdf", str(args.sign_metadata), *map(str, paths)], check=True)
+    pfx = getattr(args, "sign_pfx", None)
+    if pfx:
+        how = ["/f", str(pfx), "/p", os.environ["SIGN_PFX_PASSWORD"], "/tr", PFX_TIMESTAMP_URL]
+    else:
+        how = ["/tr", TIMESTAMP_URL, "/dlib", str(args.sign_dlib), "/dmdf", str(args.sign_metadata)]
+    subprocess.run([str(args.signtool), "sign", "/fd", "SHA256", "/td", "SHA256", *how, *map(str, paths)], check=True)
+    publisher = getattr(args, "publisher", PUBLISHER)
     for path in paths:
-        if signer(path, args) != PUBLISHER:
-            raise ValueError(f"簽章後核對失敗（發行者不是 {PUBLISHER}）：{path}")
+        if signer(path, args) != publisher:
+            raise ValueError(f"簽章後核對失敗（發行者不是 {publisher}）：{path}")
 
 
 def unsigned_pe(root, args):
@@ -260,7 +267,7 @@ def build(args):
         check_pe(stage / DLL32, "x86")
         ours.append(stage / DLL32)
         for binary in ours:
-            stamp_version(binary, args.version)
+            stamp_version(binary, args.version, args.publisher)
         # 先寫版本資訊再簽章；之後才計算 release.json 與 SHA256SUMS 的雜湊。
         if args.sign:
             authenticode_sign(ours, args)
@@ -330,14 +337,23 @@ def main():
     parser.add_argument("--signtool", type=Path, help="Windows SDK x64 signtool.exe")
     parser.add_argument("--sign-dlib", type=Path, help="Artifact Signing 用戶端的 Azure.CodeSigning.Dlib.dll")
     parser.add_argument("--sign-metadata", type=Path, help="Artifact Signing metadata.json（端點、帳戶、憑證設定檔）")
+    parser.add_argument("--sign-pfx", type=Path, help="改用 PFX 簽章（fork 的自簽憑證）；密碼放在環境變數 SIGN_PFX_PASSWORD，須搭配 --signtool")
+    parser.add_argument("--publisher", default=PUBLISHER, help="寫進版本資訊的公司名，也是簽章後核對的簽署者")
     try:
         args = parser.parse_args()
-        sign = (args.signtool, args.sign_dlib, args.sign_metadata)
-        if any(sign) and not all(sign):
-            parser.error("簽章需要同時指定 --signtool、--sign-dlib、--sign-metadata")
-        args.sign = all(sign)
+        if args.sign_pfx:
+            if not args.signtool or args.sign_dlib or args.sign_metadata:
+                parser.error("PFX 簽章需要 --signtool，且不可同時指定 Artifact Signing 的 --sign-dlib、--sign-metadata")
+            if not os.environ.get("SIGN_PFX_PASSWORD"):
+                parser.error("PFX 簽章需要環境變數 SIGN_PFX_PASSWORD")
+            args.sign = True
+        else:
+            sign = (args.signtool, args.sign_dlib, args.sign_metadata)
+            if any(sign) and not all(sign):
+                parser.error("簽章需要同時指定 --signtool、--sign-dlib、--sign-metadata")
+            args.sign = all(sign)
         if not args.preview and not args.sign:
-            parser.error("公開包必須簽章：請指定 --signtool、--sign-dlib、--sign-metadata")
+            parser.error("公開包必須簽章：請指定 --signtool、--sign-dlib、--sign-metadata，或 --signtool、--sign-pfx")
         if args.e2etest and not args.preview:
             parser.error("--e2etest 只能用於 --preview 套件")
         if args.e2e_fault and not args.e2etest:
