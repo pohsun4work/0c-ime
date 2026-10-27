@@ -95,6 +95,28 @@ Copyright: 2013-2023 Niels Lohmann <https://nlohmann.me>
 License: Expat
 Comment: nlohmann/json 3.11.3。
 
+Files: bigram/*
+Copyright: 2026 Funmula Co., Limited
+License: CC-BY-SA-4.0
+Comment: component tarball 0c-ime-bigram-<日期>.tar.xz，取自
+ https://github.com/0c-biggo/0c-ime-data 的 Release；assets/data/lexicon.bin、lm.bin
+ 的詞對統計輸入（data/sources/bigram.lock.json 固定校驗值）。每行只有前詞、詞與條件機率，
+ 不含原始文章。
+
+Files: bigram/bigram/zhwiki.tsv
+Copyright: Wikipedia contributors（中文維基百科）
+           2026 Funmula Co., Limited
+License: CC-BY-SA-4.0
+
+Files: bigram/bigram/chewing-v4.tsv
+Copyright: libchewing Core Team（libchewing-data dict/chewing_v4）
+License: CC-BY-4.0
+
+Files: bigram/LICENSES/*
+Copyright: Creative Commons
+License: CC-BY-SA-4.0 and CC-BY-4.0
+Comment: 授權條款全文。
+
 License: AGPL-3
                      GNU AFFERO GENERAL PUBLIC LICENSE
                         Version 3, 19 November 2007

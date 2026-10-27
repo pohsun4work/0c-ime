@@ -5,12 +5,16 @@ models/pairing.lock.json; a plain Git checkout does not, so run
 "make assets MODELS=0" before testing a build from Git.
 
 Dictionary source
-  assets/data is built from the bigram TSVs published in the 0c-ime-data
-  repository.  The component source for this release is
-  https://github.com/0c-biggo/0c-ime-data/releases/download/bigram-20261019/0c-ime-bigram-20261019.tar.xz
-  (about 307 MB; checksums in data/sources/bigram.lock.json).  It is not in
-  the upstream tarball, so Debian source completeness needs it as a
-  component tarball (or an equivalent arrangement agreed with ftp-master).
+  assets/data is compiled from the Git data plus four bigram TSVs.  They ship
+  as the component tarball 0c-ime_<version>.orig-bigram.tar.xz (about 307 MB),
+  which debian/watch fetches from the 0c-ime-data GitHub release, so they are
+  part of the Debian source package under bigram/.  Each line holds only
+  prev-word, word and P(word|prev); no original text can be recovered.
+  The build still uses the prebuilt assets/data.  Upstream rebuilt it with
+  scripts/build_release_data.py --bigram-dir and got byte-identical output
+  for 0.2.2; this has not been re-run for 0.2.6.  The component's version is
+  ignored, so uscan takes the newest bigram release: when updating, check
+  its checksums against data/sources/bigram.lock.json.
 
 Go modules
   The build stays in module mode (GO111MODULE=on, GOFLAGS=-mod=readonly,

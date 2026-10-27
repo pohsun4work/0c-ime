@@ -1,5 +1,15 @@
 Version: 5
+
 Source: https://github.com/0c-biggo/0c-ime/releases
 Matching-Pattern: /0c-biggo/0c-ime/releases/tag/v(\d[\d.]*)
 Download-Url-Mangle: s%.*?/releases/tag/v([\d.]+)%https://github.com/0c-biggo/0c-ime/releases/download/v$1/0c-ime-$1.tar.xz%
 Filename-Mangle: s%.*/releases/tag/v([\d.]+)%0c-ime-$1.tar.xz%
+
+# Bigram statistics that assets/data/lexicon.bin and lm.bin are compiled from
+# (data/sources/bigram.lock.json pins their checksums).
+Component: bigram
+Source: https://github.com/0c-biggo/0c-ime-data/releases
+Matching-Pattern: /0c-biggo/0c-ime-data/releases/tag/bigram-(\d{8})
+Download-Url-Mangle: s%.*?/releases/tag/bigram-(\d+)%https://github.com/0c-biggo/0c-ime-data/releases/download/bigram-$1/0c-ime-bigram-$1.tar.xz%
+Filename-Mangle: s%.*/releases/tag/bigram-(\d+)%0c-ime-bigram-$1.tar.xz%
+Version-Schema: ignore
