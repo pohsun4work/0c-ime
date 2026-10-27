@@ -12,11 +12,13 @@ Dictionary source
   upstream source.
 
 Go modules
-  go.mod requires Go 1.26.  The build runs through the upstream Makefile with
-  GOPROXY=off, so a clean chroot needs Debian-packaged module sources for
-  uax29/v2, godbus/dbus/v5, go-winio and x/sys.  Some Debian packages may not
-  provide the /v5 or /v2 import paths; patches or a vendor tree will be
-  needed.  This is the main open packaging task.
+  The build stays in module mode (GO111MODULE=on, GOFLAGS=-mod=readonly,
+  GOPROXY=off) and debian/patches/0002 replaces the four modules with the
+  Debian-packaged sources under /usr/share/gocode/src.  Module mode matters:
+  go.mod's go directive selects net/http's Go 1.22+ ServeMux behavior; GOPATH
+  mode falls back to the old mux and the local API routes return 404.
+  Versions in sid: go-winio 0.6.2, golang-dbus 5.1.0, uax29/v2 2.7.0,
+  x/sys 0.49.0.  Recheck them when updating the package.
 
 Settings application
   The 0c-settings Tauri application is not built.  The engine and both desktop
@@ -31,10 +33,10 @@ Neural runtime
   before advertising neural selection as supported.
 
 Tests
-  Upstream tests are skipped by default (module dependencies and assets/data).
-  The autopkgtest only checks that the dictionary loads with
-  "0c-server -check-data".  Enable override_dh_auto_test once the Go modules
-  are pinned.
+  "go test -count=1 ./..." runs during the package build with the same
+  module replacements, unless DEB_BUILD_OPTIONS contains nocheck.  The
+  autopkgtest additionally checks that the packaged dictionary loads with
+  "0c-server -check-data".
 
 Neural models
   The models are non-free (MIT weights, but no training source) and are

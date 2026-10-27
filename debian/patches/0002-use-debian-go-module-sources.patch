@@ -1,0 +1,24 @@
+Description: build against Debian's packaged Go module sources
+ Debian ships the modules under /usr/share/gocode/src instead of a module
+ cache.  Point go.mod at those directories so the build stays offline without
+ vendoring, while keeping the go directive (and with it net/http's Go 1.22+
+ ServeMux behavior; GOPATH mode falls back to the old mux and breaks the
+ local API routes).
+Author: Kevin Watt <k@funmula.com>
+Forwarded: not-needed
+Last-Update: 2026-10-27
+
+--- a/go.mod	2026-10-27 09:15:49.096275784 +0800
++++ b/go.mod	2026-10-27 09:15:49.098275815 +0800
+@@ -9,3 +9,11 @@
+ )
+ 
+ require github.com/clipperhouse/uax29/v2 v2.7.0
++
++replace github.com/Microsoft/go-winio => /usr/share/gocode/src/github.com/Microsoft/go-winio
++
++replace github.com/godbus/dbus/v5 => /usr/share/gocode/src/github.com/godbus/dbus
++
++replace github.com/clipperhouse/uax29/v2 => /usr/share/gocode/src/github.com/clipperhouse/uax29/v2
++
++replace golang.org/x/sys => /usr/share/gocode/src/golang.org/x/sys

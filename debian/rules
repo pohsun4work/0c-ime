@@ -3,6 +3,7 @@
 export DH_VERBOSE = 1
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export GO111MODULE = on
+export GOFLAGS = -mod=readonly
 export GOTOOLCHAIN = local
 export GOPROXY = off
 export GOCACHE = $(CURDIR)/debian/gocache
@@ -13,7 +14,8 @@ UPSTREAM_VERSION := $(shell dpkg-parsechangelog -SVersion | sed -e 's/^[0-9]*://
 	dh $@ --buildsystem=makefile
 
 override_dh_auto_build:
-	$(MAKE) build PREFIX=/usr VERSION=$(UPSTREAM_VERSION) FCITX5=1 IBUS=1 SETTINGS=0
+	$(MAKE) build PREFIX=/usr VERSION=$(UPSTREAM_VERSION) GO_MODULE=github.com/0c-biggo/0c-ime \
+		FCITX5=1 IBUS=1 SETTINGS=0
 
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/tmp PREFIX=/usr VERSION=$(UPSTREAM_VERSION) \
@@ -25,7 +27,7 @@ override_dh_auto_clean:
 
 override_dh_auto_test:
 ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
-	@echo "Skipping upstream tests until the Debian Go module dependencies are pinned; see debian/README.source."
+	go test -count=1 ./...
 endif
 
 override_dh_compress:
