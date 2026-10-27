@@ -1,0 +1,25 @@
+Description: link the Go command-line binaries dynamically
+ Debian builds against the system C library so the binaries are dynamically
+ linked; the official packages use CGO_ENABLED=0 for portability.  Dynamic
+ linking also avoids lintian's statically-linked-binary error.
+Author: Kevin Watt <k@funmula.com>
+Forwarded: not-needed
+Last-Update: 2026-10-27
+
+--- a/Makefile	2026-10-27 09:56:09.649609584 +0800
++++ b/Makefile	2026-10-27 09:56:09.670609729 +0800
+@@ -91,11 +91,12 @@
+ check-version:
+ 	@test -n '$(VERSION)' || { echo '請指定 VERSION（例如 make VERSION=0.2.3；沒有 git 時無法自動取得）' >&2; exit 1; }
+ 
+-# 0c-update、0c-ibus、0c-mcp 不依賴 C 函式庫（同官網套件）；0c-server 照官網套件以預設方式建置。
++# Debian links these dynamically against the system C library; the official
++# packages use CGO_ENABLED=0 for portability.
+ build-go: check-version
+ 	@mkdir -p $(SYSBUILD)
+ 	$(GO) build $(GOBUILDFLAGS) -ldflags '$(GO_LDFLAGS)' -o $(SYSBUILD)/0c-server ./cmd/0c-server
+-	$(foreach b,0c-update 0c-mcp $(if $(filter 1,$(IBUS)),0c-ibus),CGO_ENABLED=0 $(GO) build $(GOBUILDFLAGS) -ldflags '$(GO_LDFLAGS)' -o $(SYSBUILD)/$(b) ./cmd/$(b) &&) true
++	$(foreach b,0c-update 0c-mcp $(if $(filter 1,$(IBUS)),0c-ibus),$(GO) build $(GOBUILDFLAGS) -ldflags '$(GO_LDFLAGS)' -o $(SYSBUILD)/$(b) ./cmd/$(b) &&) true
+ 
+ build-fcitx5: check-version
+ 	$(MAKE) -C platforms/linux-fcitx5 BUILD=$(abspath $(SYSBUILD))/fcitx5 SHELL_VERSION=$(VERSION) \

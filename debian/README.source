@@ -6,10 +6,11 @@ models/pairing.lock.json; a plain Git checkout does not, so run
 
 Dictionary source
   assets/data is built from the bigram TSVs published in the 0c-ime-data
-  repository (bigram-<date> release); those inputs are not in the upstream
-  tarball (see data/sources/bigram.lock.json and legal/DFSG-free.md).  Debian
-  source completeness may need that component tarball as an additional
-  upstream source.
+  repository.  The component source for this release is
+  https://github.com/0c-biggo/0c-ime-data/releases/download/bigram-20261019/0c-ime-bigram-20261019.tar.xz
+  (about 307 MB; checksums in data/sources/bigram.lock.json).  It is not in
+  the upstream tarball, so Debian source completeness needs it as a
+  component tarball (or an equivalent arrangement agreed with ftp-master).
 
 Go modules
   The build stays in module mode (GO111MODULE=on, GOFLAGS=-mod=readonly,
@@ -18,13 +19,18 @@ Go modules
   go.mod's go directive selects net/http's Go 1.22+ ServeMux behavior; GOPATH
   mode falls back to the old mux and the local API routes return 404.
   Versions in sid: go-winio 0.6.2, golang-dbus 5.1.0, uax29/v2 2.7.0,
-  x/sys 0.49.0.  Recheck them when updating the package.
+  x/sys 0.49.0.  Recheck them when updating the package.  The Go binaries
+  are built with CGO_ENABLED=1 and -buildmode=pie for Debian; the official
+  packages use CGO_ENABLED=0 for portability (debian/patches/0004).
 
 Settings application
-  The 0c-settings Tauri application is not built.  The engine and both desktop
-  shells work without it, but the Fcitx5 menu entry, the IBus <setup> command
-  and the model-download reminder call "0c-update open-settings" and will fail
-  until the application is packaged.
+  The 0c-settings Tauri application is not built in this package.  Its
+  Cargo.lock has 455 crates and Debian sid has no librust-tauri/wry/tao
+  packages, so shipping it in main would need a vendored Rust tree, which the
+  Rust team does not accept for main.  The engine and both desktop shells work
+  without it, but the Fcitx5 menu entry, the IBus <setup> command and the
+  model-download reminder call "0c-update open-settings" and will fail until
+  the application is packaged separately.
 
 Neural runtime
   python3-numpy and python3-onnxruntime are recommended, but upstream pins
@@ -34,7 +40,9 @@ Neural runtime
 
 Tests
   "go test -count=1 ./..." runs during the package build with the same
-  module replacements, unless DEB_BUILD_OPTIONS contains nocheck.  The
+  module replacements, unless DEB_BUILD_OPTIONS contains nocheck.  One
+  settingsapp test that checks system-file ownership is skipped for root
+  builds (debian/patches/0003); Debian buildds run unprivileged.  The
   autopkgtest additionally checks that the packaged dictionary loads with
   "0c-server -check-data".
 

@@ -2,7 +2,8 @@ Source: 0c-ime
 Section: utils
 Priority: optional
 Maintainer: Kevin Watt <k@funmula.com>
-Build-Depends: debhelper-compat (= 13),
+Build-Depends: dbus-daemon,
+               debhelper-compat (= 13),
                golang-go (>= 2:1.26~),
                golang-github-clipperhouse-uax29-dev,
                golang-github-microsoft-go-winio-dev,

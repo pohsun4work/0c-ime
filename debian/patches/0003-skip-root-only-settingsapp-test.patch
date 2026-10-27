@@ -1,0 +1,21 @@
+Description: skip the system-owner test when running as root
+ LocateSystem treats the owner of the test file as a system file when the
+ test runs as root, so the rejection check cannot distinguish the two.  Skip
+ the test for root builds; Debian buildds run unprivileged, so non-root
+ coverage is unchanged.
+Author: Kevin Watt <k@funmula.com>
+Forwarded: not-needed
+Last-Update: 2026-10-27
+
+--- a/internal/settingsapp/settingsapp_test.go	2026-10-27 09:31:57.498221099 +0800
++++ b/internal/settingsapp/settingsapp_test.go	2026-10-27 09:31:57.517220704 +0800
+@@ -313,6 +313,9 @@
+ 
+ // 系統套件的設定程式（#181）沒有收據雜湊，改核對擁有者與權限。
+ func TestLocateSystemChecksOwnerAndPermissions(t *testing.T) {
++	if os.Geteuid() == 0 {
++		t.Skip("system owner is the test user when running as root")
++	}
+ 	dir := t.TempDir()
+ 	path := filepath.Join(dir, "0c-settings")
+ 	if _, err := LocateSystem(path); !errors.Is(err, ErrNotFound) {
