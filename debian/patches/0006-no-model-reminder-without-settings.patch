@@ -1,0 +1,85 @@
+Description: skip the model-download reminder when there is no settings program
+ The reminder's "下載模型" button opens the settings program's models page.
+ The Debian packages do not ship 0c-settings yet, so the button would only
+ fail.  Treat a missing settings program like a disabled download for the
+ reminder only: "0c-update models download" keeps working, and reminders
+ resume once a settings program is installed.
+Author: Kevin Watt <k@funmula.com>
+Forwarded: no
+Last-Update: 2026-10-27
+
+--- a/cmd/0c-update/models.go
++++ b/cmd/0c-update/models.go
+@@ -598,7 +598,7 @@
+ 		now := e.now()
+ 		send := r.Decide(models.RemindInput{Now: now, Committed: committed, HasModel: snap.source == neural.SourceBundled,
+ 			Downloaded: snap.inspect.AnyUser, Neural: neuralSelection,
+-			Disabled: e.distributionDisabled(e.data) || !snap.pairingOK})
++			Disabled: e.distributionDisabled(e.data) || !snap.pairingOK || settingsProgramMissing()})
+ 		if !send {
+ 			return
+ 		}
+@@ -661,6 +661,10 @@
+ // openSettingsPage 測試替換用。
+ var openSettingsPage = func(page string) error { return openSettings([]string{page}) }
+ 
++// settingsProgramMissing 回報這個安裝找不到設定程式（例如發行版套件沒附 0c-settings）。這時通知的「下載模型」
++// 開不了模型頁，所以不發提醒；不算永久停止，之後裝上設定程式就照常提醒。測試替換用。
++var settingsProgramMissing = func() bool { _, err := newSettingsOpener().locate(); return err != nil }
++
+ func printModels(w io.Writer, st modelsStatus) {
+ 	switch st.Source {
+ 	case neural.SourceBundled:
+--- a/cmd/0c-update/models_test.go
++++ b/cmd/0c-update/models_test.go
+@@ -113,7 +113,8 @@
+ 		runtimeCheck:         func(string) []string { return []string{"python3-onnxruntime"} },
+ 		distributionDisabled: func(string) bool { return false }, now: time.Now}
+ 	f.writePairing(t)
+-	oldReload, oldSend, oldOpen := reloadEngineForModels, sendModelsNotice, openSettingsPage
++	oldReload, oldSend, oldOpen, oldMissing := reloadEngineForModels, sendModelsNotice, openSettingsPage, settingsProgramMissing
++	settingsProgramMissing = func() bool { return false }
+ 	reloadEngineForModels = func() { f.reloads++ }
+ 	sendModelsNotice = func() error {
+ 		f.notices++
+@@ -123,7 +124,9 @@
+ 		return nil
+ 	}
+ 	openSettingsPage = func(page string) error { f.opened = append(f.opened, page); return nil }
+-	t.Cleanup(func() { reloadEngineForModels, sendModelsNotice, openSettingsPage = oldReload, oldSend, oldOpen })
++	t.Cleanup(func() {
++		reloadEngineForModels, sendModelsNotice, openSettingsPage, settingsProgramMissing = oldReload, oldSend, oldOpen, oldMissing
++	})
+ 	return f
+ }
+ 
+@@ -429,6 +432,29 @@
+ 	}
+ }
+ 
++// 找不到設定程式時（發行版套件沒附 0c-settings），「下載模型」按鈕開不了模型頁：不發提醒，也不永久停止。
++func TestModelsReminderWaitsForSettingsProgram(t *testing.T) {
++	f := newModelsFixture(t)
++	settingsProgramMissing = func() bool { return true }
++	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
++	now := t0
++	f.env.now = func() time.Time { return now }
++	for _, d := range []time.Duration{0, 2 * time.Hour, 30 * time.Hour} {
++		now = t0.Add(d)
++		if err := f.env.remind(d > 0); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if r := f.env.store().LoadRemind(); f.notices != 0 || r.Stopped != "" {
++		t.Fatalf("notices %d %+v", f.notices, r)
++	}
++	settingsProgramMissing = func() bool { return false }
++	now = t0.Add(60 * time.Hour)
++	if err := f.env.remind(true); err != nil || f.notices != 1 {
++		t.Fatalf("裝上設定程式後照常提醒：%v %d", err, f.notices)
++	}
++}
++
+ func TestModelsReminderStops(t *testing.T) {
+ 	t.Run("statistical", func(t *testing.T) {
+ 		f := newModelsFixture(t)

@@ -3,3 +3,4 @@
 0003-skip-root-only-settingsapp-test.patch
 0004-go-dynamic-linking.patch
 0005-allow-profile-in-package-mode.patch
+0006-no-model-reminder-without-settings.patch

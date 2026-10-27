@@ -28,9 +28,13 @@ Settings application
   Cargo.lock has 455 crates and Debian sid has no librust-tauri/wry/tao
   packages, so shipping it in main would need a vendored Rust tree, which the
   Rust team does not accept for main.  The engine and both desktop shells work
-  without it, but the Fcitx5 menu entry, the IBus <setup> command and the
-  model-download reminder call "0c-update open-settings" and will fail until
-  the application is packaged separately.
+  without it, but the Fcitx5 menu entry and the IBus <setup> command call
+  "0c-update open-settings" and report that it is missing.  The
+  model-download reminder would do the same, so debian/patches/0006 skips it
+  while no settings program is installed; "0c-update models download" still
+  works.  debian/patches/0005 lets "0c-update profile" run on a
+  package-managed install; without it new users cannot change the keys locked
+  by the built-in input style.  Both are to be fixed upstream.
 
 Neural runtime
   python3, python3-numpy and python3-onnxruntime are only Suggested: they
