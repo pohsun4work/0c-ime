@@ -19,6 +19,8 @@ Build-Depends: dbus-daemon,
 Standards-Version: 4.7.0
 Rules-Requires-Root: no
 Homepage: https://0c.biggo.com/
+Vcs-Browser: https://github.com/0c-biggo/0c-ime/tree/debian/latest
+Vcs-Git: https://github.com/0c-biggo/0c-ime.git -b debian/latest
 
 Package: 0c-ime
 Architecture: linux-any

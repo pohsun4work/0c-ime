@@ -53,5 +53,6 @@ Neural models
   debian/control will gain "Suggests: 0c-ime-models" once that package is in
   the archive.
 
-ITP: https://bugs.debian.org/1152241 (closed by the first upload).  Fill in
-Vcs-Git/Vcs-Browser after creating the packaging repository.
+ITP: https://bugs.debian.org/1152241 (closed by the first upload).
+Packaging lives on the debian/latest branch of the upstream repository
+(DEP-14 layout); tag uploads as debian/<version>.
