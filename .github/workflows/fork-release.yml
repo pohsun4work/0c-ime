@@ -59,7 +59,8 @@ jobs:
           echo "官方最新 $latest；fork 上次 $upstream；本次 $mode（$version）" >> "$GITHUB_STEP_SUMMARY"
 
   # 可攜 Python 的 bytecode 要用 Linux 版直譯器編（scripts/prepare_neural.py），所以在 Linux 準備，
-  # 用官方那一版的原始碼，跟官方出貨的 neural/ 相同。
+  # 用官方那一版的原始碼，跟官方出貨的 neural/ 相同。字典也在這裡抓：fetch_assets.py 在 Windows 上
+  # 改名下載暫存檔時會遇到檔案被占用（WinError 32）。
   neural:
     needs: plan
     if: needs.plan.outputs.mode != 'renew'
@@ -83,6 +84,13 @@ jobs:
         with:
           name: neural-windows-amd64
           path: build/neural-windows-amd64
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: data
+          path: assets/data
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
@@ -172,14 +180,16 @@ jobs:
         with:
           name: neural-windows-amd64
           path: build/neural-windows-amd64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: data
+          path: assets/data
 
       - name: Build package
         env:
           SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
           SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
         run: |
-          python scripts/fetch_assets.py --release $env:BASE
-          if ($LASTEXITCODE -ne 0) { exit 1 }
           python scripts/build_settings_windows.py --version $env:VERSION --out build/settings
           if ($LASTEXITCODE -ne 0) { exit 1 }
           $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
