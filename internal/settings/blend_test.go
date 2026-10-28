@@ -42,19 +42,20 @@ func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
 	if back.ReadOnly() || back.ProfileRules() != r || !back.MixedInput {
 		t.Fatalf("blend copy did not round trip: %+v", back.ProfileRules())
 	}
-	// 官方的非預設規則照官方的做法擋混打：混打或英文補全開著時改不了，都關掉才能改。
-	if err := back.Set("style-tab", "cycle"); err == nil {
-		t.Fatal("an official non-default rule was accepted with mixed input")
+	// 官方的規則照官方逐條判斷能不能跟混打並用：Tab 輪換可以，Tab 調整斷詞要先關掉混打才能改。
+	if err := back.Set("style-tab", "cycle"); err != nil || !back.MixedInput {
+		t.Fatalf("a compatible official rule: %v", err)
 	}
-	for _, key := range []string{"mixed-input", "english-autocomplete"} {
-		if err := back.Set(key, "off"); err != nil {
-			t.Fatal(err)
-		}
+	if err := back.Set("style-tab", "segment"); err == nil {
+		t.Fatal("a conflicting official rule was accepted with mixed input")
 	}
-	if err := back.Set("style-tab", "cycle"); err != nil {
+	if err := back.Set("mixed-input", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if reason := itemsByKey(back)["mixed-input"].DisabledReason; reason != styleExtensionReason {
+	if err := back.Set("style-tab", "segment"); err != nil {
+		t.Fatal(err)
+	}
+	if reason := itemsByKey(back)["mixed-input"].DisabledReason; reason != "Tab 調整斷詞時關閉" {
 		t.Fatalf("mixed input should be disabled by the official rule: %q", reason)
 	}
 }
