@@ -13,7 +13,9 @@ const MaxEnglishObservations = 1024
 // Engineering defaults, replayable with the host's clock: ordinary words need
 // three independent commits over at least two days; likely misspellings need
 // eight over four days. Each word contributes at most two confirmations per day.
-// Decayed thresholds leave room for observations on adjacent days.
+// Decayed thresholds leave room for observations on adjacent days. With
+// Model.KnownEnglish (the blend style), suggestible dictionary words need
+// three commits on any days instead.
 type EnglishEvidence struct {
 	Text                   string
 	Confirmed, Days, Usage float64
@@ -67,6 +69,12 @@ func (e EnglishEvidence) eligible() bool {
 	return e.Confirmed >= 2.5 && e.Days >= 1.5
 }
 
+// englishEligible looks the dictionary up last: it runs for every observation
+// on each keystroke.
+func (m *Model) englishEligible(key string, e EnglishEvidence) bool {
+	return e.eligible() || e.Confirmed >= 2.5 && m.KnownEnglish.Suggestible(key)
+}
+
 // LearnEnglish is called exactly once at commit, using final tokens and their
 // origins. Repeated words in one composition count once. System suggestions may
 // strengthen usage of an existing observation but never confirm or create one.
@@ -107,12 +115,14 @@ func (m *Model) LearnEnglish(events []EnglishCommit) {
 			weight = 1
 			e.Text = event.Text
 			e.Suspicious = e.Suspicious || event.Suspicious
-			if e.DayConfirmed < 2 {
+			// Dictionary words may pass the daily cap only to reach the threshold,
+			// so the shared evidence does not inflate for the other styles.
+			if e.DayConfirmed < 2 || !m.englishEligible(key, e) && m.KnownEnglish.Suggestible(key) {
 				if e.DayConfirmed == 0 {
 					e.Days = min(16, e.Days+1)
 				}
 				e.Confirmed = min(32, e.Confirmed+1)
-				e.DayConfirmed++
+				e.DayConfirmed = min(2, e.DayConfirmed+1)
 			}
 		}
 		e.Usage = min(16, e.Usage+weight)
@@ -187,7 +197,7 @@ func (m *Model) EnglishKnown(text string) bool {
 	}
 	key := strings.ToLower(text)
 	e, ok := m.Store.English[key]
-	return ok && !m.Store.Tombstones[key] && e.at(m.Store.Time).eligible()
+	return ok && !m.Store.Tombstones[key] && m.englishEligible(key, e.at(m.Store.Time))
 }
 
 func englishRank(cs []english.Candidate, limit int) []english.Candidate {
@@ -231,7 +241,7 @@ func (m *Model) EnglishPrefix(base *english.Dictionary, prefix string, limit int
 	p := strings.ToLower(prefix)
 	for key, e := range m.Store.English {
 		e = e.at(m.Store.Time)
-		if !e.eligible() || m.Store.Tombstones[key] || !strings.HasPrefix(key, p) || base.Has(key) && !base.Suggestible(key) {
+		if !m.englishEligible(key, e) || m.Store.Tombstones[key] || !strings.HasPrefix(key, p) || base.Has(key) && !base.Suggestible(key) {
 			continue
 		}
 		suffix := e.Text[len(prefix):]
@@ -256,7 +266,7 @@ func (m *Model) EnglishCorrections(base *english.Dictionary, text string, limit 
 		words := []english.Word{}
 		for key, e := range m.Store.English {
 			e = e.at(m.Store.Time)
-			if e.eligible() && !m.Store.Tombstones[key] && !(base.Has(key) && !base.Suggestible(key)) {
+			if m.englishEligible(key, e) && !m.Store.Tombstones[key] && !(base.Has(key) && !base.Suggestible(key)) {
 				words = append(words, english.Word{Text: key, Weight: 320 + e.Usage})
 			}
 		}

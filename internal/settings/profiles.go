@@ -173,7 +173,7 @@ func (s *Settings) applyProfile(p Profile) error {
 }
 func (s Settings) profileAvailability(p Profile) (bool, string) {
 	// A preset never silently changes the separately selected physical layout.
-	if s.KeyboardLayout != LayoutStandard && p.Rules != inputstyleDefaultRules() {
+	if s.KeyboardLayout != LayoutStandard && !officialRulesDefault(p.Rules) {
 		return false, "此風格目前支援標準注音排列；請先在「鍵盤與符號」選擇標準排列"
 	}
 	return true, ""
@@ -398,7 +398,7 @@ const styleExtensionReason = "此操作規則目前不支援混打、英文補�
 func (s Settings) styleExtensionDisabled(key string) bool {
 	switch key {
 	case "mixed-input", "english-autocomplete", "toneless":
-		return s.ProfileRules() != inputstyleDefaultRules()
+		return !officialRulesDefault(s.ProfileRules())
 	}
 	return false
 }
@@ -407,7 +407,7 @@ func (s Settings) validateProfileCombination() error {
 	if ok, reason := s.profileAvailability(p); !ok {
 		return profileError(reason)
 	}
-	if s.ProfileRules() != inputstyleDefaultRules() && (s.MixedInput || s.EnglishAutocomplete || s.Toneless) {
+	if !officialRulesDefault(s.ProfileRules()) && (s.MixedInput || s.EnglishAutocomplete || s.Toneless) {
 		return profileError(styleExtensionReason)
 	}
 	return nil

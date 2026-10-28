@@ -169,6 +169,9 @@ type Model struct {
 	Gen int
 	// Now 由互動宿主注入；nil 時凍結時間，測試與 transcript 可確定性重播。
 	Now func() int64
+	// KnownEnglish 由宿主在整合風格（InputStyle.EnglishLearning）時設定：這份字典裡可推薦的詞，
+	// 累計確認 3 次就學會、不限天數。nil 照原本的規則；判斷當場查字典，不寫進個人資料。
+	KnownEnglish *english.Dictionary
 	// prunedDay 是這個行程最後一次清理的日子（PruneIfDue）；不存檔。
 	prunedDay int64
 	// undo 是 Undoable 執行期間記錄改動的複本；其餘時候是 nil（見 recording）。

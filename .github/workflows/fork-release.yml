@@ -103,6 +103,7 @@ jobs:
     environment: release
     permissions:
       contents: write
+      issues: write # 官方新增規則待分類
     defaults:
       run:
         shell: pwsh
@@ -143,6 +144,35 @@ jobs:
             "合併官方 $env:BASE 時發生衝突，需要人工處理。" | Out-File $env:GITHUB_STEP_SUMMARY -Append
             exit 1
           }
+
+      # 官方新增或改了操作規則時，整合風格要決定它跟混打相不相容。沒分類的規則照官方的做法擋混打，
+      # 不會出錯，所以只開 issue 提醒、照常發布。
+      - name: Check upstream input-style rules
+        id: rules
+        if: env.MODE == 'merge'
+        continue-on-error: true
+        run: |
+          $out = go test -tags forkcheck -run TestUpstreamRulesClassified ./internal/settings 2>&1
+          $code = $LASTEXITCODE
+          $out
+          if ($code -ne 0) {
+            # 檢查本身編譯不過（多半是官方改了設定程式的結構）跟「規則有變」分開報。
+            $summary = if ($out -match '--- FAIL: TestUpstreamRulesClassified') { '官方新增或改了操作規則，整合風格還沒決定它們跟混打相不相容' } else { '整合風格的規則檢查跑不起來，多半是官方改了設定程式的結構，要更新 internal/settings/upstream_rules_forkcheck_test.go' }
+            "summary=$summary" | Out-File $env:GITHUB_OUTPUT -Append
+            $summary, '```', ($out -join "`n"), '```' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
+          exit $code
+      - name: Report unclassified rules
+        if: steps.rules.outcome == 'failure'
+        shell: bash
+        env:
+          SUMMARY: ${{ steps.rules.outputs.summary }}
+        run: |
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "官方規則變動待處理 in:title" --json number -q '.[0].number')
+          if [ -n "$open" ]; then gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body "官方 $BASE：$SUMMARY。$run"
+          else gh issue create --repo "$GITHUB_REPOSITORY" --title "官方規則變動待處理" --body "官方 $BASE：$SUMMARY。還沒分類的規則照官方的做法擋混打，這次照常發布。詳情在執行摘要：$run"
+          fi
 
       - name: Test
         run: |

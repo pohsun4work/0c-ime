@@ -22,6 +22,10 @@ type Rules struct {
 	CandidateSpace      string `json:"candidate_space"`
 	CandidateEnter      string `json:"candidate_enter"`
 	ShiftLetter         string `json:"shift_letter"`
+	// 以下是整合風格加的欄位（fork:"blend"）；空值是靈犀原本的做法，沒有這些欄位的設定檔照舊讀得懂。
+	// 它們不算官方的非預設規則，不會因此停用混打（settings.officialRulesDefault）。
+	EnglishRanking  string `json:"english_ranking,omitempty" fork:"blend"`  // frequency：英文補全與拼字修正依語料詞頻排序
+	EnglishLearning string `json:"english_learning,omitempty" fork:"blend"` // dictionary：英文字典裡的詞確認 3 次就學會、不限天數
 }
 
 func (r Rules) Validate() error {
@@ -49,6 +53,8 @@ func (r Rules) Validate() error {
 		{"candidate_space", r.CandidateSpace, []string{"page", "select"}},
 		{"candidate_enter", r.CandidateEnter, []string{"select", "commit"}},
 		{"shift_letter", r.ShiftLetter, []string{"inline", "commit"}},
+		{"english_ranking", r.EnglishRanking, []string{"", "frequency"}},
+		{"english_learning", r.EnglishLearning, []string{"", "dictionary"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -106,6 +112,13 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 	switch id {
 	case "0c":
 		p.Name = "靈犀注音"
+	case "blend": // 不列進內建清單：用 0c-update profile copy blend 複製成自訂風格，不鎖設定。
+		p.Name = "整合風格"
+		p.Behavior.MixedInput = true
+		p.Behavior.EnglishAutocomplete = true
+		p.Behavior.EmojiShortcut = "off"
+		p.Rules.EnglishRanking = "frequency"
+		p.Rules.EnglishLearning = "dictionary"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"
