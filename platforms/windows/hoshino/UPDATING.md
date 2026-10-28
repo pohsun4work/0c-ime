@@ -19,6 +19,20 @@ fork 的 GitHub Actions（`.github/workflows/fork-release.yml`）每 12 小時�
 
 合併有衝突或測試失敗時，不會發布新版，而是在 fork 開一個 issue 通知。電腦上維持原本的版本，照常可以使用。
 
+官方新增或改了操作規則時，會另外開一個「官方規則變動待處理」issue，提醒決定新規則跟中英混打相不相容；檢查本身跑不起來時也開在同一個 issue。這種情況照常發布：還沒分類的規則照官方的做法停用混打，不會出錯。
+
+## 整合風格有新功能時
+
+整合風格是一份自訂風格，建好之後內容就固定了，之後版本加的新功能不會自動套進去。release 說明寫到整合風格有新功能時，每台電腦重新建一份，再刪掉舊的：
+
+```powershell
+.\0c-update.exe profile copy blend --name 整合風格 -apply
+.\0c-update.exe settings -json   # 在 profiles.items 找到舊的那份整合風格的 id
+.\0c-update.exe profile delete <舊的 id>
+```
+
+也可以在設定程式的「選用風格」刪掉舊的那份。
+
 ## 什麼時候需要按「允許」
 
 - **只換引擎、字典、模型的更新**：在背景完成，不需要系統管理員權限。

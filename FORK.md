@@ -8,11 +8,15 @@
 - **程式碼簽章**：Windows 套件用 fork 的自簽憑證簽章（`platforms/windows/hoshino/codesign.cer`），發行者是「Hoshino 0c-ime fork」。打包腳本加了 `--sign-pfx` 和 `--publisher` 兩個選項。
 - **版本號**：官方版號加上 `-hoshino.N`。
 - **發布流程**：`.github/workflows/fork-release.yml` 自動合併官方新版、測試、打包、發布。
-- **輸入行為**：之後會新增一個內建模式「整合風格」（`blend`），提供以下行為：
-  - 符號規則參考微軟新注音
-  - 符號表參考華碩注音
-  - 改良英文補全與中英混打
-  
-  原本的各個模式行為不變。
+- **輸入行為**：新增「整合風格」的配方（`blend`，`core/inputstyle`），以靈犀注音為底，補上華碩注音與微軟新注音的長處。它不是內建風格，用 `0c-update profile copy blend --name 整合風格` 複製成自訂風格，設定畫面上的設定都能調，整合風格加的英文排序與學習規則不在設定畫面。原本的各個模式行為不變。
+  - 已完成：
+    - 英文補全與拼字修正依 wordfreq 語料詞頻排序（`internal/englishpack/wordfreq`）
+    - 英文字典裡的詞確認 3 次就學會
+    - 預設開啟中英混打與英文模式自動補字；= 不開 Emoji 選單
+  - 之後：
+    - 符號規則與 Shift＋空白全半形參考微軟新注音
+    - 符號表參考華碩注音
+    - 中英混打改用上下文判斷
+  - 跟混打的相容：fork 新加的規則欄位是為混打設計的；官方的規則照舊，只有預設值能跟混打一起用。fork 的欄位在 `inputstyle.Rules` 標 `fork:"blend"`，由 `internal/settings/mixed_compat.go` 的 `officialRulesDefault` 排除。官方新增規則時，CI 用 `-tags forkcheck` 的測試提醒分類。
 
 安裝與更新說明見 `platforms/windows/hoshino/`。

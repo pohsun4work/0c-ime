@@ -75,6 +75,9 @@ def go_sections(go, goos, packages):
     out.append(section("OpenCC ver.1.4.2 字典（tw2s：TSCharacters、TSPhrases、TWVariants、TWVariantsRevPhrases、"
                        "CJK_Compatibility_Ideographs，https://github.com/BYVoid/OpenCC）",
                        [read(ROOT / "internal/simplified/opencc/LICENSE")]))
+    # 整合風格的英文詞頻也編在 0c-server 裡（internal/englishpack/wordfreq）。
+    out.append(section("wordfreq 3.1.1 英文詞頻（https://github.com/rspeer/wordfreq）",
+                       [read(ROOT / "data/sources/licenses/wordfreq.txt")]))
     return out
 
 

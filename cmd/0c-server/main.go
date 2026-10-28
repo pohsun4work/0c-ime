@@ -148,6 +148,7 @@ func serve() string {
 	eng.DocumentContextOff = !config.DocumentContext
 	eng.Fuzzy = config.FuzzyConfig()
 	eng.InputStyle = config.ProfileRules()
+	datadir.ApplyEnglishStyle(eng)
 	eng.MixedInput = config.MixedInput
 	eng.Toneless = config.Toneless // #150：開啟時 session 停用混打的自動判斷；health 的 mixed_input 照設定檔回報
 	eng.EnglishAutocomplete = config.EnglishAutocomplete

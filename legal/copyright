@@ -90,6 +90,14 @@ Copyright: 2010-2026 Carbo Kuo (BYVoid) and contributors
 License: Apache-2.0
 Comment: OpenCC ver.1.4.2（commit 025f371dc76b598d77384fbdab90c937471844d8）的 tw2s 字典，原樣收錄。
 
+Files: internal/englishpack/wordfreq/wordfreq.tsv
+       data/sources/licenses/wordfreq.txt
+Copyright: 2022 Robyn Speer（wordfreq）
+           Marc Brysbaert et al.（SUBTLEX）
+License: CC-BY-SA-4.0
+Comment: wordfreq 3.1.1 的英文 Zipf 詞頻，只取 data/english 詞表收錄的詞，由 scripts/export_wordfreq.py 產生；
+ 出處見 data/sources/licenses/wordfreq.txt。
+
 Files: platforms/linux-fcitx5/third_party/nlohmann/*
 Copyright: 2013-2023 Niels Lohmann <https://nlohmann.me>
 License: Expat

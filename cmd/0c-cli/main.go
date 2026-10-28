@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
@@ -52,6 +53,7 @@ func main() {
 	outputSimplified := flag.Bool("output-simplified", false, "送出時轉成簡體字（組字與候選仍是繁體）")
 	spaceSelects := flag.Bool("space-selects", true, "注音打完按空白選字；關閉時空白輸入空格、↓ 選字。重播需使用相同開關")
 	selectionKeys := flag.String("selection-keys", "1234567890", "選字鍵：1234567890、1234qweras 或 asdfghjkl;（數字仍照位置選字）。重播需使用相同選字鍵")
+	inputStyle := flag.String("input-style", "", "套用內建風格的操作規則（0c、blend、microsoft、chewing、mcbopomofo、macos）；其他設定照各旗標。空白為零值規則。重播需使用相同風格")
 	keyboardLayout := flag.String("keyboard-layout", "standard", "鍵盤排列：standard、eten（倚天 41 鍵，停用混打與 = 開 Emoji）或 hsu（許氏，停用混打）。重播需使用相同排列")
 	flag.Parse()
 
@@ -88,6 +90,14 @@ func main() {
 		check(fmt.Errorf("未知鍵盤排列 %q（standard、eten、hsu）", *keyboardLayout))
 	}
 	eng.Layout = kb
+	if *inputStyle != "" {
+		p, ok := inputstyle.Get(*inputStyle)
+		if !ok {
+			check(fmt.Errorf("未知風格 %q", *inputStyle))
+		}
+		eng.InputStyle = p.Rules
+		datadir.ApplyEnglishStyle(eng)
+	}
 	for _, id := range strings.FieldsFunc(*fuzzyPairs, func(r rune) bool { return r == ',' }) {
 		id, mode, _ := strings.Cut(strings.TrimSpace(id), "=")
 		p, ok := fuzzy.ParsePair(id)
@@ -134,6 +144,9 @@ func main() {
 		}
 		if *toneless {
 			fmt.Fprintln(rec, "# 重播需要相同的聲調選填設定：0c-cli -toneless")
+		}
+		if *inputStyle != "" {
+			fmt.Fprintf(rec, "# 重播需要相同的風格：0c-cli -input-style %s\n", *inputStyle)
 		}
 		if *advanceAfterSelect {
 			fmt.Fprintln(rec, "# 重播需要相同的選字後游標設定：0c-cli -advance-after-select")
