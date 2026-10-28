@@ -158,6 +158,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Pop-Location
 
+      # 狀態先寫進檔案，release 建好之後才提交（Sign feed and publish）。
       - name: Record state
         id: state
         run: |
@@ -173,7 +174,6 @@ jobs:
           $state.build = [int]$env:BUILD
           if ($kind -eq "shell") { $state.shell_commit = (git rev-parse HEAD) }
           $state | ConvertTo-Json | Out-File .github/fork-state.json -Encoding utf8NoBOM
-          git commit -am "release: $env:VERSION"
           "kind=$kind" | Out-File $env:GITHUB_OUTPUT -Append
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -221,11 +221,18 @@ jobs:
           if ($code -ne 0) { exit 1 }
           # 合併進來的官方提交若改到 workflow，GITHUB_TOKEN 推不上去，要用有 Workflows 權限的 FORK_PUSH_TOKEN。
           $token = if ($env:PUSH_TOKEN) { $env:PUSH_TOKEN } else { $env:GH_TOKEN }
-          git push "https://x-access-token:$token@github.com/$env:GITHUB_REPOSITORY.git" HEAD:main
+          $remote = "https://x-access-token:$token@github.com/$env:GITHUB_REPOSITORY.git"
+          # 先推程式（合併官方的提交）、建 release，成功了才提交狀態：建 release 失敗時狀態不變，下一輪照樣重發這一版。
+          git push $remote HEAD:main
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          # 合併模式加了 upstream remote，不指定 --repo 的話 gh 會選到官方的 repo。
           gh release create $env:TAG $zip "$zip.sha256" build/release/public-beta.json build/release/public-beta.json.sig platforms/windows/hoshino/codesign.cer `
-            --target (git rev-parse HEAD) --latest --title "靈犀注音 hoshino $env:VERSION" `
+            --repo $env:GITHUB_REPOSITORY --target (git rev-parse HEAD) --latest --title "靈犀注音 hoshino $env:VERSION" `
             --notes "官方 $env:BASE 的 hoshino 版（$env:KIND 更新）。第一次安裝請看 platforms/windows/hoshino/INSTALL.md。"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git commit -m "release: $env:VERSION" -- .github/fork-state.json
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          git push $remote HEAD:main
           if ($LASTEXITCODE -ne 0) { exit 1 }
           # 「最新 release」的轉址可能晚幾秒才指到新版。
           foreach ($i in 1..5) {
