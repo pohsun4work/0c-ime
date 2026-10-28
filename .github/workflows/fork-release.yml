@@ -158,8 +158,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Pop-Location
 
-      # 狀態先寫進檔案，release 建好之後才提交（Sign feed and publish）。
-      - name: Record state
+      # 狀態檔等 release 建好才更新並提交（Sign feed and publish）；打包要求工作區乾淨，這裡只算更新種類。
+      - name: Release kind
         id: state
         run: |
           $state = Get-Content .github/fork-state.json -Raw | ConvertFrom-Json
@@ -170,10 +170,6 @@ jobs:
             $changed = git diff --name-only $state.shell_commit HEAD -- platforms/windows/tsf platforms/windows/ui platforms/windows/common platforms/windows/Cargo.toml platforms/windows/Cargo.lock
             if ($changed) { $kind = "shell" }
           }
-          $state.upstream = $env:BASE
-          $state.build = [int]$env:BUILD
-          if ($kind -eq "shell") { $state.shell_commit = (git rev-parse HEAD) }
-          $state | ConvertTo-Json | Out-File .github/fork-state.json -Encoding utf8NoBOM
           "kind=$kind" | Out-File $env:GITHUB_OUTPUT -Append
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -230,6 +226,11 @@ jobs:
             --repo $env:GITHUB_REPOSITORY --target (git rev-parse HEAD) --latest --title "靈犀注音 hoshino $env:VERSION" `
             --notes "官方 $env:BASE 的 hoshino 版（$env:KIND 更新）。第一次安裝請看 platforms/windows/hoshino/INSTALL.md。"
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          $state = Get-Content .github/fork-state.json -Raw | ConvertFrom-Json
+          $state.upstream = $env:BASE
+          $state.build = [int]$env:BUILD
+          if ($env:KIND -eq "shell") { $state.shell_commit = (git rev-parse HEAD) }
+          $state | ConvertTo-Json | Out-File .github/fork-state.json -Encoding utf8NoBOM
           git commit -m "release: $env:VERSION" -- .github/fork-state.json
           if ($LASTEXITCODE -ne 0) { exit 1 }
           git push $remote HEAD:main
