@@ -26,4 +26,11 @@ fork 的 GitHub Actions（`.github/workflows/fork-release.yml`）每 12 小時�
 
 ## 手動操作
 
-`0c-update.exe` 的用法跟官方相同，例如 `status`、`check`、`rollback`、`mode auto|ask|manual`。在版本目錄或解壓縮的套件目錄執行 `.\0c-update.exe help` 可以查看全部命令。
+`0c-update.exe` 的用法跟官方相同。在 `%LOCALAPPDATA%\Zuin\versions\<目前版本>\` 執行：
+
+- `.\0c-update.exe status -json`：目前版本與更新狀態
+- `.\0c-update.exe check -json`：立刻查詢有沒有新版，不下載
+- `.\0c-update.exe auto -now`：立刻下載並準備更新。切換會等電腦閒置，狀態顯示 `waiting_idle`
+- `.\0c-update.exe finish`：不等閒置，現在就切換到已準備好的版本
+- `.\0c-update.exe rollback`：回到上一版
+- `.\0c-update.exe mode auto|ask|manual`：自動更新的模式
