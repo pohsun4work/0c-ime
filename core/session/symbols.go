@@ -156,6 +156,9 @@ func (s *Session) openingBracketHalf(k string) (half, ok bool) {
 				continue
 			}
 			t := string(s.syls[at])
+			if w, ok := s.wideTyped[at]; ok {
+				t = w // 整合風格全形時打的開括號
+			}
 			if utf8.RuneCountInString(t) != 1 {
 				continue
 			}
@@ -201,6 +204,10 @@ func (s *Session) insertPairedBracket(k string) bool {
 // 混打的閉括號跟著配對的開括號（#232，insertPairedBracket）。
 func (s *Session) insertPunctKey(k, p string) {
 	if s.insertPairedBracket(k) {
+		return
+	}
+	if s.InputStyle.Symbols != "" {
+		s.insertTyped(k) // 整合風格的標點照按鍵出字
 		return
 	}
 	s.insertLiteral(p)

@@ -26,6 +26,10 @@ type Rules struct {
 	// 它們不在官方跟混打衝突的規則表上（settings.styleConflicts），也不算官方的非預設規則（settings.officialRulesDefault）。
 	EnglishRanking  string `json:"english_ranking,omitempty" fork:"blend"`  // frequency：英文補全與拼字修正依語料詞頻排序
 	EnglishLearning string `json:"english_learning,omitempty" fork:"blend"` // dictionary：英文字典裡的詞確認 3 次就學會、不限天數
+	// microsoft：中文模式的標點照按鍵出半形（全形時照微軟新注音的全形），` 不開符號選單；Ctrl＋標點多 [ ] Shift+;，英文模式也打全形標點
+	Symbols string `json:"symbols,omitempty" fork:"blend"`
+	// shift_space：Shift＋空白切換全半形；混打照常判斷，判成英數的段落轉全形
+	Width string `json:"width,omitempty" fork:"blend"`
 }
 
 func (r Rules) Validate() error {
@@ -55,6 +59,8 @@ func (r Rules) Validate() error {
 		{"shift_letter", r.ShiftLetter, []string{"inline", "commit", "lower"}},
 		{"english_ranking", r.EnglishRanking, []string{"", "frequency"}},
 		{"english_learning", r.EnglishLearning, []string{"", "dictionary"}},
+		{"symbols", r.Symbols, []string{"", "microsoft"}},
+		{"width", r.Width, []string{"", "shift_space"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -119,6 +125,8 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 		p.Behavior.EmojiShortcut = "off"
 		p.Rules.EnglishRanking = "frequency"
 		p.Rules.EnglishLearning = "dictionary"
+		p.Rules.Symbols = "microsoft"
+		p.Rules.Width = "shift_space"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

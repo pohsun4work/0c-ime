@@ -226,12 +226,18 @@ impl State {
     /// 這一鍵是不是要交給引擎的 Ctrl＋標點（#168）：中文模式、引擎可用而且回報 ctrl_punctuation（認得鍵名、設定開著）。
     /// 先看按鍵本身，不是 Ctrl＋標點鍵就不問引擎；Ctrl+: ( )（#231）還要引擎的 ctrl_punctuation_keys 列了它。
     /// TestKeyDown 與 OnKeyDown 用同一個答案；是的話不先送出組字。
+    /// 整合風格（引擎回報 ctrl_punctuation_symbols）另外收 Ctrl＋[ ]，英文模式也收；先看有快取的這一項，
+    /// 其他風格按 Ctrl＋[ 不必往返。
     fn ctrl_punct_key(&mut self, vk: u32, lparam: isize) -> Option<&'static str> {
-        if self.session.english() {
+        let key = keys::ctrl_punct(vk, lparam).or_else(|| {
+            let c = keys::ctrl_char(vk, lparam)?;
+            keys::ctrl_punct_symbols_name(&c).filter(|_| self.session.ctrl_punctuation_symbols())
+        })?;
+        if self.session.english() && !self.session.ctrl_punctuation_symbols() {
             return None;
         }
-        let key = keys::ctrl_punct(vk, lparam)?;
-        (self.session.available() && self.session.ctrl_punctuation(key)).then_some(key)
+        // ctrl_punctuation_symbols 是 true 時設定開著、這些鍵引擎都認得，不必再往返。
+        (self.session.available() && (self.session.ctrl_punctuation_symbols() || self.session.ctrl_punctuation(key))).then_some(key)
     }
 
     /// 這一鍵是不是要攔下來切換「輸出簡體字」的 Ctrl＋Shift＋F11（#192）：引擎可用而且回報 simplified_hotkey
@@ -1036,6 +1042,10 @@ impl TextService_Impl {
             return None;
         }
         if keys::modifier_down() {
+            // 整合風格英文模式的 Ctrl＋標點交給引擎，打到一半的字由引擎定案。
+            if self.state.borrow_mut().ctrl_punct_key(vk, lparam).is_some() {
+                return Some(true);
+            }
             if snap.english_pending {
                 self.finish(ctx, "commit");
             }
@@ -1053,6 +1063,9 @@ impl TextService_Impl {
             return Some(false);
         }
         if key.as_ref().is_some_and(|k| snap.english_wants_key(k) || caps_lower && k.len() == 1 && k.as_bytes()[0].is_ascii_alphabetic()) {
+            return Some(true);
+        }
+        if key.as_ref().is_some_and(|k| snap.wide_wants_key(k)) && self.state.borrow_mut().session.style_wide() {
             return Some(true);
         }
         if let Some(key) = key {
@@ -1145,6 +1158,7 @@ impl TextService_Impl {
         let style_key = st.styled_key(vk, lparam, false, english);
         if style_key.as_deref() == Some("ShiftSpace") { return true; }
         if style_key.as_ref().is_some_and(|k| st.session.english_state.full_width_extra_key(k)) { return true; }
+        if style_key.as_ref().is_some_and(|k| st.session.english_state.wide_wants_key(k)) && st.session.style_wide() { return true; }
         if st.composing {
             let english = st.session.english();
             let vocab = st.vocab_keys();

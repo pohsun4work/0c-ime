@@ -1022,7 +1022,8 @@ func (s *Session) mixedKey(k string) bool {
 		s.flushMixed()
 		return false
 	}
-	if len(rs) != 1 || rs[0] > unicode.MaxASCII || !unicode.IsPrint(rs[0]) || k == "`" {
+	// 整合風格的 ` 不開符號選單，跟 @ # 一樣併進待定按鍵。
+	if len(rs) != 1 || rs[0] > unicode.MaxASCII || !unicode.IsPrint(rs[0]) || k == "`" && s.InputStyle.Symbols == "" {
 		return false
 	}
 	if k == " " && s.mixed.raw == "" {
@@ -1121,6 +1122,7 @@ type mixedOrigin struct{ assisted, explicit bool }
 func (s *Session) insertMixedLiteral(text string, assisted, explicit bool) {
 	at := s.cursor
 	s.insertLiteral(text)
+	s.markWide(at)
 	if s.mixedOrigins == nil {
 		s.mixedOrigins = map[int]mixedOrigin{}
 	}

@@ -454,6 +454,11 @@ func serve() string {
 		// #231：引擎認得的 Ctrl＋標點鍵（不跟著設定）。外殼送 Ctrl+: ( ) 前要看到這一項列了那個字元，
 		// 舊引擎沒有這一項，外殼只送最早的六個鍵。
 		"ctrl_punctuation_keys": proto.CtrlPunctKeys,
+		// 整合風格（操作規則 symbols）的 Ctrl＋標點：多 Ctrl＋[ ]（也列在 ctrl_punctuation_keys），英文模式也打全形。
+		// 外殼只在這一項是 true 時送那兩個鍵與英文模式的 Ctrl＋標點。
+		"ctrl_punctuation_symbols": fmt.Sprint(eng.CtrlPunct && eng.InputStyle.Symbols != ""),
+		// 整合風格（操作規則 width）：Shift＋空白切換全半形；全形時外殼把可見字元、空白與數字鍵盤都交給引擎。
+		"input_style_width": eng.InputStyle.Width,
 		// #173：引擎認得 caps_lock 請求而且設定「Caps Lock 開著時直接打英文」開著；外殼只在這一項是 true 時回報
 		// Caps Lock 狀態，舊引擎沒有這一項、或設定關閉時，注音模式照舊不理 Caps Lock（#168）。
 		"caps_lock_english": fmt.Sprint(capsSetting),
@@ -468,6 +473,9 @@ func serve() string {
 		// #169：引擎認得 output_simplified 請求，「輸出簡體字」可以即時切換；目前的值在 RuntimeInfo 的 output_simplified。
 		// 舊引擎沒有這一項，外殼退回 0c-update set output-simplified … -apply（重啟引擎套用）。
 		"output_simplified_live": "true"}
+	if eng.InputStyle.Symbols != "" {
+		srv.Info["ctrl_punctuation_keys"] += proto.CtrlPunctExtraKeys // 整合風格多的 Ctrl＋[ ]
+	}
 	// #181：模型從哪裡來（bundled：安裝包內建；user：個人目錄），推論用哪個 Python（bundled、system、custom、missing）。
 	srv.Info["neural_python"] = pythonSource
 	if selectionSource != "" {

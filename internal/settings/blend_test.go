@@ -23,8 +23,14 @@ func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
 		t.Fatalf("not a custom copy: %+v", p)
 	}
 	if !s.MixedInput || !s.EnglishAutocomplete || s.Toneless || s.EmojiShortcut != "off" || !s.CtrlPunctuation ||
-		r.ShiftSpace != "disabled" || r.EnglishRanking != "frequency" || r.EnglishLearning != "dictionary" {
+		r.ShiftSpace != "disabled" || r.EnglishRanking != "frequency" || r.EnglishLearning != "dictionary" ||
+		r.Symbols != "microsoft" || r.Width != "shift_space" {
 		t.Fatalf("blend recipe not applied: %+v %+v", s, r)
+	}
+	for _, item := range s.Profiles().Items {
+		if item.ID == p.ID && item.Summary[0] != "Shift＋空白切換全半形（混打照常）" {
+			t.Errorf("summary: %q", item.Summary)
+		}
 	}
 	for key, item := range itemsByKey(s) {
 		if item.Locked {
