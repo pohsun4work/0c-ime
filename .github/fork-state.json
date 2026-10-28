@@ -1,5 +1,5 @@
 {
   "upstream": "v0.2.7",
-  "build": 1,
-  "shell_commit": "6c3a7256ebc132a285337f0590167f579774390e"
+  "build": 2,
+  "shell_commit": "f3074d24590b5a7d44b9bc0b470e6cbd78e195af"
 }
