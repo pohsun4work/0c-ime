@@ -23,7 +23,7 @@ type Rules struct {
 	CandidateEnter      string `json:"candidate_enter"`
 	ShiftLetter         string `json:"shift_letter"`
 	// 以下是整合風格加的欄位（fork:"blend"）；空值是靈犀原本的做法，沒有這些欄位的設定檔照舊讀得懂。
-	// 它們不算官方的非預設規則，不會因此停用混打（settings.officialRulesDefault）。
+	// 它們不在官方跟混打衝突的規則表上（settings.styleConflicts），也不算官方的非預設規則（settings.officialRulesDefault）。
 	EnglishRanking  string `json:"english_ranking,omitempty" fork:"blend"`  // frequency：英文補全與拼字修正依語料詞頻排序
 	EnglishLearning string `json:"english_learning,omitempty" fork:"blend"` // dictionary：英文字典裡的詞確認 3 次就學會、不限天數
 }
@@ -52,7 +52,7 @@ func (r Rules) Validate() error {
 		{"tab", r.Tab, []string{"0c", "cycle", "segment"}},
 		{"candidate_space", r.CandidateSpace, []string{"page", "select"}},
 		{"candidate_enter", r.CandidateEnter, []string{"select", "commit"}},
-		{"shift_letter", r.ShiftLetter, []string{"inline", "commit"}},
+		{"shift_letter", r.ShiftLetter, []string{"inline", "commit", "lower"}},
 		{"english_ranking", r.EnglishRanking, []string{"", "frequency"}},
 		{"english_learning", r.EnglishLearning, []string{"", "dictionary"}},
 	} {

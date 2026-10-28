@@ -33,7 +33,7 @@ func TestUpstreamRulesClassified(t *testing.T) {
 		"style-candidate-enter":      "select commit",
 		"style-page-size":            "9 10",
 		"style-punctuation":          "0c microsoft standard chewing",
-		"style-shift-letter":         "inline commit",
+		"style-shift-letter":         "inline commit lower",
 		"style-shift-delete":         "0c tone",
 		"style-caps-letter":          "platform lower",
 		"style-candidate-navigation": "0c horizontal",
