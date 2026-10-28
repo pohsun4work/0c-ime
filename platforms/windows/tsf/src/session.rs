@@ -69,6 +69,11 @@ impl Snapshot {
         self.full_width && key.len() == 1 && (key.as_bytes()[0].is_ascii_uppercase() || " \\'\"<>?".contains(key))
     }
 
+    /// 整合風格全形時（Session::style_wide）引擎要的按鍵：可見字元、空白與數字鍵盤，沒在組字時也一樣。
+    pub fn wide_wants_key(&self, key: &str) -> bool {
+        self.full_width && (key == " " || key.starts_with("KP") || key.len() == 1 && key.as_bytes()[0].is_ascii_graphic())
+    }
+
     /// Predict only keys the English word buffer will actually consume.
     pub fn english_wants_key(&self, key: &str) -> bool {
         if self.english && self.full_width && (key.len() == 1 && key.as_bytes()[0].is_ascii_graphic() || key == " ") {
@@ -376,6 +381,14 @@ impl Session {
     pub fn style_shift_space(&mut self) -> bool {
         let _ = self.idle_key("");
         matches!(self.idle_info.as_ref().and_then(|v| v["input_style_shift_space"].as_str()), Some("fullwidth" | "space" | "single"))
+            || self.idle_info.as_ref().is_some_and(|v| v["input_style_width"] == "shift_space")
+    }
+
+    /// 整合風格的全形（health 的 input_style_width，操作規則 width）：Shift＋空白切換；全形時可見字元、空白與數字鍵盤
+    /// 都交給引擎（Snapshot::wide_wants_key），混打照常判斷，判成英數的段落再轉全形。
+    pub fn style_wide(&mut self) -> bool {
+        let _ = self.idle_key("");
+        self.idle_info.as_ref().is_some_and(|v| v["input_style_width"] == "shift_space")
     }
 
     pub fn style_caps_lower(&mut self) -> bool {
@@ -419,6 +432,14 @@ impl Session {
                 && reply["info"]["ctrl_punctuation"] == "true"
                 && crate::keys::ctrl_punct_known(key, reply["info"]["ctrl_punctuation_keys"].as_str().unwrap_or(""))
         })
+    }
+
+    /// 引擎收整合風格的 Ctrl＋標點（health 的 ctrl_punctuation_symbols，操作規則 symbols）：多 Ctrl＋[ ]，英文模式也收。
+    /// 答案跟著連線快取（同 idle_key）：英文模式的 Ctrl 快捷鍵、VS Code 與終端機的 Ctrl＋[ 很常按，不能每按一次就往返；
+    /// 舊引擎或其他風格沒有這一項時為 false。
+    pub fn ctrl_punctuation_symbols(&mut self) -> bool {
+        let _ = self.idle_key("");
+        self.idle_info.as_ref().is_some_and(|v| v["ctrl_punctuation_symbols"] == "true")
     }
 
     /// 引擎目前載入的中英切換鍵設定（左右 Shift 與單按時限，#117）。在 Shift 單按放開時查詢，
@@ -750,6 +771,14 @@ mod parse_tests {
         for key in ["A", "Z", " ", "'", "\"", "\\", "<", ">", "?"] { assert!(snap.full_width_extra_key(key), "{key}"); }
         for key in ["3", "a", "Tab", "ShiftSpace"] { assert!(!snap.full_width_extra_key(key), "{key}"); }
         assert!(!Snapshot::default().full_width_extra_key("\\"));
+    }
+
+    #[test]
+    fn blend_wide_preflight_covers_space_and_keypad() {
+        let snap = parse(&json!({"snapshot":{"mode":"zhuyin","full_width":true}}));
+        for key in ["a", "A", "1", "$", "`", " ", "KP2", "KP."] { assert!(snap.wide_wants_key(key), "{key}"); }
+        for key in ["Tab", "Enter", "ShiftSpace", "Left"] { assert!(!snap.wide_wants_key(key), "{key}"); }
+        assert!(!Snapshot::default().wide_wants_key("KP2"));
     }
 
     #[test]

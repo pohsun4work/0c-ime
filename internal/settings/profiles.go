@@ -213,6 +213,9 @@ func (s Settings) profileItem(p Profile) ProfileItem {
 		}
 	}
 	shift := map[string]string{"disabled": "Shift＋空白不切換字寬", "fullwidth": "Shift＋空白切換全半形（含英數）", "space": "Shift＋空白插入空白"}[p.Rules.ShiftSpace]
+	if p.Rules.Width == "shift_space" {
+		shift = "Shift＋空白切換全半形（混打照常）"
+	}
 	tab := map[string]string{"0c": "Tab 使用靈犀候選操作", "cycle": "Tab／Shift＋Tab 輪換字詞", "segment": "Tab 調整斷詞"}[p.Rules.Tab]
 	values := map[string]string{}
 	for k, v := range p.Values {

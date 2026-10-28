@@ -151,17 +151,19 @@ type syllableState struct {
 	mixedOrigins    map[int]mixedOrigin
 	displayed       map[int]string
 	rejected        []personal.RejectedSeg
+	wideTyped       map[int]string
 }
 
 // 插入、刪除都會換成新的切片與對照表，淺複製就足以還原。
 func (s *Session) saveSyllables() syllableState {
 	return syllableState{s.syls, s.cursor, s.locks, s.literals, s.pendingLiterals, s.mixedKeys, s.literalKeys, s.mixedOrigins, s.displayed,
-		append([]personal.RejectedSeg(nil), s.rejected...)}
+		append([]personal.RejectedSeg(nil), s.rejected...), s.wideTyped}
 }
 
 func (s *Session) restoreSyllables(st syllableState) {
 	s.syls, s.cursor, s.locks, s.literals, s.pendingLiterals = st.syls, st.cursor, st.locks, st.literals, st.pendingLiterals
 	s.mixedKeys, s.literalKeys, s.mixedOrigins, s.displayed, s.rejected = st.mixedKeys, st.literalKeys, st.mixedOrigins, st.displayed, st.rejected
+	s.wideTyped = st.wideTyped
 }
 
 // completeDecodable 回報游標前剛收進的音節所在的一段（字面文字之間）能否解成完整的詞，

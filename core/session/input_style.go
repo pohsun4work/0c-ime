@@ -62,6 +62,9 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		return false, "", false
 	}
 	if k == proto.KeyShiftSpace {
+		if s.InputStyle.Width == "shift_space" {
+			return true, s.toggleWide(), true
+		}
 		switch s.InputStyle.ShiftSpace {
 		case "fullwidth":
 			s.fullWidth = !s.fullWidth
@@ -145,6 +148,9 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 			return true, "", true
 		}
 		return false, "", false
+	}
+	if commit, ok := s.wideKey(k); ok {
+		return true, commit, true
 	}
 	// Apple calls the backward-delete key Delete; accept both physical variants.
 	if (k == proto.KeyShiftDelete || k == proto.KeyShiftBackspace) && !s.english && s.InputStyle.ShiftDelete == "tone" {

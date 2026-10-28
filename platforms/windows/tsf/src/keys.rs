@@ -207,6 +207,11 @@ pub fn to_key(vk: u32, lparam: isize, vocab: bool, caps_lock: bool) -> Option<St
 /// 字元是不按 Ctrl 時這一鍵產生的字元（Ctrl+Shift+/ 是 ?）。AltGr 是 Ctrl＋Alt，不算。
 /// 要不要送由呼叫端決定（中文模式、引擎回報 ctrl_punctuation）。
 pub fn ctrl_punct(vk: u32, lparam: isize) -> Option<&'static str> {
+    ctrl_punct_name(&ctrl_char(vk, lparam)?)
+}
+
+/// 只按著 Ctrl（可以加 Shift）時，這一鍵不按 Ctrl 產生的字元。
+pub fn ctrl_char(vk: u32, lparam: isize) -> Option<String> {
     let alone = unsafe {
         GetKeyState(VK_CONTROL.0 as i32) < 0
             && GetKeyState(VK_MENU.0 as i32) >= 0
@@ -216,7 +221,7 @@ pub fn ctrl_punct(vk: u32, lparam: isize) -> Option<&'static str> {
     if !alone || is_modifier(vk) || named(vk).is_some() || is_keypad(vk) {
         return None;
     }
-    ctrl_punct_name(&printable(vk, lparam, false)?)
+    printable(vk, lparam, false)
 }
 
 /// 切換「輸出簡體字」的鍵（#192，settings.SimplifiedHotkeyLabel 的 Ctrl＋Shift＋F11）。
@@ -292,6 +297,16 @@ pub fn ctrl_punct_known(key: &str, engine_keys: &str) -> bool {
         Some(c) if c.chars().count() == 1 => ",.';?!".contains(c) || engine_keys.contains(c),
         _ => false,
     }
+}
+
+/// 不按 Ctrl 時的字元對應的整合風格（操作規則 symbols）Ctrl＋標點鍵名：照微軟新注音多的 Ctrl＋[ ]。
+/// 引擎認不認得同樣看 [`ctrl_punct_known`]（整合風格的引擎在 ctrl_punctuation_keys 多列 [ ]）。
+pub fn ctrl_punct_symbols_name(c: &str) -> Option<&'static str> {
+    Some(match c {
+        "[" => "Ctrl+[",
+        "]" => "Ctrl+]",
+        _ => return None,
+    })
 }
 
 /// health 沒有回報 shift_tap_ms 時的單按時限（毫秒）。
@@ -800,6 +815,18 @@ mod tests {
         assert!(ctrl_punct_known("Ctrl+)", ",.';?!:()"));
         assert!(!ctrl_punct_known("Ctrl+[", ",.';?!:()"));
         assert!(!ctrl_punct_known("Ctrl+", ",.';?!:()"));
+    }
+
+    #[test]
+    fn ctrl_punct_symbols_names() {
+        // 整合風格多的兩個鍵；官方的鍵與其他字元不算。引擎列了 [ ] 才算認得。
+        for (c, want) in [("[", "Ctrl+["), ("]", "Ctrl+]")] {
+            assert_eq!(ctrl_punct_symbols_name(c), Some(want), "{c}");
+            assert!(ctrl_punct_known(want, ",.';?!:()[]"), "{c}");
+        }
+        for c in [",", ".", "'", ";", "?", "!", ":", "(", "{", "}", "/", "a"] {
+            assert_eq!(ctrl_punct_symbols_name(c), None, "{c}");
+        }
     }
 
     #[test]

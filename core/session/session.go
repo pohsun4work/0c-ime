@@ -96,6 +96,8 @@ type Session struct {
 	styleCycle   *candState
 	InputStyle   inputstyle.Rules
 	fullWidth    bool
+	wide         bool           // 整合風格（操作規則 width）的全形；跟 fullWidth 分開，官方的全形在按鍵當下就出字，會搶在混打之前
+	wideTyped    map[int]string // 全形時打的位置 → 畫面上的全形字
 	symbolPrefix bool
 	styleGrid    bool
 	// Rerank 由宿主在第一次 Handle 前設定；零值保持原引擎。
@@ -510,6 +512,9 @@ func (s *Session) key(k string) (handled bool, commit string) {
 			return true, ""
 		}
 	}
+	if handled, commit, ok := s.symbolsCtrlPunct(k); ok {
+		return handled, commit
+	}
 	if p, ok := proto.CtrlPunct(k); ok {
 		return s.ctrlPunct(p), ""
 	}
@@ -724,6 +729,12 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		s.openCandidates(0)
 		return true, ""
 	}
+	if k == "`" && s.InputStyle.Symbols != "" {
+		s.flushMixed()
+		s.insertPendingLiteral()
+		s.insertTyped(k) // 整合風格的 ` 不開符號選單
+		return true, ""
+	}
 	if k == "`" {
 		s.flushMixed()
 		s.openSymbols(symbolPalette(), s.cursor, 0, !s.comp.Empty())
@@ -746,7 +757,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 			// 使用者關閉「空白鍵選字」時一般注音模式也一樣（#107、#110）。
 			// 緊接在數字後面（連打的聲調鍵 34、數字鍵盤）也是空白，同沒在組字時打數字再按空白（#135）。
 			if s.mixedInput() || s.SpaceInsertsSpace || s.literalNumberBefore() != "" {
-				s.insertLiteral(" ")
+				s.insertTyped(" ")
 				return true, ""
 			}
 			s.openCandidates(0)
@@ -777,7 +788,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	// 其他可見字元（Shift＋字母、@、#、落單聲調鍵等）在游標處逐字保留。
 	if s.composing() && unicode.IsPrint(runes[0]) {
 		s.insertPendingLiteral()
-		s.insertLiteral(k)
+		s.insertTyped(k)
 		return true, ""
 	}
 	return false, ""
@@ -935,6 +946,7 @@ func (s *Session) eraseBeforeCursor() {
 func (s *Session) shiftLocks(at, delta int) {
 	s.shiftMixedKeys(at, delta)
 	s.literalKeys = shiftKeys(s.literalKeys, at, delta)
+	s.wideTyped = shiftKeys(s.wideTyped, at, delta)
 	s.shiftMixedOrigins(at, delta)
 	s.shiftLiterals(at, delta)
 	s.shiftPendingLiterals(at, delta)
@@ -1537,7 +1549,7 @@ func (s *Session) readingPins(text string) map[int]string {
 	resolved, _ := s.resolvedSyllables() // 沒打聲調的音節用詞庫讀音（#150）；關閉時就是 s.syls
 	for _, g := range s.path {
 		runes := []rune(g.Word)
-		joined.WriteString(g.Word)
+		joined.WriteString(s.wideWord(g)) // 送出的是畫面文字（整合風格的全形）
 		reading := resolved[g.Start:min(g.End, len(resolved))]
 		if g.Matched != "" {
 			reading = zhuyin.ParseReading(g.Matched) // 近音到達的詞，用詞庫的讀音
@@ -1616,6 +1628,7 @@ func (s *Session) reset() {
 	s.mixedKeys = nil
 	s.mixedOrigins = nil
 	s.pendingToneKey, s.literalKeys = nil, nil
+	s.wideTyped = nil
 	s.clearDocumentContext()
 	s.rerankCache = nil
 	s.hint = nil
@@ -1634,7 +1647,7 @@ func (s *Session) reset() {
 }
 
 func (s *Session) snapshot() proto.Snapshot {
-	snap := proto.Snapshot{FullWidth: s.fullWidth, Revision: s.rev, EnglishAutocomplete: s.EnglishAutocomplete, EnglishPending: s.englishWord, EnglishCanStart: s.englishCanStart()}
+	snap := proto.Snapshot{FullWidth: s.fullWidth || s.wide, Revision: s.rev, EnglishAutocomplete: s.EnglishAutocomplete, EnglishPending: s.englishWord, EnglishCanStart: s.englishCanStart()}
 	pending := s.comp.String()
 	if s.symbolPrefix {
 		pending += "`"
@@ -1647,13 +1660,13 @@ func (s *Session) snapshot() proto.Snapshot {
 	hintAt, hintSyl, hinted := s.mixedSpaceReading()
 	pendingSegments := func() []proto.Segment {
 		if !hinted {
-			return []proto.Segment{{Text: pending, Style: proto.StylePending}}
+			return []proto.Segment{{Text: s.typedText(pending), Style: proto.StylePending}}
 		}
 		var out []proto.Segment
 		if hintAt > 0 {
-			out = append(out, proto.Segment{Text: pending[:hintAt], Style: proto.StylePending})
+			out = append(out, proto.Segment{Text: s.typedText(pending[:hintAt]), Style: proto.StylePending})
 		}
-		return append(out, proto.Segment{Text: pending[hintAt:], Style: proto.StyleReading})
+		return append(out, proto.Segment{Text: s.typedText(pending[hintAt:]), Style: proto.StyleReading})
 	}
 	for _, g := range s.path {
 		style := proto.StyleNormal
@@ -1665,6 +1678,7 @@ func (s *Session) snapshot() proto.Snapshot {
 		case g.Partial:
 			style = proto.StylePartial
 		}
+		g.Word = s.wideWord(g)
 		runes := []rune(g.Word)
 		if split && g.Start <= s.cursor && s.cursor < g.End {
 			k := s.cursor - g.Start
@@ -1685,6 +1699,9 @@ func (s *Session) snapshot() proto.Snapshot {
 		before = 0
 		for i, y := range s.syls {
 			text, style := s.fallbackDisplay(i, y)
+			if w, ok := s.wideTyped[i]; ok {
+				text = w
+			}
 			if split && i == s.cursor {
 				snap.Preedit = append(snap.Preedit, pendingSegments()...)
 				split = false
