@@ -17,6 +17,6 @@
     - 符號規則與 Shift＋空白全半形參考微軟新注音
     - 符號表參考華碩注音
     - 中英混打改用上下文判斷
-  - 跟混打的相容：fork 新加的規則欄位是為混打設計的；官方的規則照舊，只有預設值能跟混打一起用。fork 的欄位在 `inputstyle.Rules` 標 `fork:"blend"`，由 `internal/settings/mixed_compat.go` 的 `officialRulesDefault` 排除。官方新增規則時，CI 用 `-tags forkcheck` 的測試提醒分類。
+  - 跟混打的相容：官方的規則照官方逐條判斷（`internal/settings` 的 `styleConflicts`）；fork 新加的規則欄位是為混打設計的，在 `inputstyle.Rules` 標 `fork:"blend"`，不在官方的衝突表上。非標準排列的限制也不算這些欄位（`internal/settings/mixed_compat.go` 的 `officialRulesDefault`）。
 
 安裝與更新說明見 `platforms/windows/hoshino/`。
