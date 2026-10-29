@@ -9,6 +9,7 @@ func TestBlendRulesRejectUnknownValues(t *testing.T) {
 		func(r *Rules) { r.Symbols = "asus" },
 		func(r *Rules) { r.Width = "fullwidth" },
 		func(r *Rules) { r.SymbolBoard = "microsoft" },
+		func(r *Rules) { r.MixedResplit = "on" },
 	} {
 		r := p.Rules
 		edit(&r)

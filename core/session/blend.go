@@ -30,7 +30,11 @@ func (s *Session) wideKey(k string) (commit string, ok bool) {
 		}
 		s.flushMixed()
 		s.insertPendingLiteral()
+		at := s.cursor
 		s.insertTyped(k)
+		if keypad {
+			s.markKeyed(at, true)
+		}
 		return "", true
 	case s.composing():
 	case k == " ":
@@ -64,6 +68,7 @@ func (s *Session) insertTyped(text string) {
 	at := s.cursor
 	s.insertLiteral(text)
 	s.markWide(at)
+	s.markKeyed(at, false)
 }
 
 // markWide 把 at 到游標之間剛插入的字記成全形（全形時）。

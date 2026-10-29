@@ -16,6 +16,7 @@
     - 符號照微軟新注音：中文模式的標點出半形（Shift＋, 是 <，中文逗號用 Ctrl＋,）；沒在打字時打的符號也留在組字區，混打才看得到 $20 這類上下文；` 單純輸出 `；Ctrl＋[ ] 打【】（Ctrl＋Shift＋; 9 0 照官方），英文模式的 Ctrl＋標點也打全形（`core/session/testdata/microsoft_symbols.tsv` 是對照的實測）
     - Shift＋空白切換全半形，全形時混打照常判斷，判成英數的段落轉全形（同華碩注音）
     - Ctrl＋Alt＋, 開華碩注音的符號表：鍵盤形狀，一般／數學／特殊三頁，Tab 換頁，按鍵或方向鍵加 Enter 選取
+    - 混打打進組字區的字在 Enter 之前都找得回原按鍵（`core/session/mixed_span.go`）：↓ 與 Tab 換詞長可以跨過英數、原樣注音與數字鍵盤的數字，整段換成英文、注音或中文（$20␣ 換成「$單」，數字鍵盤打的 ㄍ2ㄍ 換回 e2e）；數字鍵盤的數字一律只是數字
   - 之後：
     - 中英混打改用上下文判斷
   - 跟混打的相容：官方的規則照官方逐條判斷（`internal/settings` 的 `styleConflicts`）；fork 新加的規則欄位是為混打設計的，在 `inputstyle.Rules` 標 `fork:"blend"`，不在官方的衝突表上。非標準排列的限制也不算這些欄位（`internal/settings/mixed_compat.go` 的 `officialRulesDefault`）。
