@@ -161,6 +161,7 @@ type Model struct {
 	englishIndexBase  *english.Dictionary
 	englishIndexGen   int
 	correctionIndex   correctionIndex
+	mixedIndex        mixedIndex // 整合風格的混打修正記憶（mixed_memory.go）
 	diversityIndex    diversityIndex
 	Store             *Store
 	// Vocab 是使用者親手加入的自訂詞（#122）；nil 表示沒有。由宿主載入，修改走 VocabAdd 等方法。

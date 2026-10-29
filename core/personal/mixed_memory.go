@@ -1,8 +1,9 @@
 package personal
 
 import (
+	"cmp"
+	"maps"
 	"slices"
-	"sort"
 )
 
 // 整合風格（操作規則 mixed_memory）的混打修正記憶：使用者用 ↓ 把一段按鍵換成別的解釋（英數、中文、注音）再送出時，
@@ -23,107 +24,100 @@ const (
 	MixedZhuyin  = "z" // 原樣留下的注音
 )
 
-// MixedRecord 是一筆記憶。Left 是前一個字，空字串是句首；Right 是後面接的中文音節，空字串是空白、標點、英數或沒有東西。
-type MixedRecord struct {
-	Keys        string
-	Left, Right string
-	Form        []MixedToken
-	Confirmed   int    // 確認次數；被反向選取時扣一次
-	Updated     int64  // 最後一次學到或用到的 Store.Time，滿了先丟最舊的
-	Serial      uint64 // 同一時間的先後
-}
-
-// MixedRef 指出一筆記憶。
+// MixedRef 指出一筆記憶。Left 是前一個字，空字串是句首；Right 是後面接的中文音節，空字串是空白、標點、英數或沒有東西。
 type MixedRef struct{ Keys, Left, Right string }
 
 func (r MixedRef) key() string { return r.Keys + "\t" + r.Left + "\t" + r.Right }
 
-// Ref 回傳 r 的位置。
-func (r MixedRecord) Ref() MixedRef { return MixedRef{r.Keys, r.Left, r.Right} }
+// MixedRecord 是一筆記憶。
+type MixedRecord struct {
+	MixedRef
+	Form      []MixedToken
+	Confirmed int    // 確認次數；被反向選取時扣一次
+	Serial    uint64 // 最後一次學到或用到的順序，滿了先丟最舊的
+}
 
-// MixedChoice 是一次送出時使用者用 ↓ 換過的一段。Applied 是選之前那段是記憶換的樣子時，換它的紀錄
-// （Exact：前後都對上的那一筆；否則是按鍵相同、從別處套用的）。
+// MixedChoice 是一次送出時使用者用 ↓ 換過的一段。Contest 是選之前那段照前後都對上的記憶換過（或留著），換它的那筆。
 type MixedChoice struct {
 	MixedRef
 	Form    []MixedToken
-	Applied *MixedApplied
+	Contest *MixedRef
 }
 
+// MixedApplied 是讓一段照記憶換的紀錄：Exact 是前後都對上的那一筆，否則是按鍵相同、換成 Form 的每一筆（從別處套用）。
 type MixedApplied struct {
 	MixedRef
 	Exact bool
+	Form  []MixedToken
 }
 
-// MixedMemoryIndex 依按鍵分組全部紀錄，組內順序固定。session 每次重看建一次，不每個位置都掃一遍。
-func (m *Model) MixedMemoryIndex() map[string][]MixedRecord {
-	if len(m.Store.MixedMemory) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(m.Store.MixedMemory))
-	for k := range m.Store.MixedMemory {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := map[string][]MixedRecord{}
-	for _, k := range keys {
-		r := m.Store.MixedMemory[k]
-		out[r.Keys] = append(out[r.Keys], r)
-	}
-	return out
+// mixedIndex 快取依按鍵分組的紀錄；Store 換掉或記憶改變（changedMixed）時重建。
+type mixedIndex struct {
+	store   *Store
+	count   int
+	groups  map[string][]MixedRecord
+	longest int
 }
 
-// LearnMixedMemory 學一次送出裡的選擇。記憶換的段落被改成別的樣子時：前後都對上的那筆扣一次確認（只確認過一次就刪），
-// 這次不記新的，再選一次才記；從別處套用的不動原本那筆，另記這個位置的紀錄。used 是這次送出裡照記憶換、沒被改掉的紀錄。
-func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedRef) {
+// MixedMemoryIndex 依按鍵分組全部紀錄（組內順序固定）與最長的按鍵長度。回傳的 map 是共用的，不要修改。
+func (m *Model) MixedMemoryIndex() (map[string][]MixedRecord, int) {
+	idx := &m.mixedIndex
+	if idx.groups == nil || idx.store != m.Store || idx.count != len(m.Store.MixedMemory) {
+		*idx = mixedIndex{store: m.Store, count: len(m.Store.MixedMemory), groups: map[string][]MixedRecord{}}
+		for _, k := range slices.Sorted(maps.Keys(m.Store.MixedMemory)) {
+			r := m.Store.MixedMemory[k]
+			idx.groups[r.Keys] = append(idx.groups[r.Keys], r)
+			idx.longest = max(idx.longest, len(r.Keys))
+		}
+	}
+	return idx.groups, idx.longest
+}
+
+// changedMixed 讓索引下次重建。
+func (m *Model) changedMixed() { m.mixedIndex.groups = nil }
+
+// LearnMixedMemory 學一次送出裡的選擇。記憶換的段落被改成別的樣子時：前後都對上的那筆（Contest）扣一次確認
+// （只確認過一次就刪），這次不記新的，再選一次才記；從別處套用的不動原本那筆，另記這個位置的紀錄。
+// used 是這次送出裡照記憶換、沒被改掉的段落，用到的紀錄移到最新。
+func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 	if len(choices) == 0 && len(used) == 0 {
 		return
 	}
+	defer m.changedMixed()
 	if m.Store.MixedMemory == nil {
 		m.Store.MixedMemory = map[string]MixedRecord{}
 	}
 	serial := m.mixedSerial()
-	touch := func(r MixedRecord) MixedRecord {
+	touch := func(k string, r MixedRecord) {
 		serial++
-		r.Updated, r.Serial = m.Store.Time, serial
-		return r
+		r.Serial = serial
+		m.Store.MixedMemory[k] = r
 	}
-	for _, ref := range used {
-		if r, ok := m.Store.MixedMemory[ref.key()]; ok {
-			m.Store.MixedMemory[ref.key()] = touch(r)
+	for _, a := range used {
+		for _, k := range m.appliedKeys(a) {
+			touch(k, m.Store.MixedMemory[k])
 		}
 	}
 	for _, c := range choices {
-		if a := c.Applied; a != nil && a.Exact {
-			m.contestMixed(a.key())
+		if c.Contest != nil {
+			m.contestMixed(c.Contest.key())
 			continue
 		}
 		k := c.key()
-		if old, ok := m.Store.MixedMemory[k]; ok && !slices.Equal(old.Form, c.Form) {
+		r, ok := m.Store.MixedMemory[k]
+		if ok && !slices.Equal(r.Form, c.Form) {
 			m.contestMixed(k)
 			continue
 		}
-		r := m.Store.MixedMemory[k]
-		r.Keys, r.Left, r.Right, r.Form = c.Keys, c.Left, c.Right, slices.Clone(c.Form)
+		r.MixedRef, r.Form = c.MixedRef, slices.Clone(c.Form)
 		r.Confirmed++
-		m.Store.MixedMemory[k] = touch(r)
+		touch(k, r)
 	}
-	if len(m.Store.MixedMemory) > maxMixedMemory {
-		keys := make([]string, 0, len(m.Store.MixedMemory))
-		for k := range m.Store.MixedMemory {
-			keys = append(keys, k)
-		}
-		sort.Slice(keys, func(i, j int) bool {
-			a, b := m.Store.MixedMemory[keys[i]], m.Store.MixedMemory[keys[j]]
-			if a.Updated != b.Updated {
-				return a.Updated < b.Updated
-			}
-			if a.Serial != b.Serial {
-				return a.Serial < b.Serial
-			}
-			return keys[i] < keys[j]
-		})
-		for _, k := range keys[:len(keys)-maxMixedMemory] {
-			delete(m.Store.MixedMemory, k)
+	if extra := len(m.Store.MixedMemory) - maxMixedMemory; extra > 0 {
+		mm := m.Store.MixedMemory
+		oldest := slices.SortedFunc(maps.Keys(mm), func(a, b string) int { return cmp.Compare(mm[a].Serial, mm[b].Serial) })
+		for _, k := range oldest[:extra] {
+			delete(mm, k)
 		}
 	}
 }
@@ -141,22 +135,32 @@ func (m *Model) contestMixed(k string) {
 	}
 }
 
-// ForgetMixedMemory（候選窗的 Shift＋Delete）刪掉讓那段被換的紀錄：前後都對上的就是那一筆，
-// 從別處套用的是按鍵相同、換成同樣子的每一筆。回報有沒有刪掉。
-func (m *Model) ForgetMixedMemory(a MixedApplied, form []MixedToken) bool {
-	if a.Exact {
-		_, ok := m.Store.MixedMemory[a.key()]
-		delete(m.Store.MixedMemory, a.key())
-		return ok
+// ForgetMixedMemory（候選窗的 Shift＋Delete）刪掉讓那段被換的紀錄，回報有沒有刪掉。
+func (m *Model) ForgetMixedMemory(a MixedApplied) bool {
+	keys := m.appliedKeys(a)
+	for _, k := range keys {
+		delete(m.Store.MixedMemory, k)
 	}
-	forgot := false
+	m.changedMixed()
+	return len(keys) > 0
+}
+
+// appliedKeys 是讓一段照記憶換的紀錄：前後都對上的是那一筆，從別處套用的是按鍵相同、換成同樣子的每一筆。
+func (m *Model) appliedKeys(a MixedApplied) []string {
+	if a.Exact {
+		if _, ok := m.Store.MixedMemory[a.key()]; ok {
+			return []string{a.key()}
+		}
+		return nil
+	}
+	var out []string
 	for k, r := range m.Store.MixedMemory {
-		if r.Keys == a.Keys && slices.Equal(r.Form, form) {
-			delete(m.Store.MixedMemory, k)
-			forgot = true
+		if r.Keys == a.Keys && slices.Equal(r.Form, a.Form) {
+			out = append(out, k)
 		}
 	}
-	return forgot
+	slices.Sort(out)
+	return out
 }
 
 func (m *Model) mixedSerial() uint64 {
