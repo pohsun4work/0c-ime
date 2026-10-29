@@ -89,6 +89,8 @@ type Store struct {
 	EmojiRecent []string                   // = 選單的表情顯示順序，最多 64 項；不參與文字學習。
 	EmojiStats  map[string]emoji.Stat      // EmojiRecent 各項的常用分數（衰減後次數）
 	PaletteTab  string                     // 上次真的選了東西的 = 選單分頁：emoji、kaomoji 或 phrases
+
+	MixedMemory map[string]MixedRecord `json:",omitempty"` // 整合風格的混打修正記憶（mixed_memory.go）；舊版讀不到、存檔時丟掉
 }
 
 func NewStore() *Store {
@@ -123,6 +125,7 @@ func (s *Store) Clone() *Store {
 	c.English = maps.Clone(s.English)
 	c.EmojiRecent = slices.Clone(s.EmojiRecent)
 	c.EmojiStats = maps.Clone(s.EmojiStats)
+	c.MixedMemory = maps.Clone(s.MixedMemory) // Form 只整個換掉、不就地修改，淺複製即可
 	return &c
 }
 
