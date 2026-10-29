@@ -34,6 +34,11 @@ type Rules struct {
 	SymbolBoard string `json:"symbol_board,omitempty" fork:"blend"`
 	// keys：Enter 之前的組字區都查得回原按鍵，↓／Tab 換詞長可以跨英數，整段換成英文、注音或中文
 	MixedResplit string `json:"mixed_resplit,omitempty" fork:"blend"`
+	// rules：每次按鍵後與送出前照上下文重看混打的判斷：重複鍵、聲母衝突、反序的英文字、不是音節的注音、注音文、
+	// 數字鍵盤夾在字母中間的英數詞照規則改；要有 mixed_resplit 的按鍵紀錄
+	MixedContext string `json:"mixed_context,omitempty" fork:"blend"`
+	// extended：組字中的標示多 Shift＋Home／End 標到頭尾、↓ 換整段、整段英文按 Enter 加成英文詞
+	VocabMark string `json:"vocab_mark,omitempty" fork:"blend"`
 }
 
 func (r Rules) Validate() error {
@@ -67,6 +72,8 @@ func (r Rules) Validate() error {
 		{"width", r.Width, []string{"", "shift_space"}},
 		{"symbol_board", r.SymbolBoard, []string{"", "asus"}},
 		{"mixed_resplit", r.MixedResplit, []string{"", "keys"}},
+		{"mixed_context", r.MixedContext, []string{"", "rules"}},
+		{"vocab_mark", r.VocabMark, []string{"", "extended"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -135,6 +142,8 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 		p.Rules.Width = "shift_space"
 		p.Rules.SymbolBoard = "asus"
 		p.Rules.MixedResplit = "keys"
+		p.Rules.MixedContext = "rules"
+		p.Rules.VocabMark = "extended"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

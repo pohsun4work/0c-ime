@@ -1,0 +1,52 @@
+# 整合風格下（go test -tags blendall）預期跟官方測試不同的測試，由 scripts/blend_official_diff.py 核對：
+# 這些以外的官方測試都要通過，這些都要失敗（不再失敗就從清單拿掉）。每行「測試名稱 欄位：原因」。
+
+# symbols（Phase 2）：符號照微軟新注音，中文模式標點的半形全形、↓ 清單、Ctrl＋標點與官方不同
+TestAmpersandIsFullWidthInChineseMode symbols：& 照微軟出半形
+TestArrowsAndNewDashesInSymbols symbols：箭頭與破折號照微軟的符號表
+TestCandidateHomeEndBackspaceDelete symbols：測試用的標點照微軟出半形
+TestCandidateJKIgnoredOutsideOrdinaryCandidates symbols：符號 ↓ 清單照微軟
+TestCapsLockEnglishActsAsEnglishMode symbols：英文模式的 Ctrl＋標點打全形
+TestCaretAndUnderscoreTypeEllipsisAndDash symbols：^ _ 照微軟不打…… ——
+TestClosingBracketWithoutMixedUnchanged symbols：括號 ↓ 清單照微軟
+TestCtrlPunctOffOrEnglishGoesToTheApp symbols：英文模式的 Ctrl＋標點打全形
+TestCtrlPunctTypesFullWidthPunctuation symbols：Ctrl＋[ ] 打「」
+TestDocumentContextDoesNotCrossPunctuationOrPersist symbols：測試用的標點照微軟出半形
+TestETenPunctuation symbols：倚天排列的標點照微軟
+TestEllipsisAndDashAlternatives symbols：^ _ 照微軟不打…… ——
+TestEllipsisAndDashEditAsOneSymbol symbols：^ _ 照微軟不打…… ——
+TestEnglishInsertionDoesNotReselectSplitWord symbols：測試用的標點照微軟出半形
+TestHsuIdleKeysAndPunct symbols：許氏排列的標點照微軟
+TestLiteralEditsAndLearningBoundaries symbols：測試用的標點照微軟出半形
+TestMixedClosingBracketFollowsOpening symbols：括號照微軟
+TestMixedColonAfterLiteralDigit symbols：: 照微軟出半形
+TestMixedDigitWordAfterChineseBeforeNumberPunct symbols：數字後的標點照微軟出半形
+TestMixedDigitWordBeforeNumberPunct symbols：數字後的標點照微軟出半形
+TestMixedKeepsUnderscoreAndCaretInEnglish symbols：^ _ 照微軟
+TestMixedPairedClosingBracketDownOffersOtherWidth symbols：括號 ↓ 清單照微軟
+TestMixedShiftCommaPeriodDownOffersKey symbols：Shift＋, . 照微軟出半形
+TestNeuralRanksSegmentsAroundLiteralsWithCache symbols：測試用的標點照微軟出半形
+TestPunctuation symbols：標點照微軟出半形
+TestPunctuationPreservesPendingAndPrefix symbols：標點照微軟出半形
+TestQuestionMarkGroupOffersSlash symbols：? 照微軟出半形
+TestQuoteVariantsStayEditable symbols：引號照微軟
+TestReplacingSymbolDoesNotConsumePendingZhuyin symbols：符號 ↓ 清單照微軟
+TestRerankCacheFollowsPersonalDataChanges symbols：測試用的標點照微軟出半形
+TestShiftCommaPeriodDownWithoutMixedUnchanged symbols：Shift＋, . 照微軟出半形
+TestSimplifiedOutputKeepsNonChinese symbols：測試用的標點照微軟出半形
+TestStandardLayoutUnchangedAfterSetLayout symbols：標點照微軟出半形
+TestSuggestionAndLocksAfterLiteral symbols：測試用的標點照微軟出半形
+TestSymbolPaletteAndCancel symbols：符號表照微軟
+TestTonelessKeepsVocabEnglish symbols：Shift＋, 照微軟出半形
+TestTonelessNeuralSkipsUntonedSegmentsAndKeepsTonedOnes symbols：Shift＋, 照微軟出半形
+TestTonelessPunctuationFinishesSyllable symbols：Shift＋, 照微軟出半形
+TestTonelessQuoteSeparatesSyllables symbols：' 照微軟出半形
+TestToneMarkDownOffersOriginalKeySecond symbols：聲調鍵 ↓ 清單照微軟
+
+# mixed_resplit（Phase 3）：每個字 ↓ 列出所有解釋，Tab 照按鍵重切
+TestCandidateAfterCursorAtTailLiteralBoundaries mixed_resplit：Tab 照按鍵重切，跨過英數
+TestMixedCandidatesRetainRawAndTabDoesNotAccept mixed_resplit：混打清單按 Tab 照按鍵重切
+TestMixedLiteralPhoneticKeyDownOffersSymbol mixed_resplit：2026 的 2 按 ↓ 也列 ㄉ
+
+# mixed_context（Phase 4）：混打照上下文重看
+TestMixedLoneInitialSpaceKeepsZhuyin mixed_context：注音文，緊接在中文後面的 2␣ 是 ㄉ

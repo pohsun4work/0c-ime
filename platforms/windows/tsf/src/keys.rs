@@ -159,6 +159,24 @@ pub fn vocab_base(key: &str) -> Option<&'static str> {
     })
 }
 
+/// 整合風格（操作規則 vocab_mark）：組字中 Shift＋Home／End 的新鍵名，同 [`vocab_key`]；不是 Home／End 回傳 None。
+pub fn mark_key(base: &str) -> Option<&'static str> {
+    Some(match base {
+        "Home" => "ShiftHome",
+        "End" => "ShiftEnd",
+        _ => return None,
+    })
+}
+
+/// [`mark_key`] 的新鍵名對應的原本按鍵；不是新鍵名回傳 None。
+pub fn mark_base(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "ShiftHome" => "Home",
+        "ShiftEnd" => "End",
+        _ => return None,
+    })
+}
+
 /// 鎖定鍵（NumLock、ScrollLock）與 IME 控制鍵（VK_KANA…VK_MODECHANGE、VK_PROCESSKEY）：組字中也直接交給宿主，不送出組字。
 pub fn is_lock_or_ime(vk: u32) -> bool {
     matches!(vk, 0x90 | 0x91 | 0x15..=0x1f | 0xe5)
@@ -815,6 +833,19 @@ mod tests {
         assert!(ctrl_punct_known("Ctrl+)", ",.';?!:()"));
         assert!(!ctrl_punct_known("Ctrl+[", ",.';?!:()"));
         assert!(!ctrl_punct_known("Ctrl+", ",.';?!:()"));
+    }
+
+    #[test]
+    fn mark_key_names_round_trip() {
+        for (base, name) in [("Home", "ShiftHome"), ("End", "ShiftEnd")] {
+            assert_eq!(mark_key(base), Some(name));
+            assert_eq!(mark_base(name), Some(base));
+            assert!(composing_wants(false, Some(name)) && composing_wants(true, Some(name)), "{name}");
+        }
+        for key in ["Left", "ShiftLeft", "Enter", "a"] {
+            assert_eq!(mark_key(key), None, "{key}");
+            assert_eq!(mark_base(key), None, "{key}");
+        }
     }
 
     #[test]

@@ -20,10 +20,12 @@ func (s *Session) resplitKeepsLiteral(k string) bool {
 }
 
 // keyUnit 是組字區裡一段查得回原按鍵的位置：中文音節、英數與符號各一格，原樣注音連同聲調整個算一段。
+// 標示整段按 ↓（openMarkSpan）時，查不到按鍵的字與分隔的空白照畫面留著（fixed 是畫面上的字，沒有按鍵）。
 type keyUnit struct {
 	start, end int
 	keys       string
 	keypad     bool
+	fixed      string
 }
 
 // keyUnitAt 回傳位置 pos 所在的 keyUnit。補字接受的英文、= 選單與符號表選的字查不到按鍵。
@@ -111,13 +113,15 @@ func (s *Session) keyRun(anchor int, before bool) int {
 	return far - anchor
 }
 
-// keyGroup 是重新拆成注音的一段：一個音節的按鍵，或照字面的一個字元（不是注音鍵、數字鍵盤的數字、前面沒有注音的聲調鍵）。
+// keyGroup 是重新拆成注音的一段：一個音節的按鍵，或照字面的一個字元（不是注音鍵、數字鍵盤的數字、前面沒有注音的聲調鍵），
+// 或照畫面留著的字（fixed，keys 是畫面上的字）。
 type keyGroup struct {
 	keys    string
 	comp    zhuyin.Composer // 音節：聲調之前的注音
 	tone    rune            // 音節：按下的聲調；0 是沒打聲調
 	literal bool
 	keypad  bool
+	fixed   bool
 }
 
 // keyGroups 照「聲母 介音 韻母」的順序把按鍵接成音節，接上就不是任何音節的開頭時開新的音節，聲調鍵結束音節，
@@ -132,6 +136,11 @@ func (s *Session) keyGroups(units []keyUnit) []keyGroup {
 		cur = keyGroup{}
 	}
 	for _, u := range units {
+		if u.fixed != "" {
+			end()
+			out = append(out, keyGroup{keys: u.fixed, literal: true, fixed: true})
+			continue
+		}
 		for _, r := range u.keys {
 			sym, ok := s.layout.Symbol(r)
 			cl := zhuyin.ClassOf(sym)
@@ -249,6 +258,8 @@ func (s *Session) keyGroupsText(groups []keyGroup, words []chineseWord) string {
 	var b strings.Builder
 	for i, g := range groups {
 		switch {
+		case g.fixed:
+			b.WriteString(g.keys)
 		case g.literal:
 			b.WriteString(s.typedText(g.keys))
 		case words == nil:
@@ -268,9 +279,11 @@ func (s *Session) keyGroupsText(groups []keyGroup, words []chineseWord) string {
 // 只有一個字元的符號照舊接著列它的符號選項。沒有別的寫法時不開，回傳 false。
 func (s *Session) openKeySpan(pos, length int) bool {
 	units, ok := s.keyUnits(pos, pos+length)
-	if !ok {
-		return false
-	}
+	return ok && s.openUnits(pos, length, units)
+}
+
+// openUnits 開 units（[pos, pos+length)）的跨英數候選，見 openKeySpan。
+func (s *Session) openUnits(pos, length int, units []keyUnit) bool {
 	s.refresh()
 	c := &candState{start: pos, length: length, keyLiterals: map[int]string{}}
 	seen := map[string]bool{}
@@ -286,7 +299,7 @@ func (s *Session) openKeySpan(pos, length int) bool {
 	add(s.shownText(pos, pos+length), nil)
 	var english strings.Builder
 	for _, u := range units {
-		english.WriteString(u.keys)
+		english.WriteString(u.keys + u.fixed)
 	}
 	if add(s.typedText(english.String()), func() { s.insertKeyUnits(units) }) {
 		c.keyLiterals[len(c.items)-1] = english.String()
@@ -322,16 +335,20 @@ func (s *Session) selectKeySpan(id int) bool {
 	}
 	start, end := c.start, c.start+c.length
 	tail := s.AdvanceAfterSelect || s.cursor == end
-	s.cursor = end
-	for s.cursor > start {
-		s.eraseBeforeCursor()
-	}
+	s.eraseSpan(start, end)
 	insert()
 	if !tail {
 		s.cursor = start
 	}
 	s.refresh()
 	return true
+}
+
+// eraseSpan 刪掉 [start, end)，游標停在 start。
+func (s *Session) eraseSpan(start, end int) {
+	for s.cursor = end; s.cursor > start; {
+		s.eraseBeforeCursor()
+	}
 }
 
 // insertKeyText 在游標處照字面插入 text。不用 insertLiteral：它每次先解碼、把跨過游標的詞切開鎖住兩半，
@@ -350,6 +367,10 @@ func (s *Session) insertKeyText(text string) {
 // insertKeyUnits 把原按鍵照字面插回去，當成明確選了英數（學習同 ↓ 選回原按鍵）。
 func (s *Session) insertKeyUnits(units []keyUnit) {
 	for _, u := range units {
+		if u.fixed != "" {
+			s.insertKeyText(u.fixed)
+			continue
+		}
 		s.insertKeyLiteral(u.keys, u.keypad)
 	}
 }
@@ -372,6 +393,8 @@ func (s *Session) insertKeyGroups(groups []keyGroup, words []chineseWord) {
 	start, next := 0, 0 // words[next] 是插到一半的詞，從 start 開始
 	for i, g := range groups {
 		switch {
+		case g.fixed:
+			s.insertKeyText(g.keys)
 		case g.literal:
 			s.insertKeyLiteral(g.keys, g.keypad)
 		case words == nil:

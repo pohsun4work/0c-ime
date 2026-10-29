@@ -478,6 +478,8 @@ func serve() string {
 	if eng.InputStyle.Symbols != "" {
 		srv.Info["ctrl_punctuation_keys"] += proto.CtrlPunctExtraKeys // 整合風格多的 Ctrl＋[ ]
 	}
+	// 整合風格（操作規則 vocab_mark）：見 proto.KeyShiftHome。
+	srv.Info["mark_ends"] = fmt.Sprint(eng.Preview02 && vocabDisabled == "" && eng.InputStyle.VocabMark != "")
 	// #181：模型從哪裡來（bundled：安裝包內建；user：個人目錄），推論用哪個 Python（bundled、system、custom、missing）。
 	srv.Info["neural_python"] = pythonSource
 	if selectionSource != "" {

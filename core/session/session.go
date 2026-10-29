@@ -221,6 +221,7 @@ func New(m *personal.Model) *Session {
 		English:          english.Prototype(),
 		EmojiShortcut:    "equals",
 		EmojiEqualsFirst: true,
+		InputStyle:       defaultStyle,
 		locks:            map[int]decode.Lock{},
 	}
 }
@@ -389,6 +390,9 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		commit = s.output(commit, commit, s.readingPins(commit))
 		s.reset()
 	}
+	if r.Type == proto.Key {
+		s.rejudge()
+	}
 	s.refresh()
 	// 保護狀態／前文確認／撤銷可以在候選窗仍開啟時變更；不能留下過期的個人或關聯標示。
 	if s.cand != nil && !s.cand.mixed && (r.Private || r.Type == proto.Pause || r.Type == proto.Context || r.Type == proto.Forget) {
@@ -499,7 +503,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	if handled, commit, done := s.styleKey(k); done {
 		return handled, commit
 	}
-	k = s.normalizeVocabKey(k) // #123 的新鍵名在沒有對應功能時就是原本的鍵
+	k = s.normalizeVocabKey(s.normalizeMarkKey(k)) // #123 的新鍵名在沒有對應功能時就是原本的鍵
 	// 數字鍵盤永遠不是注音鍵（#75）：英文模式與候選選號同主鍵盤數字；沒在組字交還應用程式；
 	// 組字中以半形插在游標處，未打完的注音保留成符號（同 Shift＋字母）。
 	if c, ok := proto.KeypadChar(k); ok {
@@ -1517,6 +1521,7 @@ func (s *Session) accept() bool {
 func (s *Session) commit() string {
 	// Resolve pending English exactly as displayed; never accept a suggestion on Enter.
 	s.flushMixed()
+	s.rejudge()
 	s.finishUntoned() // 聲調選填：最後一個沒打聲調的音節也照解碼結果送出（#150）
 	if s.Rerank.Scorer == nil {
 		s.refresh()

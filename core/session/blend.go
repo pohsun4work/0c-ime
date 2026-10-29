@@ -6,8 +6,13 @@ import (
 	"unicode"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
+
+// defaultStyle 是 New 建的 session 一開始的操作規則，平常是零值（靈犀原本的做法）。整合風格下跑官方測試時
+// （build tag blendall，見 blend_all_test.go）換成整合風格的規則。
+var defaultStyle inputstyle.Rules
 
 // wideKey 處理全形時混打不收的鍵。英文模式與數字鍵盤照微軟新注音：字母、數字、空白沒在組字時直接送出，
 // 其餘接在游標處。中文模式沒在組字時的空白直接送出全形空白；沒開混打時（其他鍵盤排列），
