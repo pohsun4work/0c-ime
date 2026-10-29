@@ -138,6 +138,7 @@ type Session struct {
 	untonedRun            *untonedRun         // 聲調選填時這一串連續打的注音鍵（#150），認「我的詞彙」的英文詞
 	literalKeys           map[int]string      // 照字面留下的符號位置 → 原按鍵，↓ 第二項可選回（#135 聲調符號、#190 混打的「，」「。」）
 	retypeLiteral         bool                // 上一鍵剛把沒有字的音節原樣留下：緊接著的同類介音／韻母是在改它（#85）
+	memory                memoryState         // 整合風格（mixed_memory）的混打修正記憶
 	// DocumentContextOff 由宿主依使用者設定：外殼送來的前文確認一律忽略，不以前文選字。
 	DocumentContextOff bool
 	// SpaceInsertsSpace 由宿主依使用者設定（關閉「空白鍵選字」）：注音打完後空白插入半形空白、↓ 選字，
@@ -964,6 +965,7 @@ func (s *Session) eraseBeforeCursor() {
 // 完全在編輯點之前的鎖定不動；完全在之後的平移；被這次編輯切到的解除。
 func (s *Session) shiftLocks(at, delta int) {
 	s.shiftMixedKeys(at, delta)
+	s.memory.shift(at, delta)
 	s.literalKeys = shiftKeys(s.literalKeys, at, delta)
 	s.wideTyped = shiftKeys(s.wideTyped, at, delta)
 	s.shiftMixedOrigins(at, delta)
@@ -1453,6 +1455,7 @@ func (s *Session) selectCandidate(id int) bool {
 	if s.cand == nil || id < 0 || id >= len(s.cand.items) {
 		return false
 	}
+	defer s.noteMemoryChoice(id)()
 	if s.cand.english {
 		s.mixed.accepted = s.cand.items[id].Entry.Surface
 		s.cand = nil
@@ -1562,6 +1565,7 @@ func (s *Session) commit() string {
 	if s.mixedInput() && !s.paused && !s.private && !s.localBlocked {
 		s.model.LearnEnglish(s.mixedEnglishCommits())
 	}
+	s.learnMixedMemory()
 	shown := text
 	text = s.punctuate(text)
 	tail := s.committedTail()
@@ -1668,6 +1672,7 @@ func (s *Session) reset() {
 	s.clearMixed()
 	s.mixedKeys = nil
 	s.mixedOrigins = nil
+	s.memory = memoryState{}
 	s.pendingToneKey, s.literalKeys = nil, nil
 	s.wideTyped = nil
 	s.clearDocumentContext()

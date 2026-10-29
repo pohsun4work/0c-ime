@@ -268,6 +268,9 @@ func markSegments(segs []proto.Segment, start, end int) []proto.Segment {
 // forgetCandidate 是候選窗的反悔鍵：反白的候選是自訂詞就刪除（可在管理頁復原），
 // 是學到的詞就忘記；系統詞庫本來就有、也沒學過的詞不動。
 func (s *Session) forgetCandidate() {
+	if s.forgetMemoryCandidate() {
+		return
+	}
 	c := s.cand
 	if c == nil || c.kind != "" || c.english || c.mixed || c.cursor < 0 || c.cursor >= len(c.items) {
 		return

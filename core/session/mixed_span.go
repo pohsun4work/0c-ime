@@ -236,22 +236,33 @@ func (s *Session) chineseChoices(groups []keyGroup) [][]chineseWord {
 	}
 	var best []chineseWord
 	for _, r := range runs {
-		lat := input.Exact{}.Expand(r.syls)
-		path, _ := dec.Best(lat, nil, false)
-		covered := 0
-		for _, g := range path {
-			reading, ok := decode.Reading(dec.Lex, lat, g.Start, g.End, g.Word)
-			if g.Partial || g.Start != covered || !ok || len(reading) != g.End-g.Start || len([]rune(g.Word)) != len(reading) {
-				return nil
-			}
-			best = append(best, chineseWord{r.at + g.Start, g.Word, reading})
-			covered = g.End
-		}
-		if covered != len(r.syls) {
+		words, ok := bestWords(dec, r.syls)
+		if !ok {
 			return nil
+		}
+		for _, w := range words {
+			w.at += r.at
+			best = append(best, w)
 		}
 	}
 	return [][]chineseWord{best}
+}
+
+// bestWords 是 syls 解碼最好的一串詞（at 從 0 起），讀音是詞庫的讀音；有詞跟音節對不上時回傳 false。
+func bestWords(dec *decode.Decoder, syls []zhuyin.Syllable) ([]chineseWord, bool) {
+	lat := input.Exact{}.Expand(syls)
+	path, _ := dec.Best(lat, nil, false)
+	var out []chineseWord
+	covered := 0
+	for _, g := range path {
+		reading, ok := decode.Reading(dec.Lex, lat, g.Start, g.End, g.Word)
+		if g.Partial || g.Start != covered || !ok || len(reading) != g.End-g.Start || len([]rune(g.Word)) != len(reading) {
+			return nil, false
+		}
+		out = append(out, chineseWord{g.Start, g.Word, reading})
+		covered = g.End
+	}
+	return out, covered == len(syls)
 }
 
 // keyGroupsText 是 groups 在畫面上的樣子：words 是 nil 時是注音，否則是中文。

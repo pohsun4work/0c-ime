@@ -41,6 +41,8 @@ type Rules struct {
 	VocabMark string `json:"vocab_mark,omitempty" fork:"blend"`
 	// shorter：候選開著時 Shift＋Tab 是 Tab 的反方向，換到較短的詞長，最短再按回到最長（candidate_tab 是 length 時）
 	CandidateBackTab string `json:"candidate_backtab,omitempty" fork:"blend"`
+	// context：記住 ↓ 換過的混打解釋（按鍵＋前一個字＋後一個音），下次照上下文決定要不要照記憶換；要有 mixed_resplit 的按鍵紀錄
+	MixedMemory string `json:"mixed_memory,omitempty" fork:"blend"`
 }
 
 func (r Rules) Validate() error {
@@ -77,6 +79,7 @@ func (r Rules) Validate() error {
 		{"mixed_context", r.MixedContext, []string{"", "rules"}},
 		{"vocab_mark", r.VocabMark, []string{"", "extended"}},
 		{"candidate_backtab", r.CandidateBackTab, []string{"", "shorter"}},
+		{"mixed_memory", r.MixedMemory, []string{"", "context"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -148,6 +151,7 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 		p.Rules.MixedContext = "rules"
 		p.Rules.VocabMark = "extended"
 		p.Rules.CandidateBackTab = "shorter"
+		p.Rules.MixedMemory = "context"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"
