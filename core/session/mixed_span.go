@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 
@@ -275,7 +276,7 @@ func (s *Session) keyGroupsText(groups []keyGroup, words []chineseWord) string {
 	return b.String()
 }
 
-// openKeySpan 開 [pos, pos+length) 的跨英數候選：第一項是畫面上的樣子，接著是英文、注音、中文。
+// openKeySpan 開 [pos, pos+length) 的跨英數候選：第一項是畫面上的樣子，接著同中文的 ↓ 是中文、原按鍵、注音。
 // 只有一個字元的符號照舊接著列它的符號選項。沒有別的寫法時不開，回傳 false。
 func (s *Session) openKeySpan(pos, length int) bool {
 	units, ok := s.keyUnits(pos, pos+length)
@@ -285,18 +286,22 @@ func (s *Session) openKeySpan(pos, length int) bool {
 // openUnits 開 units（[pos, pos+length)）的跨英數候選，見 openKeySpan。
 func (s *Session) openUnits(pos, length int, units []keyUnit) bool {
 	s.refresh()
-	c := &candState{start: pos, length: length, keyLiterals: map[int]string{}}
+	c := &candState{start: pos, length: length, keyLiterals: map[int]string{}, replace: map[int]func(){}, across: true}
 	seen := map[string]bool{}
 	add := func(text string, insert func()) bool {
 		if text == "" || seen[text] {
 			return false
 		}
 		seen[text] = true
+		c.replace[len(c.items)] = insert
 		c.items = append(c.items, rawCandidate(text))
-		c.keySpan = append(c.keySpan, insert)
 		return true
 	}
 	add(s.shownText(pos, pos+length), nil)
+	groups := s.keyGroups(units)
+	for _, words := range s.chineseChoices(groups) {
+		add(s.keyGroupsText(groups, words), func() { s.insertKeyGroups(groups, words) })
+	}
 	var english strings.Builder
 	for _, u := range units {
 		english.WriteString(u.keys + u.fixed)
@@ -304,11 +309,7 @@ func (s *Session) openUnits(pos, length int, units []keyUnit) bool {
 	if add(s.typedText(english.String()), func() { s.insertKeyUnits(units) }) {
 		c.keyLiterals[len(c.items)-1] = english.String()
 	}
-	groups := s.keyGroups(units)
 	add(s.keyGroupsText(groups, nil), func() { s.insertKeyGroups(groups, nil) })
-	for _, words := range s.chineseChoices(groups) {
-		add(s.keyGroupsText(groups, words), func() { s.insertKeyGroups(groups, words) })
-	}
 	if _, pending := s.pendingLiteralAt(pos); length == 1 && s.literals[pos] && !pending {
 		for _, alt := range s.symbolChoices(string(s.syls[pos])) {
 			add(alt, func() {
@@ -324,24 +325,90 @@ func (s *Session) openUnits(pos, length int, units []keyUnit) bool {
 	return true
 }
 
-// selectKeySpan 套用跨英數候選的第 id 項：把那段換掉，游標原本在尾端（前方模式）就留在新的尾端，否則留在開頭；
-// 開了「選字後游標移到下一個字」也移到尾端。第一項（畫面上的樣子）只關閉候選。
-func (s *Session) selectKeySpan(id int) bool {
+// spanUnits 把 [start, end) 切成 keyUnit，不要求每個位置都查得回按鍵：空白照留、查不到按鍵的字照畫面、
+// 沒記按鍵的中文用讀音的按鍵。keyed 是有沒有任何一段有按鍵。
+func (s *Session) spanUnits(start, end int) (units []keyUnit, keyed bool) {
+	for pos := start; pos < end; {
+		u, ok := s.keyUnitAt(pos)
+		switch {
+		case ok && u.start == pos && u.end <= end && (u.keys != " " || u.end == end):
+		case !s.literals[pos]:
+			u = keyUnit{start: pos, end: pos + 1, keys: s.layout.Keys(s.syls[pos])}
+		default:
+			u = keyUnit{start: pos, end: pos + 1, fixed: s.shownText(pos, pos+1)}
+		}
+		keyed = keyed || u.fixed == ""
+		units = append(units, u)
+		pos = u.end
+	}
+	return units, keyed
+}
+
+// addSpanChoices：整合風格多字的中文候選同跨英數候選的順序，畫面上的字不是候選的詞時排第一個（選了不換），
+// 原始按鍵後面接整段的注音。
+func (s *Session) addSpanChoices(c *candState) {
+	if !s.resplit() || c.length < 2 {
+		return
+	}
+	start, end := c.start, c.start+c.length
+	c.replace = map[int]func(){}
+	if shown := s.shownText(start, end); !slices.ContainsFunc(c.items, func(x decode.Candidate) bool { return x.Entry.Surface == shown }) {
+		c.items = slices.Insert(c.items, 0, rawCandidate(shown))
+		if c.matched != nil {
+			c.matched = slices.Insert(c.matched, 0, "")
+		}
+		c.keyLiterals = shiftKeys(c.keyLiterals, 0, 1)
+		c.replace[0] = nil
+	}
+	units, _ := s.spanUnits(start, end)
+	groups := s.keyGroups(units)
+	c.replace[len(c.items)] = func() { s.insertKeyGroups(groups, nil) }
+	c.items = append(c.items, rawCandidate(s.keyGroupsText(groups, nil)))
+}
+
+// selectReplace 套用 replace 的第 id 項：把那段換掉，游標原本在尾端（前方模式）就留在新的尾端，否則留在開頭；
+// 開了「選字後游標移到下一個字」也移到尾端。畫面上的樣子只關閉候選。
+func (s *Session) selectReplace(id int) bool {
 	c := s.cand
 	s.cand = nil
-	insert := c.keySpan[id]
+	insert := c.replace[id]
 	if insert == nil {
 		return true
 	}
 	start, end := c.start, c.start+c.length
 	tail := s.AdvanceAfterSelect || s.cursor == end
+	left, right := s.cutHalves(start, end)
 	s.eraseSpan(start, end)
 	insert()
+	if left.Len > 0 {
+		s.locks[start-left.Len] = left
+	}
+	if right.Len > 0 {
+		s.locks[s.cursor] = right
+	}
 	if !tail {
 		s.cursor = start
 	}
 	s.refresh()
 	return true
+}
+
+// cutHalves 是 [start, end) 切開的詞在範圍外的兩半，鎖成被字面文字切開的詞（同 insertLiteral）：換成照字面的字時
+// 照畫面留著（「打幾」換成注音，「幾句」的「句」不會重新解成「據」），換成中文時 refresh 拿掉鎖、照常重新解碼。
+func (s *Session) cutHalves(start, end int) (left, right decode.Lock) {
+	for _, g := range s.path {
+		word := []rune(g.Word)
+		if len(word) != g.End-g.Start {
+			continue
+		}
+		if g.Start < start && start < g.End {
+			left = decode.Lock{Word: string(word[:start-g.Start]), Len: start - g.Start, LiteralBoundary: 1, Matched: s.matchedFor(g.Start, start-g.Start)}
+		}
+		if g.Start < end && end < g.End {
+			right = decode.Lock{Word: string(word[end-g.Start:]), Len: g.End - end, LiteralBoundary: -1, Matched: s.matchedFor(end, g.End-end)}
+		}
+	}
+	return left, right
 }
 
 // eraseSpan 刪掉 [start, end)，游標停在 start。

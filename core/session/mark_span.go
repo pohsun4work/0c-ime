@@ -50,23 +50,9 @@ func (s *Session) markKey(k string) (handled, consumed bool) {
 }
 
 // openMarkSpan 開 Tab 換不到的標示範圍 [start, end)（中間有分隔的空白、查不到按鍵的字）的整段候選，照跨英數候選
-// （openKeySpan）的順序列：空白照留、查不到按鍵的字照畫面、沒記按鍵的中文用讀音的按鍵。
+// （openKeySpan）的順序列。
 func (s *Session) openMarkSpan(start, end int) bool {
-	var units []keyUnit
-	keyed := false
-	for pos := start; pos < end; {
-		u, ok := s.keyUnitAt(pos)
-		switch {
-		case ok && u.start == pos && u.end <= end && (u.keys != " " || u.end == end):
-		case !s.literals[pos]:
-			u = keyUnit{start: pos, end: pos + 1, keys: s.layout.Keys(s.syls[pos])}
-		default:
-			u = keyUnit{start: pos, end: pos + 1, fixed: s.shownText(pos, pos+1)}
-		}
-		keyed = keyed || u.fixed == ""
-		units = append(units, u)
-		pos = u.end
-	}
+	units, keyed := s.spanUnits(start, end)
 	return keyed && s.openUnits(start, end-start, units)
 }
 
