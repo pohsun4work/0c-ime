@@ -95,27 +95,7 @@ func (s *Session) gridMove(key string) {
 // with a syllable offset; unfinished input at the caret is not in this range.
 func (s *Session) candidateText() string {
 	start, length := s.cand.span(s.cand.cursor)
-	end := start + length
-	var text strings.Builder
-	if len(s.path) == 0 {
-		for i := start; i < end; i++ {
-			displayed, _ := s.fallbackDisplay(i, s.syls[i])
-			text.WriteString(displayed)
-		}
-		return text.String()
-	}
-	for _, g := range s.path {
-		if g.End <= start || g.Start >= end {
-			continue
-		}
-		if g.End-g.Start == 1 {
-			text.WriteString(g.Word)
-		} else {
-			runes := []rune(g.Word)
-			text.WriteString(string(runes[max(0, start-g.Start):min(len(runes), end-g.Start)]))
-		}
-	}
-	return text.String()
+	return s.shownText(start, start+length)
 }
 
 // = 選單的分頁：Emoji、顏文字，以及 Preview02 打開（0.2.0 起一律打開）、而且有片語時的「我的片語」（#124）。
@@ -205,8 +185,8 @@ func (s *Session) paletteTriggerAllowed() bool {
 	if s.mixed.raw != "" && s.mixedText() == s.mixed.raw {
 		return false
 	}
-	_, typedMixed := s.mixedOrigins[s.cursor-1]
-	if s.cursor > 0 && typedMixed && s.literals[s.cursor-1] {
+	origin, typedMixed := s.mixedOrigins[s.cursor-1]
+	if s.cursor > 0 && typedMixed && !origin.keyed && s.literals[s.cursor-1] {
 		text := string(s.syls[s.cursor-1])
 		if len(text) == 1 && !unicode.IsSpace(rune(text[0])) {
 			return false

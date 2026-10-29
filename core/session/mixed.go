@@ -115,8 +115,10 @@ func (s *Session) insertMixedTyped(syl zhuyin.Syllable, keys string) {
 		for _, r := range string(syl.Base()) {
 			comp.Add(r)
 		}
+		at := s.cursor
 		s.insertSyllableLiteral(comp, syl)
 		s.pendingLiterals[len(s.pendingLiterals)-1].prefix = true
+		s.keepResplitKeys(at, keys)
 	}
 }
 
@@ -147,7 +149,7 @@ func (s *Session) flushMixed() {
 	if s.mixed.raw == "" {
 		return
 	}
-	text := s.mixedText()
+	text, raw := s.mixedText(), s.mixed.raw
 	c, phonetic := s.mixedPending(text)
 	if !phonetic {
 		s.reviseLetterI(text)
@@ -160,6 +162,7 @@ func (s *Session) flushMixed() {
 	if phonetic {
 		s.comp = c
 		s.insertPendingLiteral()
+		s.keepResplitKeys(at, raw) // 數字鍵盤打斷的 e 留成 ㄍ，↓ 有 e
 	} else {
 		s.insertMixedLiteral(text, assisted, explicit)
 		for pos := at; pos < at+min(assistedPrefix, len([]rune(text))); pos++ {
@@ -1011,7 +1014,7 @@ func (s *Session) mixedKey(k string) bool {
 	if !s.mixedInput() || s.english {
 		return false
 	}
-	if s.mixed.raw == "" {
+	if s.mixed.raw == "" && !s.resplitKeepsLiteral(k) {
 		s.restorePendingLiteral()
 	}
 	if !s.comp.Empty() {
@@ -1117,7 +1120,11 @@ func (s *Session) englishCorrections(text string, limit int) []english.Candidate
 	return s.model.EnglishCorrections(s.English, text, limit)
 }
 
-type mixedOrigin struct{ assisted, explicit bool }
+type mixedOrigin struct {
+	assisted, explicit bool
+	// 整合風格（mixed_resplit）：keyed 是只為了查回按鍵而記的位置（打的符號、數字鍵盤），不算混打的英數，不學。
+	keyed, keypad bool
+}
 
 func (s *Session) insertMixedLiteral(text string, assisted, explicit bool) {
 	at := s.cursor
@@ -1127,7 +1134,7 @@ func (s *Session) insertMixedLiteral(text string, assisted, explicit bool) {
 		s.mixedOrigins = map[int]mixedOrigin{}
 	}
 	for pos := at; pos < s.cursor; pos++ {
-		s.mixedOrigins[pos] = mixedOrigin{assisted, explicit}
+		s.mixedOrigins[pos] = mixedOrigin{assisted: assisted, explicit: explicit}
 	}
 }
 
@@ -1182,7 +1189,7 @@ func (s *Session) mixedEnglishCommits() []personal.EnglishCommit {
 			for i := left; i < right; i++ {
 				word.WriteString(string(s.syls[i]))
 				origin, ok := s.mixedOrigins[i]
-				tracked = tracked && ok
+				tracked = tracked && ok && !origin.keyed
 				event.Assisted = event.Assisted || origin.assisted
 				event.Explicit = event.Explicit && origin.explicit
 			}
