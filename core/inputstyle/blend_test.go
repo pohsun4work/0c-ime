@@ -8,6 +8,7 @@ func TestBlendRulesRejectUnknownValues(t *testing.T) {
 	for _, edit := range []func(*Rules){
 		func(r *Rules) { r.Symbols = "asus" },
 		func(r *Rules) { r.Width = "fullwidth" },
+		func(r *Rules) { r.SymbolBoard = "microsoft" },
 	} {
 		r := p.Rules
 		edit(&r)

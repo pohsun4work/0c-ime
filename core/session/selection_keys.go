@@ -6,6 +6,9 @@ const defaultSelectionKeys = "1234567890"
 // selectionKeys 回傳實際使用的選字鍵（#112）：SelectionKeys 要剛好是每頁項數（10）個不重複的可見 ASCII 字元
 // （不含大寫，那是 Shift＋字母），否則用預設。設定只開放 1234567890、1234qweras、asdfghjkl;，這裡只防不合用的值。
 func (s *Session) selectionKeys() string {
+	if s.boardOpen() {
+		return boardKeys
+	}
 	keys := s.SelectionKeys
 	if len(keys) != s.pageSize() && !(s.pageSize() == 9 && len(keys) == 10) {
 		return defaultSelectionKeys[:s.pageSize()]

@@ -40,6 +40,8 @@ use zuin_win_common::{
     notice_row, UiCandidate, UiMessage, NOTICE_MS, WM_SELECT_CANDIDATE,
 };
 
+mod keyboard; // 整合風格的符號表
+
 const WM_ZUIN_REFLOW: u32 = WM_APP + 2;
 /// 一次性提示（notice）顯示 NOTICE_MS 後收起；下一鍵的訊息沒有提示時也會收起。
 /// 標示加詞範圍時的說明（marking）不計時，留到標示結束。
@@ -669,8 +671,10 @@ pub fn present(hwnd: HWND, m: UiMessage) {
         width += t.pad * 3;
         height += t.pad;
         width = width.max(t.row * 3);
-        // Emoji 的單欄退回也使用同一個彩色字型路徑。
-        if uses_grid(&m) {
+        if keyboard::is_keyboard(&m) {
+            (width, height) = keyboard::size(&m, hdc, &t, info.rcWork.right - info.rcWork.left);
+        } else if uses_grid(&m) {
+            // Emoji 的單欄退回也使用同一個彩色字型路徑。
             (width, height) = grid_size(&m, info.rcWork.right - info.rcWork.left, &t, hdc);
         }
         ReleaseDC(Some(hwnd), hdc);
@@ -720,6 +724,10 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
     FillRect(hdc, &inner, t.bg);
     SetBkMode(hdc, TRANSPARENT);
     if let Some(m) = current(hwnd) {
+        if keyboard::is_keyboard(&m) {
+            keyboard::draw(&m, hdc, rc.right - rc.left, &t);
+            return;
+        }
         if uses_grid(&m) {
             draw_grid(&m, hdc, rc.right - rc.left, &t);
             return;
@@ -842,7 +850,9 @@ unsafe fn click(hwnd: HWND, m: &UiMessage, lparam: LPARAM) {
         return;
     }
     let x = (lparam.0 as u16) as i16 as i32;
-    let selected = if uses_grid(m) {
+    let selected = if keyboard::is_keyboard(m) {
+        keyboard::hit(hwnd, m, &t, x, y)
+    } else if uses_grid(m) {
         let mut rc = RECT::default();
         let _ = GetClientRect(hwnd, &mut rc);
         let hdc = GetDC(Some(hwnd));

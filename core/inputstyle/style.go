@@ -30,6 +30,8 @@ type Rules struct {
 	Symbols string `json:"symbols,omitempty" fork:"blend"`
 	// shift_space：Shift＋空白切換全半形；混打照常判斷，判成英數的段落轉全形
 	Width string `json:"width,omitempty" fork:"blend"`
+	// asus：Ctrl＋Alt＋, 開華碩注音的符號表（鍵盤形狀，一般／數學／特殊三頁）
+	SymbolBoard string `json:"symbol_board,omitempty" fork:"blend"`
 }
 
 func (r Rules) Validate() error {
@@ -61,6 +63,7 @@ func (r Rules) Validate() error {
 		{"english_learning", r.EnglishLearning, []string{"", "dictionary"}},
 		{"symbols", r.Symbols, []string{"", "microsoft"}},
 		{"width", r.Width, []string{"", "shift_space"}},
+		{"symbol_board", r.SymbolBoard, []string{"", "asus"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -127,6 +130,7 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 		p.Rules.EnglishLearning = "dictionary"
 		p.Rules.Symbols = "microsoft"
 		p.Rules.Width = "shift_space"
+		p.Rules.SymbolBoard = "asus"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

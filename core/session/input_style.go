@@ -37,6 +37,9 @@ func (s *Session) fullWidthText(k string) string {
 }
 
 func (s *Session) pageSize() int {
+	if s.boardOpen() {
+		return len(boardKeys) // 符號表一頁是一個鍵盤
+	}
 	if s.InputStyle.CandidatePageSize == 9 {
 		return 9
 	}
