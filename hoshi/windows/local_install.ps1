@@ -1,6 +1,4 @@
-﻿# 安裝 local_preview.py 打好的本機包（未簽章的 internal-preview）；整合風格的配方有變時重建風格。
-# local_preview.py 把這支複製成 build\local-preview\install.ps1，要裝的套件在旁邊的 bundle\。
-# 不是系統管理員時自己跳 UAC：powershell -ExecutionPolicy Bypass -File build\local-preview\install.ps1
+﻿# local_preview.py 本機包的安裝入口（複製成 build\local-preview\install.ps1，套件在旁邊的 bundle\）；不是系統管理員時自己跳 UAC。
 param([switch]$Pause)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -16,15 +14,19 @@ $bundle = Join-Path $PSScriptRoot 'bundle'
 $updater = Join-Path $bundle '0c-update.exe'
 $settings = Join-Path $env:LOCALAPPDATA 'Zuin\settings.json'
 function Invoke-Updater { & $updater @args; if ($LASTEXITCODE -ne 0) { throw "0c-update $($args -join ' ') 失敗（$LASTEXITCODE）" } }
-function Get-ActiveProfile { $p = (Get-Content $settings -Raw -Encoding UTF8 | ConvertFrom-Json).input_profile; $p.items | Where-Object id -eq $p.active }
+function Get-ActiveProfile {
+    if (-not (Test-Path $settings)) { return }
+    $p = (Get-Content $settings -Raw -Encoding UTF8 | ConvertFrom-Json).input_profile
+    if ($p) { $p.items | Where-Object id -eq $p.active }
+}
 function Get-EngineVersion { (& $updater status -json | ConvertFrom-Json).runtime.version }
 
 try {
     Invoke-Updater install -bundle $bundle -channel internal-preview
     # 自訂風格存的是複製當下的規則，配方加了規則要重新複製才會生效。先複製再比，規則沒變就換回原本那份。
     $old = Get-ActiveProfile
-    if ($old.source -ne 'blend') {
-        Write-Host "目前用的不是整合風格（$($old.name)），風格沒動。"
+    if (-not $old -or $old.source -ne 'blend') {
+        Write-Host '目前用的不是整合風格，風格沒動。'
     } else {
         Invoke-Updater profile copy blend --name $old.name
         $new = Get-ActiveProfile
@@ -33,8 +35,8 @@ try {
             Invoke-Updater profile delete $new.id
             Write-Host '整合風格的配方沒變，沿用原本的風格。'
         } else {
-            Invoke-Updater profile delete $old.id
-            Write-Host "整合風格的配方有變，已重建（$($new.id)），舊的那份刪掉了。"
+            if (-not $old.builtin) { Invoke-Updater profile delete $old.id }  # 直接選用配方時是內建項目，刪不掉
+            Write-Host "整合風格的配方有變，已重建（$($new.id)）。"
             foreach ($v in $old.values.PSObject.Properties) {
                 if ($new.values.($v.Name) -ne $v.Value) {
                     Write-Host "  $($v.Name) 原本是 $($v.Value)，回到配方的 $($new.values.($v.Name))；要的話到設定改回來。"
@@ -53,8 +55,9 @@ try {
         Write-Host "引擎還沒換成 $version（交接時可能正在組字），登出再登入後生效。"
         return
     }
-    Invoke-Updater profile select (Get-ActiveProfile).id -apply
-    Write-Host "引擎已換成 $version，風格也套用了，不用登出。"
+    $active = Get-ActiveProfile
+    if ($active) { Invoke-Updater profile select $active.id -apply }
+    Write-Host "引擎已換成 $version，不用登出。"
 } finally {
     if ($Pause) { Read-Host '按 Enter 關閉' | Out-Null }
 }
