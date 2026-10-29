@@ -518,8 +518,8 @@ func (s *Session) shownText(start, end int) string {
 	return text.String()
 }
 
-// tabFromMixed 在還沒定案的混打按鍵候選上按 Tab：先照畫面定案，再從剛定案那段的長度換到下一個詞長。
-func (s *Session) tabFromMixed() {
+// tabFromMixed 在還沒定案的混打按鍵候選上按 Tab（d 是 1）或 Shift+Tab（-1）：先照畫面定案，再從剛定案那段的長度換詞長。
+func (s *Session) tabFromMixed(d int) {
 	n := len([]rune(s.mixedText())) // 定案時可能改到前面的字（reviseLetterI），長度照畫面上的待定按鍵算
 	s.cand = nil
 	s.flushMixed()
@@ -528,7 +528,7 @@ func (s *Session) tabFromMixed() {
 	}
 	flushed := &candState{start: s.cursor - n, length: n, before: true, literal: true}
 	s.cand = flushed
-	s.nextCandidateLength()
+	s.cycleCandidateLength(d)
 	if s.cand == flushed {
 		s.cand = nil
 	}

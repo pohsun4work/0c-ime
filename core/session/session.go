@@ -607,7 +607,11 @@ func (s *Session) key(k string) (handled bool, commit string) {
 			case "next":
 				s.moveHighlight(1)
 			default:
-				s.nextCandidateLength()
+				s.cycleCandidateLength(1)
+			}
+		case proto.KeyBackTab:
+			if s.InputStyle.CandidateBackTab != "" && s.InputStyle.CandidateTab == "length" { // 整合風格（candidate_backtab）
+				s.cycleCandidateLength(-1)
 			}
 		default:
 			if n := s.selectionIndex(k); n >= 0 {
@@ -1380,10 +1384,11 @@ func (s *Session) openAt(pos, length int) bool {
 func (s *Session) pages() int { return (len(s.cand.items) + s.pageSize() - 1) / s.pageSize() }
 
 // 候選開啟時 Tab 切至下一個較長詞長，最長後回到最短；不接受補全或提交。
-func (s *Session) nextCandidateLength() {
+// d 是 -1 時（整合風格的 Shift+Tab）反過來換到較短的，最短後回到最長。
+func (s *Session) cycleCandidateLength(d int) {
 	c := s.cand
 	if c != nil && c.mixed && !c.english && s.resplit() {
-		s.tabFromMixed()
+		s.tabFromMixed(d)
 		return
 	}
 	// 整合風格：照字面的字（英數、符號、原樣注音）也能換詞長；= 選單、符號表與打到一半的注音照舊不換。
@@ -1392,7 +1397,7 @@ func (s *Session) nextCandidateLength() {
 	}
 	anchor, maxLen := s.candidateAnchor(c)
 	for i := 1; i <= maxLen; i++ {
-		length := (c.length-1+i)%maxLen + 1
+		length := ((c.length-1+d*i)%maxLen+maxLen)%maxLen + 1
 		if s.openAnchored(anchor, length, c.before) {
 			return
 		}
