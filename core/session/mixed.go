@@ -1014,7 +1014,7 @@ func (s *Session) mixedKey(k string) bool {
 	if !s.mixedInput() || s.english {
 		return false
 	}
-	if s.mixed.raw == "" {
+	if s.mixed.raw == "" && !s.resplitKeepsLiteral(k) {
 		s.restorePendingLiteral()
 	}
 	if !s.comp.Empty() {

@@ -6,11 +6,18 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/input"
+	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
 // resplit：整合風格（操作規則 mixed_resplit），組字區查得回原按鍵，↓／Tab 換詞長可以跨過英數，整段換成英文、注音或中文。
 func (s *Session) resplit() bool { return s.InputStyle.MixedResplit != "" && s.mixedInput() }
+
+// resplitKeepsLiteral：整合風格只有接著打的字、↓ 與 Esc 把游標前的原樣注音收回待定按鍵。方向鍵、Enter 這類鍵收回後
+// 同一鍵又定案，定案沿用收回前的路徑，神經選字時會多出一個字（ㄍ2ㄍ 按 ← 變 ㄍㄍ2ㄍ）。
+func (s *Session) resplitKeepsLiteral(k string) bool {
+	return s.resplit() && len([]rune(k)) != 1 && k != proto.KeyDown && k != proto.KeyEscape
+}
 
 // keyUnit 是組字區裡一段查得回原按鍵的位置：中文音節、英數與符號各一格，原樣注音連同聲調整個算一段。
 type keyUnit struct {

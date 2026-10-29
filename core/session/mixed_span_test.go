@@ -11,6 +11,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
+	"github.com/0c-biggo/0c-ime/core/rerank"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -151,6 +152,37 @@ func TestResplitRestoresPendingKeys(t *testing.T) {
 	s = resplitSession()
 	if snap := keys(s, "e", "KP2", proto.KeyBackspace, "2", "e", " "); snap.Text() != "e2e " {
 		t.Fatalf("接著打：%q", snap.Text())
+	}
+}
+
+// 使用者回報：神經選字時打 e、數字鍵盤的 2、e 再按三下 ←，ㄍ2ㄍ 變成 ㄍㄍ2ㄍ。方向鍵與 Enter 不收回原樣注音，畫面與送出的字照舊。
+func TestResplitNavigationKeepsLiteral(t *testing.T) {
+	s := resplitSession()
+	s.Rerank = rerank.Options{Weight: .1, Scorer: rankFunc(func(r rerank.Request) ([]float64, error) {
+		return make([]float64, len(r.Candidates)), nil
+	})}
+	keys(s, "e", "KP2", "e")
+	for _, k := range []string{proto.KeyLeft, proto.KeyLeft, proto.KeyLeft, proto.KeyRight, proto.KeyLeft, proto.KeyEnd, proto.KeyHome, proto.KeyRight} {
+		if snap := key(s, k); snap.Text() != "ㄍ2ㄍ" {
+			t.Fatalf("按 %s：%q", k, snap.Text())
+		}
+	}
+	if snap := key(s, proto.KeyEnter); snap.Commit != "ㄍ2ㄍ" {
+		t.Fatalf("送出：%q", snap.Commit)
+	}
+}
+
+// 游標緊接在原樣注音後面按 ↓ 照舊收回成待定按鍵，候選有原按鍵；Esc 照舊先清掉它。
+func TestResplitDownAndEscapeRestoreLiteral(t *testing.T) {
+	s := resplitSession()
+	keys(s, "e", "KP2", "e", proto.KeyLeft, proto.KeyLeft)
+	if items := itemTexts(key(s, proto.KeyDown)); !slices.Contains(items, "e") {
+		t.Fatalf("↓ 的候選：%q", items)
+	}
+	s = resplitSession()
+	keys(s, "e", "KP2", "e", proto.KeyLeft, proto.KeyLeft)
+	if snap := key(s, proto.KeyEscape); snap.Text() != "2ㄍ" {
+		t.Fatalf("Esc：%q", snap.Text())
 	}
 }
 
