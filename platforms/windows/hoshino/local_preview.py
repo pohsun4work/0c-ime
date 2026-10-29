@@ -44,19 +44,21 @@ def fetch(url, target, expected):
         return target
     print(f"下載 {url}", flush=True)
     pending = target.with_name(".download-" + target.name)
-    with urllib.request.urlopen(url, timeout=120) as response, pending.open("wb") as stream:
-        shutil.copyfileobj(response, stream, 1 << 20)
-    if digest(pending) != expected:
-        pending.unlink()
-        raise ValueError(f"SHA-256 不符：{target.name}")
-    os.replace(pending, target)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, pending.open("wb") as stream:
+            shutil.copyfileobj(response, stream, 1 << 20)
+        if digest(pending) != expected:
+            raise ValueError(f"SHA-256 不符：{target.name}")
+        os.replace(pending, target)
+    finally:
+        pending.unlink(missing_ok=True)
     return target
 
 
 def ensure_data(tag):
-    """官方同版本原始碼 tarball 裡的字典，依這個 checkout 的字典 lock 核對。
+    """官方同版本原始碼 tarball 裡的字典，依這個 checkout 的字典 lock 核對；快取以 lock 的雜湊區分。
     不用 fetch_assets.install：整包驗證會比對執行權限位元，只能在 POSIX 跑。"""
-    target = OUT / "data" / tag
+    target = OUT / "data" / digest(ROOT / "data/dictionary.lock.json")[:12]
     if not target.is_dir():
         fetch_assets.fetch = fetch
         tarball, _ = fetch_assets.download(tag, ROOT / "build/cache/releases", models=False)
@@ -65,8 +67,8 @@ def ensure_data(tag):
 
 
 def ensure_neural(tag, receipt, data):
-    """依安裝收據逐檔複製已安裝版本的 neural/ 並核對雜湊，執行期多出來的檔案不會帶進套件。"""
-    target = OUT / "neural" / tag
+    """依安裝收據逐檔複製已安裝版本的 neural/ 並核對雜湊，執行期多出來的檔案不會帶進套件；快取以配對的字典區分。"""
+    target = OUT / "neural" / digest(data / "manifest.json")[:12]
     if target.is_dir():
         return target
     if receipt is None:
@@ -98,8 +100,24 @@ def next_version(base, installed):
     return f"{base}.{max(used, default=0) + 1}"
 
 
-def shell_changed(since):
-    """跟 fork-release 一樣看 TSF DLL、候選窗有沒有變，另外算上還沒提交的改動。"""
+def semver(version):
+    """semver 的先後：預覽版排在正式版前；預覽欄位數字比大小、排在文字前，前面都一樣時欄位多的較新。"""
+    core, _, pre = version.partition("-")
+    ids = tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in pre.split(".")) if pre else ()
+    return tuple(map(int, core.split("."))), not pre, ids
+
+
+def shell_changed(receipt, fallback):
+    """TSF DLL、候選窗（同 fork-release 判斷 shell 更新的路徑）跟已安裝那版的 commit 比有沒有變，算上還沒提交的改動。
+    已安裝的是有未提交改動的本機包時比不出來，當成有變；那個 commit 不在本機時改跟上次的 shell 發布比。"""
+    since = fallback
+    if receipt:
+        release = json.loads((ZUIN / receipt["directory"] / "release.json").read_text(encoding="utf-8"))
+        if release.get("dirty"):
+            return True
+        if subprocess.run(["git", "cat-file", "-e", release["revision"] + "^{commit}"], cwd=ROOT,
+                          capture_output=True).returncode == 0:
+            since = release["revision"]
     changed = subprocess.check_output(["git", "diff", "--name-only", since, "--", *SHELL_PATHS], cwd=ROOT, text=True)
     untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "--", *SHELL_PATHS],
                                         cwd=ROOT, text=True)
@@ -146,9 +164,12 @@ def main():
     tag = state["upstream"]
     receipt_path = ZUIN / "install-receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.exists() else None
-    version = args.version or next_version(f"{tag[1:]}-hoshino.{state['build']}", receipt and receipt["version"])
+    installed = receipt and receipt["version"]
+    version = args.version or next_version(f"{tag[1:]}-hoshino.{state['build']}", installed)
     started = time.monotonic()
     try:
+        if installed and semver(version) <= semver(installed):
+            raise ValueError(f"{version} 沒有比已安裝的 {installed} 新，裝不上去；先 rebase 到最新的 main，或用 --version 指定")
         data = ensure_data(tag)
         neural = ensure_neural(tag, receipt, data)
         settings = OUT / "settings"
@@ -163,7 +184,7 @@ def main():
         for old in (OUT / "release").glob("0c-*-windows-amd64-preview.zip*"):
             if not old.name.startswith(archive.name):
                 old.unlink()
-        shell = shell_changed(state["shell_commit"])
+        shell = shell_changed(receipt, state["shell_commit"])
         script = stage_install(archive, shell)
         print(f"已打包 {version}（{time.monotonic() - started:.0f} 秒）：{archive}", flush=True)
         print("這版改到 TSF DLL 或候選窗，裝完要登出再登入。" if shell else "這版只改引擎，裝完不用登出。")
