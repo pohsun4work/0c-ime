@@ -90,7 +90,7 @@ func (s *Session) literalKeyAlternatives(items []string, start, length int) []st
 // 回傳它在目前排列的注音符號，↓ 第二項給它（2 → ㄉ），比照 loneToneKeyAt 的聲調鍵。混打下單獨打 1 2 , 接空白照舊是數字與標點（#162），
 // 要注音文（我ㄉ天）時打完按 ↓ 選，或像這樣回頭在字上按 ↓。沒開混打時組字區裡的字面數字來自數字鍵盤，不加。
 func (s *Session) lonePhoneticKeyAt(at int) (rune, bool) {
-	if !s.mixedInput() || at < 0 || at >= len(s.syls) || !s.literals[at] {
+	if !s.mixedInput() || at < 0 || at >= len(s.syls) || !s.literals[at] || s.mixedOrigins[at].keypad {
 		return 0, false
 	}
 	rs := []rune(string(s.syls[at]))

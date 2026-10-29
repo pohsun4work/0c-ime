@@ -32,6 +32,8 @@ type Rules struct {
 	Width string `json:"width,omitempty" fork:"blend"`
 	// asus：Ctrl＋Alt＋, 開華碩注音的符號表（鍵盤形狀，一般／數學／特殊三頁）
 	SymbolBoard string `json:"symbol_board,omitempty" fork:"blend"`
+	// keys：Enter 之前的組字區都查得回原按鍵，↓／Tab 換詞長可以跨英數，整段換成英文、注音或中文
+	MixedResplit string `json:"mixed_resplit,omitempty" fork:"blend"`
 }
 
 func (r Rules) Validate() error {
@@ -64,6 +66,7 @@ func (r Rules) Validate() error {
 		{"symbols", r.Symbols, []string{"", "microsoft"}},
 		{"width", r.Width, []string{"", "shift_space"}},
 		{"symbol_board", r.SymbolBoard, []string{"", "asus"}},
+		{"mixed_resplit", r.MixedResplit, []string{"", "keys"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -131,6 +134,7 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 		p.Rules.Symbols = "microsoft"
 		p.Rules.Width = "shift_space"
 		p.Rules.SymbolBoard = "asus"
+		p.Rules.MixedResplit = "keys"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"
