@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 
@@ -114,7 +115,30 @@ var wideSymbols = strings.NewReplacer("'", "’", "^", "︿", "`", "‵")
 
 func wideText(text string) string { return fullWidthASCII(wideSymbols.Replace(text)) }
 
-// symbolsCtrlPunct 是整合風格（操作規則 symbols）照微軟新注音多的 Ctrl＋標點：Ctrl＋[ ] 與 Ctrl＋Shift＋; 打【】：；
+// microsoftBrackets 是整合風格（操作規則 symbols）的括號 ↓ 清單：微軟新注音 Ctrl＋[ ] 按 ↓ 的清單，但「」與【】對調，
+// 跟 Ctrl＋[ ] 打的「」一樣排第一。清單裡的符號不列靈犀的分組（symbolGroups）。
+var microsoftBrackets = [][]string{runes("「【『〔︹︻﹁﹃﹝［｢"), runes("」】』〕︺︼﹂﹄﹞］｣")}
+
+// symbolChoices 是符號按 ↓ 的清單，第一項是目前的符號：整合風格的括號列 microsoftBrackets，其餘同 symbolAlternatives。
+func (s *Session) symbolChoices(current string) []string {
+	if s.InputStyle.Symbols != "" {
+		for _, group := range microsoftBrackets {
+			if !slices.Contains(group, current) {
+				continue
+			}
+			out := []string{current}
+			for _, item := range group {
+				if item != current {
+					out = append(out, item)
+				}
+			}
+			return out
+		}
+	}
+	return symbolAlternatives(current)
+}
+
+// symbolsCtrlPunct 是整合風格（操作規則 symbols）照微軟新注音多的 Ctrl＋標點：Ctrl＋[ ] 與 Ctrl＋Shift＋; 打「」：；
 // 英文模式的 Ctrl＋標點也打全形，連同打到一半的英文字直接送出，不留在組字區。中文模式的官方六個鍵照官方（ctrlPunct）。
 func (s *Session) symbolsCtrlPunct(k string) (handled bool, commit string, ok bool) {
 	if s.InputStyle.Symbols == "" {

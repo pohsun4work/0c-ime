@@ -297,7 +297,7 @@ func (s *Session) openKeySpan(pos, length int) bool {
 		add(s.keyGroupsText(groups, words), func() { s.insertKeyGroups(groups, words) })
 	}
 	if _, pending := s.pendingLiteralAt(pos); length == 1 && s.literals[pos] && !pending {
-		for _, alt := range symbolAlternatives(string(s.syls[pos])) {
+		for _, alt := range s.symbolChoices(string(s.syls[pos])) {
 			add(alt, func() {
 				s.insertKeyText(alt)
 				s.setLiteralKey(s.cursor-1, units[0].keys) // 換了符號也查得回按鍵

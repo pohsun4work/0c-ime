@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -118,6 +119,8 @@ func blendDiffers(c microsoftCase) string {
 	switch {
 	case strings.Contains(c.keys, "C+A+,"):
 		return "Ctrl+Alt+, 開華碩的符號表，不是微軟的符號輸入模式"
+	case c.keys == "C+[" || c.keys == "C+]":
+		return "Ctrl+[ ] 打最常用的「」，不是微軟的【】"
 	case tokens[0] == "`" && len(tokens) > 1:
 		return "` 不是前導鍵"
 	case c.prefix == "1":
@@ -202,15 +205,15 @@ func TestBlendIdleSymbolsStayInComposition(t *testing.T) {
 	}
 }
 
-// Ctrl＋[ ] Shift+; 照微軟打【】：；英文模式的 Ctrl＋標點也打全形，連同打到一半的英文字直接送出。
+// Ctrl＋[ ] Shift+; 打「」：（微軟是【】：）；英文模式的 Ctrl＋標點也打全形，連同打到一半的英文字直接送出。
 // 設定關閉時、靈犀風格都交給應用程式。
 func TestBlendCtrlPunctuation(t *testing.T) {
 	for _, tc := range []struct {
 		keys []string
 		want string
 	}{
-		{[]string{proto.KeyCtrlLeftBracket}, "【"},
-		{[]string{"j", "i", "3", proto.KeyCtrlRightBracket}, "我】"},
+		{[]string{proto.KeyCtrlLeftBracket}, "「"},
+		{[]string{"j", "i", "3", proto.KeyCtrlRightBracket}, "我」"},
 		{[]string{proto.KeyCtrlColon}, "："},
 	} {
 		if snap := keys(blendSession(), tc.keys...); !snap.Handled || snap.Text() != tc.want {
@@ -222,7 +225,7 @@ func TestBlendCtrlPunctuation(t *testing.T) {
 	if snap, commit := pressKeys(s, "h", "e", "l", proto.KeyCtrlComma); !snap.Handled || commit != "hel，" || snap.Text() != "" {
 		t.Errorf("English mode: %+v", snap)
 	}
-	if snap, commit := pressKeys(s, proto.KeyCtrlLeftBracket, "y"); commit != "【" || !snap.EnglishPending {
+	if snap, commit := pressKeys(s, proto.KeyCtrlLeftBracket, "y"); commit != "「" || !snap.EnglishPending {
 		t.Errorf("autocomplete resumes after an English-mode punctuation: %+v", snap)
 	}
 	s = blendSession()
@@ -237,6 +240,36 @@ func TestBlendCtrlPunctuation(t *testing.T) {
 	s.Handle(proto.Request{Type: proto.Mode, On: true})
 	if snap := key(s, proto.KeyCtrlComma); snap.Handled {
 		t.Errorf("0c style English mode: %+v", snap)
+	}
+}
+
+// Ctrl＋[ ] 打的「」按 ↓ 列微軟 Ctrl＋[ ] 的清單，「」與【】對調：要【就 Ctrl＋[ ↓ 2，在【上按 ↓ 就是微軟的原順序。
+// 混打的 ] 跟著「配成」。靈犀風格照舊列靈犀的分組。
+func TestBlendBracketChoices(t *testing.T) {
+	for _, tc := range []struct {
+		keys []string
+		want []string
+	}{
+		{[]string{proto.KeyCtrlLeftBracket, proto.KeyDown}, runes("「【『〔︹︻﹁﹃﹝［｢")},
+		{[]string{"j", "i", "3", proto.KeyCtrlRightBracket, proto.KeyDown}, runes("」】』〕︺︼﹂﹄﹞］｣")},
+		{[]string{proto.KeyCtrlLeftBracket, proto.KeyDown, "2", proto.KeyDown}, runes("【「『〔︹︻﹁﹃﹝［｢")},
+	} {
+		s := blendSession()
+		keys(s, tc.keys...)
+		if got := candidateTexts(s); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: %q", tc.keys, got)
+		}
+	}
+	if snap := keys(blendSession(), proto.KeyCtrlLeftBracket, proto.KeyDown, "2"); snap.Text() != "【" {
+		t.Errorf("Ctrl+[ ↓ 2: %q", snap.Text())
+	}
+	if snap := keys(blendSession(), proto.KeyCtrlLeftBracket, "D", "N", "S", "]"); snap.Text() != "「DNS」" {
+		t.Errorf("paired ]: %q", snap.Text())
+	}
+	s := styleSession("0c")
+	keys(s, "[", proto.KeyDown)
+	if got := candidateTexts(s); !slices.Equal(got, runes("「『﹁﹃“‘")) {
+		t.Errorf("0c style: %q", got)
 	}
 }
 
