@@ -12,6 +12,7 @@ func TestBlendRulesRejectUnknownValues(t *testing.T) {
 		func(r *Rules) { r.MixedResplit = "on" },
 		func(r *Rules) { r.MixedContext = "on" },
 		func(r *Rules) { r.VocabMark = "on" },
+		func(r *Rules) { r.CandidateBackTab = "on" },
 	} {
 		r := p.Rules
 		edit(&r)

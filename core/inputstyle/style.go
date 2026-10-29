@@ -39,6 +39,8 @@ type Rules struct {
 	MixedContext string `json:"mixed_context,omitempty" fork:"blend"`
 	// extended：組字中的標示多 Shift＋Home／End 標到頭尾、↓ 換整段、整段英文按 Enter 加成英文詞
 	VocabMark string `json:"vocab_mark,omitempty" fork:"blend"`
+	// shorter：候選開著時 Shift＋Tab 是 Tab 的反方向，換到較短的詞長，最短再按回到最長（candidate_tab 是 length 時）
+	CandidateBackTab string `json:"candidate_backtab,omitempty" fork:"blend"`
 }
 
 func (r Rules) Validate() error {
@@ -74,6 +76,7 @@ func (r Rules) Validate() error {
 		{"mixed_resplit", r.MixedResplit, []string{"", "keys"}},
 		{"mixed_context", r.MixedContext, []string{"", "rules"}},
 		{"vocab_mark", r.VocabMark, []string{"", "extended"}},
+		{"candidate_backtab", r.CandidateBackTab, []string{"", "shorter"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -144,6 +147,7 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 		p.Rules.MixedResplit = "keys"
 		p.Rules.MixedContext = "rules"
 		p.Rules.VocabMark = "extended"
+		p.Rules.CandidateBackTab = "shorter"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

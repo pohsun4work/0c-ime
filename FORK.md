@@ -19,6 +19,7 @@
     - 混打打進組字區的字在 Enter 之前都找得回原按鍵（`core/session/mixed_span.go`）：↓ 與 Tab 換詞長可以跨過英數、原樣注音與數字鍵盤的數字，整段換成英文、注音或中文（$20␣ 換成「$單」）；數字鍵盤的數字一律只是數字。多字的 ↓ 清單（含純中文）同官方單字的順序：畫面上的字（不是詞時才列，選了不換）→ 中文 → 原始按鍵 → 整段注音 → 單字（#161）；換成注音或英文時，被切開的詞外面那一半照畫面留著
     - 混打照上下文重看（`core/session/mixed_context.go`）：官方照常判斷，每個按鍵處理完與送出前把組字區再看一次（待定的按鍵還沒定案時只看游標前），規則成立才改。重複鍵（ggggk6、jji3 是什、我）、聲母衝突（gck6 是 g合）、反序打的英文字（url␣ 不是「交」）、不是國語音節的注音（npm␣ 不是 ㄙㄩㄣ）改成英文或中文；注音文（a␣ 2␣ 1␣ 緊接在中文或注音後面是 ㄇ ㄉ ㄅ，句首、空白或標點後要連著兩個以上，ㄇ 後面接著打英文字時改回 a）；數字鍵盤夾在字母中間（e KP2 e）是一個英數詞 e2e，接聲調鍵照舊是中文（B1樓）。選過的字、從 ↓ 明確選的不改。const、sql 這類程式詞加到「我的詞彙」就照字面
     - 組字中的標示（`core/session/mark_span.go`）：Shift＋Home／End 一次標到頭尾（同一直按 Shift＋←／→，最多 32 字）；標示中按 ↓ 同從開頭按 ↓ 再按 Tab 換到那個長度，中間有空白或符號也能換整段；整段英文按 Enter 加成「我的詞彙」的英文詞
+    - 候選開著時 Shift＋Tab 是 Tab 的反方向（操作規則 candidate_backtab）：換到較短的詞長，最短再按回到最長；待定的按鍵同 Tab 先照畫面定案，不會換到切開注音的長度
   - 整合風格跑官方測試：`go test -tags blendall ./core/session` 讓每個 session 都套用整合風格；預期不同的測試與原因列在 `core/session/testdata/blend_expected_diffs.txt`，`py -3.12 scripts/blend_official_diff.py` 核對其他官方測試都通過、列出的測試關掉對應的規則後也通過
   - 跟混打的相容：官方的規則照官方逐條判斷（`internal/settings` 的 `styleConflicts`）；fork 新加的規則欄位是為混打設計的，在 `inputstyle.Rules` 標 `fork:"blend"`，不在官方的衝突表上。非標準排列的限制也不算這些欄位（`internal/settings/mixed_compat.go` 的 `officialRulesDefault`）。
 

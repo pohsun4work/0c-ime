@@ -354,3 +354,37 @@ func TestResplitReplaceKeepsCutWord(t *testing.T) {
 		t.Fatalf("送出：%q", snap.Commit)
 	}
 }
+
+// 整合風格（candidate_backtab）的 Shift+Tab 是 Tab 的反方向：換到較短的詞長，最短再按回到最長；換不到的長度照樣跳過，
+// 待定的按鍵先照畫面定案（su 是 ㄋㄧ，不會換到只剩 ㄧ）。沒有這個規則照官方不動作。
+func TestResplitBackTabShortens(t *testing.T) {
+	for _, tc := range []struct {
+		keys      []string
+		tab, back []string
+	}{
+		{[]string{"2", "8", "3", "r", "u", "3", "r", "m", "4", proto.KeyHome, proto.KeyDown},
+			[]string{"打幾", "打幾句", "打"}, []string{"打幾句", "打幾", "打"}},
+		{[]string{"j", "i", "3", "$", "2", "0", proto.KeyDown}, // 游標在尾端：前方模式往左延伸
+			[]string{"我$20", "0", "20", "$20"}, []string{"20", "0", "我$20", "$20"}},
+		{[]string{"s", "u", "3", "c", "l", "3", "s", "u", proto.KeyDown},
+			[]string{"好ㄋㄧ", "你好ㄋㄧ", "ㄋㄧ"}, []string{"你好ㄋㄧ", "好ㄋㄧ", "ㄋㄧ"}},
+	} {
+		for k, want := range map[string][]string{proto.KeyTab: tc.tab, proto.KeyBackTab: tc.back} {
+			s := resplitSession()
+			keys(s, tc.keys...)
+			var got []string
+			for range want {
+				got = append(got, itemTexts(key(s, k))[0])
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("%q 按 %s：%q，要 %q", tc.keys, k, got, want)
+			}
+		}
+	}
+	s := resplitSession()
+	s.InputStyle.CandidateBackTab = ""
+	keys(s, "j", "i", "3", "$", "2", "0", proto.KeyHome, proto.KeyDown)
+	if snap := key(s, proto.KeyBackTab); s.cand == nil || s.cand.length != 1 || !snap.Handled {
+		t.Fatalf("沒有這個規則照官方不動作：%+v", s.cand)
+	}
+}
