@@ -5,13 +5,11 @@
 （0.2.7-hoshino.4.1、.4.2…），排在下一個正式版之前，正式版發布後自動更新照常蓋過去。
 字典取官方同版本的原始碼 tarball；neural/ 沿用已安裝版本的那份（prepare_neural 要在 Linux 編 bytecode）。
 
-打包完，套件解在 build\\local-preview\\bundle\\，旁邊的 install.ps1（local_install.ps1 的複本）負責安裝與
-重建整合風格，會跳 UAC。--install 打包完直接執行它。
+打包完在 build\\local-preview\\ 留下 install.ps1（local_install.ps1 的複本），會跳 UAC：安裝、整合風格的配方有變時
+重建風格；-Rollback 退回上一版並用舊版的配方重建風格。--install 打包完直接執行它。
 
   py -3.12 platforms\\windows\\hoshino\\local_preview.py             # 在要測的 checkout 根目錄執行
-  powershell -ExecutionPolicy Bypass -File build\\local-preview\\install.ps1
-
-回到上一版：在系統管理員 PowerShell 執行 & "$env:LOCALAPPDATA\\Zuin\\bin\\0c-update.exe" rollback
+  powershell -ExecutionPolicy Bypass -File build\\local-preview\\install.ps1 [-Rollback]
 """
 import argparse
 import json
@@ -22,14 +20,14 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib.request
 import zipfile
 
 ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 sys.path.insert(0, str(ROOT / "scripts"))
 import fetch_assets  # noqa: E402
-from install_package import digest  # noqa: E402
-from source_release import extract_dictionary  # noqa: E402
+import hf_models  # noqa: E402
+from package_release import prepare_data_manifest  # noqa: E402
+from source_release import digest, extract_dictionary, git  # noqa: E402
 
 ZUIN = Path(os.environ["LOCALAPPDATA"]) / "Zuin"
 OUT = ROOT / "build/local-preview"
@@ -39,19 +37,13 @@ SHELL_PATHS = ("platforms/windows/tsf", "platforms/windows/ui", "platforms/windo
 
 
 def fetch(url, target, expected):
-    """取代 fetch_assets.fetch：它在暫存檔還開著時改名，Windows 上會 WinError 32。"""
-    if target.exists() and digest(target) == expected:
-        return target
-    print(f"下載 {url}", flush=True)
-    pending = target.with_name(".download-" + target.name)
-    try:
-        with urllib.request.urlopen(url, timeout=120) as response, pending.open("wb") as stream:
-            shutil.copyfileobj(response, stream, 1 << 20)
-        if digest(pending) != expected:
+    """取代 fetch_assets.fetch：它在暫存檔還開著時改名，Windows 上會 WinError 32；hf_models.download 先關檔再改名。"""
+    if not (target.exists() and digest(target) == expected):
+        print(f"下載 {url}", flush=True)
+        hf_models.download(url, target)
+        if digest(target) != expected:
+            target.unlink()
             raise ValueError(f"SHA-256 不符：{target.name}")
-        os.replace(pending, target)
-    finally:
-        pending.unlink(missing_ok=True)
     return target
 
 
@@ -74,9 +66,10 @@ def ensure_neural(tag, receipt, data):
     if receipt is None:
         raise ValueError("這台沒有安裝靈犀注音，取不到 neural/")
     source = ZUIN / receipt["directory"]
-    select = json.loads((source / "neural/select/manifest.json").read_text(encoding="utf-8"))
-    if select.get("dictionary_sha256") != digest(data / "manifest.json"):
-        raise ValueError(f"已安裝的 {receipt['version']} 跟這個 checkout 的字典不配對；先裝 {tag} 的 fork 正式版")
+    try:
+        prepare_data_manifest(data, source / "neural")
+    except ValueError as error:
+        raise ValueError(f"已安裝的 {receipt['version']} 跟這個 checkout 的字典不配對（{error}）；先裝 {tag} 的 fork 正式版") from None
     stage = target.with_name(target.name + ".partial")
     shutil.rmtree(stage, ignore_errors=True)
     for name, sha in receipt["files"].items():
@@ -91,12 +84,15 @@ def ensure_neural(tag, receipt, data):
     return target
 
 
+def archive_name(version):
+    return f"0c-{version}-windows-amd64-preview.zip"
+
+
 def next_version(base, installed):
     """base 加一段序號，大於留著的包，也大於已安裝的本機版（rollback 之後也不會撞號）。"""
-    used = [int(m.group(1)) for p in (OUT / "release").glob("*.zip")
-            if (m := re.fullmatch(rf"0c-{re.escape(base)}\.(\d+)-windows-amd64-preview\.zip", p.name))]
-    if m := re.fullmatch(rf"{re.escape(base)}\.(\d+)", installed or ""):
-        used.append(int(m.group(1)))
+    built = [p.name.removeprefix("0c-").removesuffix("-windows-amd64-preview.zip")
+             for p in (OUT / "release").glob(archive_name("*"))]
+    used = [int(m.group(1)) for v in (*built, installed or "") if (m := re.fullmatch(rf"{re.escape(base)}\.(\d+)", v))]
     return f"{base}.{max(used, default=0) + 1}"
 
 
@@ -118,40 +114,22 @@ def shell_changed(receipt, fallback):
         if subprocess.run(["git", "cat-file", "-e", release["revision"] + "^{commit}"], cwd=ROOT,
                           capture_output=True).returncode == 0:
             since = release["revision"]
-    changed = subprocess.check_output(["git", "diff", "--name-only", since, "--", *SHELL_PATHS], cwd=ROOT, text=True)
-    untracked = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "--", *SHELL_PATHS],
-                                        cwd=ROOT, text=True)
-    return bool((changed + untracked).strip())
+    return bool(git(ROOT, "diff", "--name-only", since, "--", *SHELL_PATHS)
+                or git(ROOT, "ls-files", "--others", "--exclude-standard", "--", *SHELL_PATHS))
 
 
 def stage_install(archive, shell):
-    """套件解到 bundle\\（套件目錄不能有多的檔案），安裝腳本放在它旁邊。"""
-    bundle, partial = OUT / "bundle", OUT / "bundle.partial"
-    for directory in (bundle, partial):
-        shutil.rmtree(directory, ignore_errors=True)
-    with zipfile.ZipFile(archive) as z:
-        z.extractall(partial)
-    (partial / archive.stem).rename(bundle)
-    partial.rmdir()
-    template = (Path(__file__).parent / "local_install.ps1").read_bytes()  # 有 BOM：PowerShell 5.1 才讀得懂中文
-    script = template.replace(b"$shellChanged = $null", b"$shellChanged = $" + (b"true" if shell else b"false"), 1)
-    (OUT / "install.ps1").write_bytes(script)
-    return OUT / "install.ps1"
-
-
-def install(script):
-    """以系統管理員執行安裝腳本（跳 UAC），輸出經 cmd 寫到記錄檔再印出來。"""
-    log = OUT / "install.log"
-    log.unlink(missing_ok=True)
-    # 參數經環境變數交給 PowerShell，避開命令列的引號跳脫；UAC 取消時 Start-Process 擲錯，Stop 讓它非零結束。
-    command = f'/c "powershell -NoProfile -ExecutionPolicy Bypass -File "{script}" > "{log}" 2>&1"'
-    elevate = ("$ErrorActionPreference = 'Stop'; $p = Start-Process cmd.exe -ArgumentList $env:ZC_INSTALL"
-               " -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode")
-    run = subprocess.run(["powershell", "-NoProfile", "-Command", elevate], env=dict(os.environ, ZC_INSTALL=command))
-    if log.exists():
-        print(log.read_text(encoding="utf-8", errors="replace"))
-    if run.returncode != 0:
-        raise ValueError("安裝沒有完成" + ("" if log.exists() else "（UAC 取消了？）"))
+    """安裝腳本與它讀的 install.json 放在 build\\local-preview\\；風格要在安裝前用新版的 0c-update 重建，先從套件取出來。"""
+    updater = OUT / "updater/0c-update.exe"
+    updater.parent.mkdir(exist_ok=True)
+    with zipfile.ZipFile(archive) as z, z.open(f"{archive.stem}/0c-update.exe") as source, updater.open("wb") as target:
+        shutil.copyfileobj(source, target)
+    sha256 = archive.with_suffix(".zip.sha256").read_text(encoding="utf-8").split()[0]
+    (OUT / "install.json").write_text(json.dumps({"archive": str(archive), "sha256": sha256, "shell_changed": shell}),
+                                      encoding="utf-8")
+    script = OUT / "install.ps1"
+    shutil.copyfile(Path(__file__).parent / "local_install.ps1", script)
+    return script
 
 
 def main():
@@ -162,10 +140,11 @@ def main():
     os.environ["PYTHONUTF8"] = "1"  # 打包腳本讀寫的中文檔案都是 UTF-8
     state = json.loads((ROOT / ".github/fork-state.json").read_text(encoding="utf-8"))
     tag = state["upstream"]
+    base = f"{tag[1:]}-hoshino.{state['build']}"
     receipt_path = ZUIN / "install-receipt.json"
     receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.exists() else None
     installed = receipt and receipt["version"]
-    version = args.version or next_version(f"{tag[1:]}-hoshino.{state['build']}", installed)
+    version = args.version or next_version(base, installed)
     started = time.monotonic()
     try:
         if installed and semver(version) <= semver(installed):
@@ -173,23 +152,24 @@ def main():
         data = ensure_data(tag)
         neural = ensure_neural(tag, receipt, data)
         settings = OUT / "settings"
-        subprocess.run([sys.executable, "scripts/build_settings_windows.py", "--version", version, "--out", str(settings)],
+        # 設定程式的版本只用在「關於」頁（檔案版本資訊由打包腳本蓋上）：固定成 base，沒改設定程式時 cargo 不必重編。
+        subprocess.run([sys.executable, "scripts/build_settings_windows.py", "--version", base, "--out", str(settings)],
                        cwd=ROOT, check=True)
         subprocess.run([sys.executable, "scripts/package_windows.py", "--preview", "--data", str(data),
                         "--neural", str(neural), "--settings", str(settings / "windows-amd64"),
                         "--release-docs", "platforms/windows/hoshino", "--version", version,
                         "--out", str(OUT / "release"), "--publisher", PUBLISHER], cwd=ROOT, check=True)
-        archive = OUT / "release" / f"0c-{version}-windows-amd64-preview.zip"
+        archive = OUT / "release" / archive_name(version)
         # 一份約 350 MB，只留最新的；序號照樣從它和已安裝的版本往上數。
-        for old in (OUT / "release").glob("0c-*-windows-amd64-preview.zip*"):
+        for old in (OUT / "release").glob(archive_name("*") + "*"):
             if not old.name.startswith(archive.name):
                 old.unlink()
         shell = shell_changed(receipt, state["shell_commit"])
         script = stage_install(archive, shell)
         print(f"已打包 {version}（{time.monotonic() - started:.0f} 秒）：{archive}", flush=True)
-        print("這版改到 TSF DLL 或候選窗，裝完要登出再登入。" if shell else "這版只改引擎，裝完不用登出。")
+        print("這版改到 TSF DLL 或候選窗，裝完要登出再登入。" if shell else "這版只改引擎，裝完不用登出。", flush=True)
         if args.install:
-            install(script)
+            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], check=True)
         else:
             print(f"安裝：powershell -ExecutionPolicy Bypass -File {script}")
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
