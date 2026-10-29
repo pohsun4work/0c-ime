@@ -55,6 +55,9 @@ func (s *Session) mixedText() string {
 	if p.choice == 0 && s.vocabEnglish(p.raw) {
 		return p.raw
 	}
+	if p.choice == 0 && s.keypadWordLetters(p.raw) { // 整合風格（mixed_context）
+		return p.raw
+	}
 	// 沒有字母（只有數字與標點鍵，也是 ㄅㄉㄓㄚㄞㄢ、ㄝㄡㄥㄤㄦ）時照字面顯示與提交：「我.」送出「我.」不是「我ㄡ」，
 	// 「2 」是「2 」不是「ㄉ」，10:30 不變成「ㄅㄢ：3安」。接聲調仍組成中文（.3 → 偶、184 → 爸），↓ 也仍可選注音解釋。
 	if p.choice == 0 && !strings.ContainsFunc(p.raw, unicode.IsLetter) {
@@ -157,6 +160,7 @@ func (s *Session) flushMixed() {
 	previous, at := slices.Clone(s.path), s.cursor
 	before := len(s.syls)
 	assisted, explicit := s.mixed.accepted != "", s.mixed.choice == 1
+	chosen := s.mixed.choice == 2 // 整合風格（mixed_context）
 	assistedPrefix := s.mixed.assistedPrefix
 	s.clearMixed()
 	if phonetic {
@@ -171,6 +175,7 @@ func (s *Session) flushMixed() {
 			s.mixedOrigins[pos] = origin
 		}
 	}
+	s.markChosen(chosen, at)
 	s.refresh() // Enter must include newly materialized literals even with neural display caching.
 	s.keepMixedDisplay(previous, at, len(s.syls)-before)
 }
@@ -458,6 +463,9 @@ func (s *Session) finishMixedTone(key string) bool {
 	// 使用者加的英文詞接空白照字面送出（ls␣ 不是「孬」）；英文詞裡的聲調鍵（ipv6 的 6）打到一半時也不當聲調。
 	// 英文詞以外的聲調鍵（ls3）照舊組成中文，↓ 選了注音解釋後空白也照舊完成一聲。
 	if s.mixed.choice != 2 && (key == " " && s.vocabEnglish(raw) || key != " " && s.vocabEnglishPrefix(raw+key)) {
+		return false
+	}
+	if key == " " && s.mixed.choice == 0 && s.keypadWordLetters(raw) { // 整合風格（mixed_context）
 		return false
 	}
 	// Keep the one-letter English word a. Other collisions, including i
@@ -1043,12 +1051,16 @@ func (s *Session) mixedKey(k string) bool {
 	if s.mixed.choice == 2 && k != " " {
 		if sym, ok := s.layout.Symbol(rs[0]); !ok || zhuyin.ClassOf(sym) != zhuyin.Tone {
 			if _, ok := s.mixedComposer(s.mixed.raw + k); !ok {
+				at := s.cursor
 				s.keepMixedSyllable(zhuyin.Tone1, s.mixed.raw)
+				s.markChosen(true, at) // 整合風格（mixed_context）：↓ 選的注音解釋不被改回英數
 			}
 		}
 	}
 	s.reviseDigitWord(k)
+	chosen, at := s.mixed.choice == 2, s.cursor
 	if s.mixed.raw != "" && s.finishMixedTone(k) {
+		s.markChosen(chosen, at) // 整合風格（mixed_context）
 		return true
 	}
 	if k == " " {

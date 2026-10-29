@@ -43,15 +43,25 @@ func wantItems(t *testing.T, snap proto.Snapshot, want ...string) {
 	}
 }
 
-// 使用者回報：數字鍵盤打斷的 e 留成 ㄍ，第一個 ㄍ 的候選只有 ㄍ。現在 ↓ 有原按鍵 e，Tab 換詞長跨過數字鍵盤的 2，
-// 整段選得回英文 e2e（第二個 e 後面的空白是一聲，選英文時照按鍵留下）。數字鍵盤的 2 在注音裡也是 2。
+// 使用者回報：數字鍵盤打斷的 e 留成 ㄍ，第一個 ㄍ 的候選只有 ㄍ。現在 ↓ 有原按鍵，Tab 換詞長跨過數字鍵盤的 2，
+// 整段換得成英文或注音（第二個 e 後面的空白是一聲，選英文時照按鍵留下）。數字鍵盤的 2 在注音裡也是 2。
+// 整合風格的 mixed_context 把 e KP2 e 直接判成英數詞（mixed_context_test.go），這裡換成注音再選回英文。
 func TestResplitKeypadWordAcrossLengths(t *testing.T) {
 	s := resplitSession()
-	if snap := keys(s, "e", "KP2", "e", " "); snap.Text() != "ㄍ2ㄍ" {
+	if snap := keys(s, "e", "KP2", "e", " "); snap.Text() != "e2e " {
 		t.Fatalf("前提：%q", snap.Text())
 	}
 	key(s, proto.KeyHome)
-	wantItems(t, key(s, proto.KeyDown), "ㄍ", "e")
+	wantItems(t, key(s, proto.KeyDown), "e", "ㄍ")
+	wantItems(t, key(s, proto.KeyTab), "e2", "ㄍ2")
+	wantItems(t, key(s, proto.KeyTab), "e2e", "ㄍ2ㄍ")
+	wantItems(t, key(s, proto.KeyTab), "e2e ", "ㄍ2ㄍ")
+	if snap := pickText(t, s, "ㄍ2ㄍ"); snap.Text() != "ㄍ2ㄍ" {
+		t.Fatalf("選注音：%q", snap.Text())
+	}
+	if items := itemTexts(key(s, proto.KeyDown)); len(items) < 2 || items[0] != "ㄍ" || items[1] != "e" {
+		t.Fatalf("選的注音上按 ↓：%q", items)
+	}
 	wantItems(t, key(s, proto.KeyTab), "ㄍ2", "e2")
 	wantItems(t, key(s, proto.KeyTab), "ㄍ2ㄍ", "e2e ")
 	if snap := pickText(t, s, "e2e "); snap.Text() != "e2e " {
@@ -68,10 +78,10 @@ func TestResplitKeypadWordAcrossLengths(t *testing.T) {
 // 還沒定案的按鍵候選按 Tab：照畫面定案，再從那段的長度換到下一個詞長。
 func TestResplitTabFromPendingKeys(t *testing.T) {
 	s := resplitSession()
-	keys(s, "e", "KP2", "e", proto.KeyDown)
-	wantItems(t, key(s, proto.KeyTab), "2ㄍ", "2e")
-	wantItems(t, key(s, proto.KeyTab), "ㄍ2ㄍ", "e2e")
-	if snap := pickText(t, s, "e2e"); snap.Text() != "e2e" {
+	keys(s, "s", "u", "KP2", "s", "u", proto.KeyDown)
+	wantItems(t, key(s, proto.KeyTab), "2ㄋㄧ", "2su", "2你")
+	wantItems(t, key(s, proto.KeyTab), "ㄋㄧ2ㄋㄧ", "su2su", "你2你")
+	if snap := pickText(t, s, "su2su"); snap.Text() != "su2su" {
 		t.Fatalf("選英文：%q", snap.Text())
 	}
 }
@@ -136,7 +146,7 @@ func TestResplitKeypadDigitIsNotZhuyin(t *testing.T) {
 		t.Fatalf("數字鍵盤的 2：%q", items)
 	}
 	s = resplitSession()
-	keys(s, "j", "i", "3", "2", " ", proto.KeyLeft, proto.KeyLeft)
+	keys(s, "j", "i", "3", "2", proto.KeyLeft)
 	if items := itemTexts(key(s, proto.KeyDown)); !slices.Contains(items, "ㄉ") {
 		t.Fatalf("主鍵盤的 2：%q", items)
 	}
@@ -156,18 +166,19 @@ func TestResplitRestoresPendingKeys(t *testing.T) {
 }
 
 // 使用者回報：神經選字時打 e、數字鍵盤的 2、e 再按三下 ←，ㄍ2ㄍ 變成 ㄍㄍ2ㄍ。方向鍵與 Enter 不收回原樣注音，畫面與送出的字照舊。
+// （整合風格的 mixed_context 把 e KP2 e 判成英數詞，這裡用兩個字母的 su。）
 func TestResplitNavigationKeepsLiteral(t *testing.T) {
 	s := resplitSession()
 	s.Rerank = rerank.Options{Weight: .1, Scorer: rankFunc(func(r rerank.Request) ([]float64, error) {
 		return make([]float64, len(r.Candidates)), nil
 	})}
-	keys(s, "e", "KP2", "e")
+	keys(s, "s", "u", "KP2", "s", "u")
 	for _, k := range []string{proto.KeyLeft, proto.KeyLeft, proto.KeyLeft, proto.KeyRight, proto.KeyLeft, proto.KeyEnd, proto.KeyHome, proto.KeyRight} {
-		if snap := key(s, k); snap.Text() != "ㄍ2ㄍ" {
+		if snap := key(s, k); snap.Text() != "ㄋㄧ2ㄋㄧ" {
 			t.Fatalf("按 %s：%q", k, snap.Text())
 		}
 	}
-	if snap := key(s, proto.KeyEnter); snap.Commit != "ㄍ2ㄍ" {
+	if snap := key(s, proto.KeyEnter); snap.Commit != "ㄋㄧ2ㄋㄧ" {
 		t.Fatalf("送出：%q", snap.Commit)
 	}
 }
@@ -175,13 +186,13 @@ func TestResplitNavigationKeepsLiteral(t *testing.T) {
 // 游標緊接在原樣注音後面按 ↓ 照舊收回成待定按鍵，候選有原按鍵；Esc 照舊先清掉它。
 func TestResplitDownAndEscapeRestoreLiteral(t *testing.T) {
 	s := resplitSession()
-	keys(s, "e", "KP2", "e", proto.KeyLeft, proto.KeyLeft)
-	if items := itemTexts(key(s, proto.KeyDown)); !slices.Contains(items, "e") {
+	keys(s, "s", "u", "KP2", proto.KeyLeft)
+	if items := itemTexts(key(s, proto.KeyDown)); !slices.Contains(items, "su") {
 		t.Fatalf("↓ 的候選：%q", items)
 	}
 	s = resplitSession()
-	keys(s, "e", "KP2", "e", proto.KeyLeft, proto.KeyLeft)
-	if snap := key(s, proto.KeyEscape); snap.Text() != "2ㄍ" {
+	keys(s, "s", "u", "KP2", proto.KeyLeft)
+	if snap := key(s, proto.KeyEscape); snap.Text() != "2" {
 		t.Fatalf("Esc：%q", snap.Text())
 	}
 }
