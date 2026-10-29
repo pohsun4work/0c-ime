@@ -78,6 +78,7 @@ struct State {
     composing: bool,
     attr_atoms: [u32; KINDS.len()],
     eaten: HashSet<u32>, // 吃掉了 key-down 的虛擬鍵，key-up 也要吃掉
+    board_preserved: bool, // 符號表的熱鍵已註冊成保留鍵（sync_board_hotkey）
     ui: UiClient,
     right_shift: keys::ShiftTap,
     left_shift: keys::ShiftTap,
@@ -228,11 +229,7 @@ impl State {
     /// TestKeyDown 與 OnKeyDown 用同一個答案；是的話不先送出組字。
     /// 整合風格（引擎回報 ctrl_punctuation_symbols）另外收 Ctrl＋[ ]，英文模式也收；先看有快取的這一項，
     /// 其他風格按 Ctrl＋[ 不必往返。
-    /// 整合風格開關符號表的 Ctrl＋Alt＋,（引擎回報 symbol_board）也走這裡，中文模式才送。
     fn ctrl_punct_key(&mut self, vk: u32, lparam: isize) -> Option<&'static str> {
-        if crate::board::symbol_board_hotkey(vk, lparam) {
-            return (!self.session.english() && self.session.available() && self.session.symbol_board()).then_some(crate::board::KEY_SYMBOL_BOARD);
-        }
         let key = keys::ctrl_punct(vk, lparam).or_else(|| {
             let c = keys::ctrl_char(vk, lparam)?;
             keys::ctrl_punct_symbols_name(&c).filter(|_| self.session.ctrl_punctuation_symbols())
@@ -299,6 +296,7 @@ impl TextService {
                 composing: false,
                 attr_atoms: [0; KINDS.len()],
                 eaten: HashSet::new(),
+                board_preserved: false,
                 ui: UiClient::new(),
                 right_shift: keys::ShiftTap::default(),
                 left_shift: keys::ShiftTap::default(),
@@ -347,7 +345,31 @@ impl TextService_Impl {
     fn present(&self, ctx: Option<&ITfContext>, snapshot: &Snapshot) -> bool {
         let eaten = self.present_in_edit(ctx, snapshot, None);
         self.sync_langbar();
+        self.sync_board_hotkey();
         eaten
+    }
+
+    /// 整合風格符號表的熱鍵只在用得到時註冊成保留鍵：中文模式、引擎回報 symbol_board（看快取，不往返）、這個排列的
+    /// AltGr＋, 不是字元。保留鍵在 TSF 判斷時就算處理了，註冊著卻不處理的話，其他風格、英文模式與 AltGr 排列的
+    /// Ctrl＋Alt＋, 就到不了程式。每次套用快照與啟用時同步。
+    fn sync_board_hotkey(&self) {
+        let (want, keystrokes, tid) = {
+            let Ok(st) = self.state.try_borrow() else { return };
+            let want = !st.session.english() && st.session.symbol_board_cached() && !crate::board::altgr_types_comma();
+            if want == st.board_preserved {
+                return;
+            }
+            let Some(keystrokes) = st.thread_mgr.as_ref().and_then(|tm| tm.cast::<ITfKeystrokeMgr>().ok()) else { return };
+            (want, keystrokes, st.client_id)
+        };
+        // TSF 的呼叫不拿著狀態的借用，免得它回呼時重複借用。
+        let preserved = if want {
+            crate::board::preserve(&keystrokes, tid)
+        } else {
+            crate::board::unpreserve(&keystrokes);
+            false
+        };
+        self.state.borrow_mut().board_preserved = preserved;
     }
 
     /// 輸入指示器按鈕的左鍵：切換中英（同右 Shift 單按）。
@@ -848,6 +870,21 @@ impl TextService_Impl {
             .confirm_context(id, confirmed);
     }
 
+    /// 整合風格開關符號表的 Ctrl＋Alt＋,（保留鍵，只在用得到時註冊，見 sync_board_hotkey）：交給引擎。
+    fn symbol_board_key(&self, ctx: Option<&ITfContext>) -> bool {
+        self.learn_mode(crate::board::VK_HOTKEY); // 程式剛啟動、第一個鍵就是熱鍵時先確定中英模式（同 OnKeyDown）
+        let wants = {
+            let mut st = self.state.borrow_mut();
+            !st.session.english() && st.session.available() && st.session.symbol_board()
+        };
+        zdebug!("OnPreservedKey symbol board wants={}", wants);
+        if !wants || crate::board::extra_modifiers() || !self.allowed(ctx) {
+            return false;
+        }
+        self.confirm_document_context(ctx);
+        self.handle_key(ctx, crate::board::KEY_SYMBOL_BOARD)
+    }
+
     fn handle_key(&self, ctx: Option<&ITfContext>, key: &str) -> bool {
         let snapshot = self.state.borrow_mut().session.key(key);
         zdebug!(
@@ -1271,6 +1308,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                     }
                 }
             }
+            self.sync_board_hotkey();
             zlog!(
                 "activate 完成 exe={} tid={} ui_less={}",
                 crate::log::exe_name(),
@@ -1286,7 +1324,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             let ctx = self.focused_context();
             self.finish(ctx.as_ref(), "commit");
             self.forget_candidates();
-            let (tm, tid, cookie) = {
+            let (tm, tid, cookie, preserved) = {
                 let mut st = self.state.borrow_mut();
                 st.callback = None;
                 st.composition = None;
@@ -1297,7 +1335,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                 st.selection = None;
                 st.ui.hide();
                 st.ui.set_elements(None);
-                (st.thread_mgr.take(), st.client_id, st.thread_mgr_cookie)
+                (st.thread_mgr.take(), st.client_id, st.thread_mgr_cookie, std::mem::take(&mut st.board_preserved))
             };
             let openclose = self.state.borrow_mut().openclose.take();
             if let Some((compartment, cookie)) = openclose {
@@ -1318,6 +1356,9 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             if let Some(tm) = tm {
                 unsafe {
                     if let Ok(keystrokes) = tm.cast::<ITfKeystrokeMgr>() {
+                        if preserved {
+                            crate::board::unpreserve(&keystrokes);
+                        }
                         let _ = keystrokes.UnadviseKeyEventSink(tid);
                     }
                     if cookie != TF_INVALID_COOKIE {
@@ -1537,10 +1578,13 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnPreservedKey(
         &self,
-        _pic: Ref<'_, ITfContext>,
-        _guid: *const GUID,
+        pic: Ref<'_, ITfContext>,
+        guid: *const GUID,
     ) -> windows_core::Result<BOOL> {
-        crate::guarded("OnPreservedKey", || Ok(false.into()))
+        crate::guarded("OnPreservedKey", || {
+            let board = !guid.is_null() && unsafe { *guid } == crate::board::GUID_SYMBOL_BOARD;
+            Ok((board && self.symbol_board_key(pic.as_ref())).into())
+        })
     }
 }
 
