@@ -7,7 +7,7 @@
 - **更新來源**：更新器信任的是 fork 自己的發行金鑰（`internal/update/trust_keys.go`），索引改從 fork 的 GitHub Releases 下載（`cmd/0c-update/auto.go` 的 `DefaultFeed`）。
 - **程式碼簽章**：Windows 套件用 fork 的自簽憑證簽章（`platforms/windows/hoshino/codesign.cer`），發行者是「Hoshino 0c-ime fork」。打包腳本加了 `--sign-pfx` 和 `--publisher` 兩個選項。
 - **版本號**：官方版號加上 `-hoshino.N`。
-- **發布流程**：`.github/workflows/fork-release.yml` 自動合併官方新版、測試、打包、發布。
+- **發布流程**：`.github/workflows/fork-release.yml` 自動合併官方新版、測試、打包、發布。開 PR 前先用 `platforms/windows/hoshino/local_preview.py` 在本機打未簽章的包，再用它產生的 `build/local-preview/install.ps1` 安裝實測（配方有新規則時會重建整合風格）。
 - **輸入行為**：新增「整合風格」的配方（`blend`，`core/inputstyle`），以靈犀注音為底，補上華碩注音與微軟新注音的長處。它不是內建風格，用 `0c-update profile copy blend --name 整合風格` 複製成自訂風格，設定畫面上的設定都能調，整合風格加的英文排序與學習規則不在設定畫面。原本的各個模式行為不變。
   - 已完成：
     - 英文補全與拼字修正依 wordfreq 語料詞頻排序（`internal/englishpack/wordfreq`）
