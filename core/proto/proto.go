@@ -193,6 +193,8 @@ type CandidateList struct {
 	// StepKeys：這是改字的候選，小寫 j／k 把要修改的字換到前一個／後一個字（#193）。外殼據此顯示「J K 換字」；
 	// 舊核心沒有這個欄位，也沒有 j／k 換字。
 	StepKeys bool `json:"step_keys,omitempty"`
+	// Rows：鍵盤形狀的候選（Kind "keyboard"，整合風格的符號表）的每一列，Items 照列由左而右排。其他候選省略。
+	Rows []KeyRow `json:"rows,omitempty"`
 }
 
 // SuggestionEdit 描述按 Tab 後替換的組字範圍，位置單位是顯示字元（rune）。

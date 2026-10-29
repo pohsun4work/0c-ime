@@ -459,6 +459,8 @@ func serve() string {
 		"ctrl_punctuation_symbols": fmt.Sprint(eng.CtrlPunct && eng.InputStyle.Symbols != ""),
 		// 整合風格（操作規則 width）：Shift＋空白切換全半形；全形時外殼把可見字元、空白與數字鍵盤都交給引擎。
 		"input_style_width": eng.InputStyle.Width,
+		// 整合風格（操作規則 symbol_board）：外殼只在這一項是 true、中文模式時攔 Ctrl＋Alt＋, 開符號表。
+		"symbol_board": fmt.Sprint(eng.InputStyle.SymbolBoard != ""),
 		// #173：引擎認得 caps_lock 請求而且設定「Caps Lock 開著時直接打英文」開著；外殼只在這一項是 true 時回報
 		// Caps Lock 狀態，舊引擎沒有這一項、或設定關閉時，注音模式照舊不理 Caps Lock（#168）。
 		"caps_lock_english": fmt.Sprint(capsSetting),

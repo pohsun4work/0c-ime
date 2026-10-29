@@ -24,7 +24,7 @@ func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
 	}
 	if !s.MixedInput || !s.EnglishAutocomplete || s.Toneless || s.EmojiShortcut != "off" || !s.CtrlPunctuation ||
 		r.ShiftSpace != "disabled" || r.EnglishRanking != "frequency" || r.EnglishLearning != "dictionary" ||
-		r.Symbols != "microsoft" || r.Width != "shift_space" {
+		r.Symbols != "microsoft" || r.Width != "shift_space" || r.SymbolBoard != "asus" {
 		t.Fatalf("blend recipe not applied: %+v %+v", s, r)
 	}
 	for _, item := range s.Profiles().Items {

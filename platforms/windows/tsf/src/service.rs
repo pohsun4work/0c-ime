@@ -228,7 +228,11 @@ impl State {
     /// TestKeyDown 與 OnKeyDown 用同一個答案；是的話不先送出組字。
     /// 整合風格（引擎回報 ctrl_punctuation_symbols）另外收 Ctrl＋[ ]，英文模式也收；先看有快取的這一項，
     /// 其他風格按 Ctrl＋[ 不必往返。
+    /// 整合風格開關符號表的 Ctrl＋Alt＋,（引擎回報 symbol_board）也走這裡，中文模式才送。
     fn ctrl_punct_key(&mut self, vk: u32, lparam: isize) -> Option<&'static str> {
+        if crate::board::symbol_board_hotkey(vk, lparam) {
+            return (!self.session.english() && self.session.available() && self.session.symbol_board()).then_some(crate::board::KEY_SYMBOL_BOARD);
+        }
         let key = keys::ctrl_punct(vk, lparam).or_else(|| {
             let c = keys::ctrl_char(vk, lparam)?;
             keys::ctrl_punct_symbols_name(&c).filter(|_| self.session.ctrl_punctuation_symbols())
@@ -568,6 +572,7 @@ impl TextService_Impl {
             page: snapshot.page + 1,
             pages: snapshot.pages,
             columns: snapshot.columns,
+            rows: snapshot.rows.clone(),
             kind: snapshot.candidate_kind.clone(),
             title: snapshot.candidate_title.clone(),
             suggestion: snapshot.suggestion.clone(),

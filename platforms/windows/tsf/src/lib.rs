@@ -15,6 +15,7 @@ use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows_core::{ComObject, Interface, BOOL, GUID, HRESULT};
 
 mod candidate;
+mod board; // 整合風格的符號表
 mod caret;
 mod context;
 mod displayattr;

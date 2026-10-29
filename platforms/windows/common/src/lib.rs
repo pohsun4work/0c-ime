@@ -162,6 +162,9 @@ pub struct UiMessage {
     pub target: u64,
     #[serde(default)]
     pub revision: u32,
+    /// 鍵盤形狀的候選（kind "keyboard"，整合風格的符號表）的每一列，0c-ui 照著排格子。舊 DLL 沒送時為空。
+    #[serde(default)]
+    pub rows: Vec<KeyRow>,
 }
 
 /// UI → TSF：wParam 是畫面版本，lParam 是候選 ID；不傳文字或指標。
@@ -246,6 +249,13 @@ pub fn candidate_cells(
             height: row,
         })
         .collect()
+}
+
+/// 鍵盤形狀候選的一列（核心的 KeyRow）：幾個鍵、這一列的起點（以鍵寬計，照實體鍵盤錯開）。
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct KeyRow {
+    pub keys: usize,
+    pub offset: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]

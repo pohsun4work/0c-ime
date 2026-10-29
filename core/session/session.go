@@ -491,6 +491,9 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	s.retypeLiteral = false
 	run := s.untonedRun // 聲調選填時連續打的注音鍵（#150）：只有緊接著的這一鍵能接續
 	s.untonedRun = nil
+	if handled, ok := s.symbolBoardKey(k); ok {
+		return handled, ""
+	}
 	if handled, commit, done := s.styleKey(k); done {
 		return handled, commit
 	}
@@ -1760,6 +1763,7 @@ func (s *Session) snapshot() proto.Snapshot {
 		if !s.cand.literal && !s.cand.mixed && cl.Length > 0 {
 			cl.Title = "修改「" + s.candidateText() + "」 · Tab 切換詞長"
 		}
+		s.boardSnapshot(cl)
 		// 選字鍵含 j、k（asdfghjkl;）時它們是選字，不是換字。
 		cl.StepKeys = s.canStepCandidate() && s.selectionIndex("j") < 0 && s.selectionIndex("k") < 0
 		lo := s.candidatePage() * s.pageSize()

@@ -244,6 +244,9 @@ func (s *Session) shiftLiterals(at, delta int) {
 }
 
 func (s *Session) selectLiteral(id int) bool {
+	if s.cand.kind == boardKind {
+		return s.selectBoard(id)
+	}
 	if s.cand.kind != "" {
 		return s.selectEmoji(id)
 	}

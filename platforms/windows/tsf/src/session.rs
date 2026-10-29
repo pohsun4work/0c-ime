@@ -30,6 +30,8 @@ pub struct Snapshot {
     /// 英文模式（只有自動補字候選，數字是文字）為空字串、不畫。
     pub candidate_keys: Vec<String>,
     pub columns: usize,
+    /// 鍵盤形狀的候選（整合風格的符號表）的每一列；其他候選為空。
+    pub rows: Vec<zuin_win_common::KeyRow>,
     pub candidate_kind: String,
     pub candidate_title: String,
     pub page: i64,
@@ -387,8 +389,13 @@ impl Session {
     /// 整合風格的全形（health 的 input_style_width，操作規則 width）：Shift＋空白切換；全形時可見字元、空白與數字鍵盤
     /// 都交給引擎（Snapshot::wide_wants_key），混打照常判斷，判成英數的段落再轉全形。
     pub fn style_wide(&mut self) -> bool {
+        self.idle_info_is("input_style_width", "shift_space")
+    }
+
+    /// 引擎的 health 裡 name 這一項是不是 value；答案跟著連線快取（同 idle_key）。
+    fn idle_info_is(&mut self, name: &str, value: &str) -> bool {
         let _ = self.idle_key("");
-        self.idle_info.as_ref().is_some_and(|v| v["input_style_width"] == "shift_space")
+        self.idle_info.as_ref().is_some_and(|v| v[name] == value)
     }
 
     pub fn style_caps_lower(&mut self) -> bool {
@@ -434,12 +441,16 @@ impl Session {
         })
     }
 
+    /// 整合風格的符號表（health 的 symbol_board，操作規則 symbol_board）：中文模式按 Ctrl＋Alt＋, 開關。答案跟著連線快取。
+    pub fn symbol_board(&mut self) -> bool {
+        self.idle_info_is("symbol_board", "true")
+    }
+
     /// 引擎收整合風格的 Ctrl＋標點（health 的 ctrl_punctuation_symbols，操作規則 symbols）：多 Ctrl＋[ ]，英文模式也收。
     /// 答案跟著連線快取（同 idle_key）：英文模式的 Ctrl 快捷鍵、VS Code 與終端機的 Ctrl＋[ 很常按，不能每按一次就往返；
     /// 舊引擎或其他風格沒有這一項時為 false。
     pub fn ctrl_punctuation_symbols(&mut self) -> bool {
-        let _ = self.idle_key("");
-        self.idle_info.as_ref().is_some_and(|v| v["ctrl_punctuation_symbols"] == "true")
+        self.idle_info_is("ctrl_punctuation_symbols", "true")
     }
 
     /// 引擎目前載入的中英切換鍵設定（左右 Shift 與單按時限，#117）。在 Shift 單按放開時查詢，
@@ -737,6 +748,9 @@ fn parse(reply: &Value) -> Snapshot {
     if let Some(c) = j.get("candidates") {
         s.columns = c["columns"].as_u64().unwrap_or(0).min(10) as usize;
         s.candidate_kind = c["kind"].as_str().unwrap_or("").to_string();
+        if c["rows"].is_array() {
+            s.rows = serde_json::from_value(c["rows"].clone()).unwrap_or_default();
+        }
         s.candidate_title = c["title"].as_str().unwrap_or("").to_string();
         s.page = c["page"].as_i64().unwrap_or(0);
         s.pages = c["pages"].as_i64().unwrap_or(0);
@@ -764,6 +778,17 @@ fn parse(reply: &Value) -> Snapshot {
 #[cfg(test)]
 mod parse_tests {
     use super::*;
+
+    #[test]
+    fn keyboard_candidates_carry_their_rows() {
+        let snap = parse(&json!({"snapshot":{"mode":"zhuyin","candidates":{"kind":"keyboard",
+            "rows":[{"keys":13,"offset":0},{"keys":10,"offset":2.25}],
+            "items":[{"id":0,"text":"‵","key":"`"},{"id":1,"text":"１","key":"1"}]}}}));
+        let rows: Vec<_> = snap.rows.iter().map(|r| (r.keys, r.offset)).collect();
+        assert_eq!((snap.candidate_kind.as_str(), rows), ("keyboard", vec![(13, 0.0), (10, 2.25)]));
+        assert_eq!(snap.candidate_keys, vec!["`", "1"]);
+        assert!(parse(&json!({"snapshot":{"mode":"zhuyin","candidates":{"items":[]}}})).rows.is_empty());
+    }
 
     #[test]
     fn chinese_full_width_preflight_covers_literal_keys_without_claiming_tones() {
