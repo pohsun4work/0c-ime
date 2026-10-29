@@ -24,6 +24,7 @@ func resplitSession() *Session {
 		{"我", "ㄨㄛˇ", 1e-2}, {"單", "ㄉㄢ", 1e-3}, {"但", "ㄉㄢˋ", 2e-3},
 		{"你", "ㄋㄧˇ", 5e-3}, {"好", "ㄏㄠˇ", 4e-3}, {"你好", "ㄋㄧˇ ㄏㄠˇ", 1e-3}, {"黑", "ㄏㄟ", 1e-3},
 		{"欸乃", "ㄟˇ ㄋㄞˇ", 1e-4}, // ㄟˇ 沒有單字，只能當詞頭（#107）
+		{"打", "ㄉㄚˇ", 1e-3}, {"幾", "ㄐㄧˇ", 1e-3}, {"幾句", "ㄐㄧˇ ㄐㄩˋ", 1e-3}, {"句", "ㄐㄩˋ", 1e-5}, {"據", "ㄐㄩˋ", 1e-3},
 	} {
 		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
 		sys.SetUni(e.w, e.p)
@@ -79,8 +80,8 @@ func TestResplitKeypadWordAcrossLengths(t *testing.T) {
 func TestResplitTabFromPendingKeys(t *testing.T) {
 	s := resplitSession()
 	keys(s, "s", "u", "KP2", "s", "u", proto.KeyDown)
-	wantItems(t, key(s, proto.KeyTab), "2ㄋㄧ", "2su", "2你")
-	wantItems(t, key(s, proto.KeyTab), "ㄋㄧ2ㄋㄧ", "su2su", "你2你")
+	wantItems(t, key(s, proto.KeyTab), "2ㄋㄧ", "2你", "2su")
+	wantItems(t, key(s, proto.KeyTab), "ㄋㄧ2ㄋㄧ", "你2你", "su2su")
 	if snap := pickText(t, s, "su2su"); snap.Text() != "su2su" {
 		t.Fatalf("選英文：%q", snap.Text())
 	}
@@ -122,14 +123,14 @@ func TestResplitChineseChoiceStaysLocked(t *testing.T) {
 	}
 }
 
-// 多個音節列讀音相符、蓋滿整段的詞（同中文的 ↓）；組不成音節的按鍵（cons 的 ㄋ）沒有中文，只有英文與注音。
+// 多個音節列讀音相符、蓋滿整段的詞（同中文的 ↓），排在原按鍵與注音前面；組不成音節的按鍵（cons 的 ㄋ）沒有中文，只有英文與注音。
 func TestResplitSyllablesAndLeftoverKeys(t *testing.T) {
 	s := resplitSession()
 	keys(s, "s", "u", "c", "l", proto.KeyHome, proto.KeyDown)
 	for range 3 {
 		key(s, proto.KeyTab)
 	}
-	wantItems(t, s.snapshot(), "sucl", "ㄋㄧㄏㄠ", "你好")
+	wantItems(t, s.snapshot(), "sucl", "你好", "ㄋㄧㄏㄠ")
 	s = resplitSession()
 	keys(s, "c", "o", "n", "s", proto.KeyHome, proto.KeyDown)
 	for range 3 {
@@ -214,7 +215,7 @@ func TestResplitSkipsAcceptedCompletion(t *testing.T) {
 	s := resplitSession()
 	s.EnglishAutocomplete = true
 	keys(s, "e", "v", proto.KeyTab, " ", proto.KeyHome, proto.KeyDown)
-	if s.snapshot().Text() != "even " || s.cand == nil || s.cand.keySpan != nil {
+	if s.snapshot().Text() != "even " || s.cand == nil || s.cand.across {
 		t.Fatalf("補字接受的段落：%q %+v", s.snapshot().Text(), s.cand)
 	}
 }
@@ -310,5 +311,46 @@ func TestResplitChineseTabStaysWithinWordLength(t *testing.T) {
 		if key(s, proto.KeyTab); s.cand == nil || s.cand.length > limit {
 			t.Fatalf("詞長上限 %d：%+v", limit, s.cand)
 		}
+	}
+}
+
+// 多字的中文候選同跨英數候選的順序：畫面上的字不是詞時排第一個（選了不換），原始按鍵後面接整段注音，再接單字（#161）。
+// 標示整段按 ↓ 也是這份清單。沒有 mixed_resplit 照官方。
+func TestResplitChineseSpanChoices(t *testing.T) {
+	s := resplitSession()
+	keys(s, "s", "u", "3", "c", "l", "3", proto.KeyHome)
+	wantItems(t, key(s, proto.KeyDown), "你好", "su3cl3", "ㄋㄧˇㄏㄠˇ", "你", "su3", "ㄋㄧˇ")
+	if snap := pickText(t, s, "ㄋㄧˇㄏㄠˇ"); snap.Text() != "ㄋㄧˇㄏㄠˇ" {
+		t.Fatalf("選整段注音：%q", snap.Text())
+	}
+	if snap := key(s, proto.KeyEnter); snap.Commit != "ㄋㄧˇㄏㄠˇ" {
+		t.Fatalf("送出：%q", snap.Commit)
+	}
+
+	s = resplitSession()
+	s.Preview02 = true
+	keys(s, "j", "i", "3", "s", "u", "3", "c", "l", "3", proto.KeyShiftHome)
+	wantItems(t, key(s, proto.KeyDown), "我你好", "ji3su3cl3", "ㄨㄛˇㄋㄧˇㄏㄠˇ", "我", "ji3", "ㄨㄛˇ")
+	if snap := pickText(t, s, "我你好"); snap.Text() != "我你好" || s.cand != nil {
+		t.Fatalf("畫面原樣：%q %+v", snap.Text(), s.cand)
+	}
+
+	s = resplitSession()
+	s.InputStyle.MixedResplit = ""
+	keys(s, "s", "u", "3", "c", "l", "3", proto.KeyHome)
+	wantItems(t, key(s, proto.KeyDown), "你好", "su3cl3", "你", "su3", "ㄋㄧˇ")
+}
+
+// 換掉的範圍切開了詞（「打幾」切開「幾句」）：換成注音時外面那一半照畫面留著，「句」不會重新解成「據」。
+func TestResplitReplaceKeepsCutWord(t *testing.T) {
+	s := resplitSession()
+	if snap := keys(s, "2", "8", "3", "r", "u", "3", "r", "m", "4", proto.KeyHome, proto.KeyDown, proto.KeyTab); snap.Text() != "打幾句" {
+		t.Fatalf("前提：%q", snap.Text())
+	}
+	if snap := pickText(t, s, "ㄉㄚˇㄐㄧˇ"); snap.Text() != "ㄉㄚˇㄐㄧˇ句" {
+		t.Fatalf("選整段注音：%q", snap.Text())
+	}
+	if snap := key(s, proto.KeyEnter); snap.Commit != "ㄉㄚˇㄐㄧˇ句" {
+		t.Fatalf("送出：%q", snap.Commit)
 	}
 }

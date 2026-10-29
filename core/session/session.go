@@ -51,8 +51,10 @@ type candState struct {
 	// 游標那個字（位置 single）的單字候選，翻頁就看得到，不必先按 Tab 換到單字。
 	split  int
 	single int
-	// keySpan 非 nil 時是整合風格跨英數的候選（mixed_span.go）：每一項怎麼替換 start/length，nil 是保持原樣。
-	keySpan []func()
+	// replace 是整合風格自己決定怎麼替換 start/length 的項目（mixed_span.go）：candidate index → 換法，nil 是保持原樣。
+	// across 時是跨英數的候選，每一項都在 replace 裡。
+	replace map[int]func()
+	across  bool
 }
 
 func (s *Session) candidatePage() int { return s.cand.cursor / s.pageSize() }
@@ -1255,7 +1257,7 @@ func (s *Session) openAnchored(anchor, length int, before bool) bool {
 	if !s.openAt(pos, length) {
 		return false
 	}
-	if length > 1 && s.cand.keySpan == nil {
+	if length > 1 && !s.cand.across {
 		s.appendSingles(single)
 	}
 	s.cand.before = before
@@ -1370,6 +1372,7 @@ func (s *Session) openAt(pos, length int) bool {
 		return false
 	}
 	s.cand = &candState{start: pos, length: length, items: items, raw: length == 1, matched: matched, keyLiterals: keyLiterals}
+	s.addSpanChoices(s.cand) // 整合風格（mixed_resplit）
 	s.cand.labels = s.candidateLabels(s.cand)
 	return true
 }
@@ -1450,8 +1453,8 @@ func (s *Session) selectCandidate(id int) bool {
 		s.cand = nil
 		return true
 	}
-	if s.cand.keySpan != nil {
-		return s.selectKeySpan(id)
+	if _, ok := s.cand.replace[id]; ok {
+		return s.selectReplace(id)
 	}
 	if s.cand.mixed {
 		return s.selectMixed(id)
