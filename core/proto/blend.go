@@ -8,6 +8,13 @@ const (
 	CtrlPunctExtraKeys  = "[]"
 )
 
+// 整合風格（操作規則 vocab_mark）：組字中 Shift＋Home／End 標示到組字區的頭尾（同 #123 的 Shift＋←／→）。
+// 外殼只在引擎回報 mark_ends 時送；引擎在沒有這個規則時當成 Home／End。
+const (
+	KeyShiftHome = "ShiftHome"
+	KeyShiftEnd  = "ShiftEnd"
+)
+
 // KeyRow 是鍵盤形狀候選的一列：幾個鍵、這一列的起點（以鍵寬計，照實體鍵盤錯開）。
 type KeyRow struct {
 	Keys   int     `json:"keys"`

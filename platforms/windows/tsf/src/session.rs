@@ -126,6 +126,8 @@ pub struct Session {
     // 引擎是否認得 #123 的新鍵名（open 回覆 info 的 vocab_keys，0.2.0 起的引擎回報 true）。
     // 跟著 session 快取，不每鍵查 health；設定套用時引擎重啟，重開 session 就會更新。
     vocab_keys: bool,
+    // 整合風格（操作規則 vocab_mark）：open 回覆 info 的 mark_ends，同 vocab_keys。
+    mark_ends: bool,
     // english 是否已是引擎那邊的模式（#160）：拿到過快照，或向引擎查過新 session 開始時的模式。新開的程式在這之前
     // 不知道開始時是不是英文，第一個按鍵前先查（learn_mode），攔不攔按鍵與中／英指示才會對。
     mode_known: bool,
@@ -207,6 +209,7 @@ impl Session {
             pending_context: None,
             private: false,
             vocab_keys: false,
+            mark_ends: false,
             mode_known: false,
             shared: false,
             caps_lock_english: false,
@@ -309,6 +312,11 @@ impl Session {
     /// 還沒開 session 或引擎不支援時為 false；沒在組字時這些鍵本來就交還應用程式，不需要查。
     pub fn vocab_keys(&self) -> bool {
         self.vocab_keys && self.id != 0 && self.generation == self.client.generation()
+    }
+
+    /// 目前的 session 是否可以送整合風格的 Shift＋Home／End 新鍵名。
+    pub fn mark_ends(&self) -> bool {
+        self.mark_ends && self.vocab_keys()
     }
 
     /// 每次按鍵前由外殼依欄位政策設定；組字中途變成私人時，引擎讓整段組字保持私人。
@@ -503,6 +511,7 @@ impl Session {
         self.id = reply["session"].as_u64().unwrap_or(0);
         self.generation = self.client.generation();
         self.vocab_keys = reply["info"]["vocab_keys"] == "true";
+        self.mark_ends = reply["info"]["mark_ends"] == "true";
         self.shared = reply["info"]["mode_memory"] == "shared";
         self.caps_lock_english = reply["info"]["caps_lock_english"] == "true";
         self.caps_generation = self.generation;
@@ -600,6 +609,9 @@ impl Session {
             if !self.vocab_keys {
                 // 按鍵當下的判斷用的是舊 session；重連到不支援新鍵名的引擎時換回原本的鍵。
                 downgrade_vocab_key(&mut request);
+            }
+            if !self.mark_ends {
+                downgrade_mark_key(&mut request); // 整合風格的 Shift＋Home／End，同上
             }
             let reply = self
                 .client
@@ -712,6 +724,16 @@ fn downgrade_vocab_key(request: &mut Value) {
         return;
     }
     if let Some(base) = request["key"].as_str().and_then(crate::keys::vocab_base) {
+        request["key"] = Value::from(base);
+    }
+}
+
+/// 把整合風格的 Shift＋Home／End 新鍵名換回原本的鍵（引擎不支援時），同 downgrade_vocab_key。
+fn downgrade_mark_key(request: &mut Value) {
+    if request["type"] != "key" {
+        return;
+    }
+    if let Some(base) = request["key"].as_str().and_then(crate::keys::mark_base) {
         request["key"] = Value::from(base);
     }
 }
@@ -938,6 +960,20 @@ mod parse_tests {
         assert_eq!(s.preedit[0].style, "reading");
         let old = parse(&json!({"snapshot": {"handled": true}}));
         assert!(old.reading_hint.is_empty());
+    }
+
+    #[test]
+    fn mark_key_names_fall_back_for_unsupported_engines() {
+        for (name, base) in [("ShiftHome", "Home"), ("ShiftEnd", "End")] {
+            let mut r = json!({"type": "key", "key": name, "private": true});
+            downgrade_mark_key(&mut r);
+            assert_eq!(r, json!({"type": "key", "key": base, "private": true}));
+        }
+        for mut r in [json!({"type": "key", "key": "ShiftLeft"}), json!({"type": "select", "key": "ShiftHome"})] {
+            let before = r.clone();
+            downgrade_mark_key(&mut r);
+            assert_eq!(r, before);
+        }
     }
 
     #[test]

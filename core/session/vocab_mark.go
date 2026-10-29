@@ -55,6 +55,9 @@ func (s *Session) markRange() (start, end int) {
 
 // vocabKey 處理組字中加詞的按鍵；consumed 為 false 時呼叫端照一般規則處理這個鍵。
 func (s *Session) vocabKey(k string) (handled, consumed bool) {
+	if handled, consumed := s.markKey(k); consumed { // 整合風格（vocab_mark）
+		return handled, true
+	}
 	switch k {
 	case proto.KeyShiftLeft, proto.KeyShiftRight:
 		if !s.composing() {
@@ -118,6 +121,9 @@ func (s *Session) markHint() string {
 	if end-start < minComposeWord {
 		return "再多選一個字（單字的讀音請到設定程式「我的詞彙」加入）"
 	}
+	if word, ok := s.markedEnglish(start, end); ok { // 整合風格（vocab_mark）
+		return s.markEnglishHint(word)
+	}
 	for i := start; i < end; i++ {
 		if s.literals[i] {
 			return "範圍裡有英文或符號，不能加入詞庫；這類文字可以放「我的片語」"
@@ -163,6 +169,10 @@ func (s *Session) addMarked() {
 	}
 	if s.private || s.paused || s.localBlocked {
 		s.notices = append(s.notices, "這裡不加入詞庫")
+		return
+	}
+	if word, ok := s.markedEnglish(start, end); ok { // 整合風格（vocab_mark）
+		s.addMarkedEnglish(word)
 		return
 	}
 	for i := start; i < end; i++ {

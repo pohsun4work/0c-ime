@@ -214,6 +214,11 @@ impl State {
     fn styled_key(&mut self, vk: u32, lparam: isize, vocab: bool, english: bool) -> Option<String> {
         let key = keys::to_key(vk, lparam, vocab, english)?;
         let shift = keys::shift_down();
+        // 整合風格（引擎回報 mark_ends）：組字中 Shift＋Home／End 標示到組字區頭尾。
+        let key = match keys::mark_key(&key) {
+            Some(mark) if shift && vocab && self.session.mark_ends() => mark.to_string(),
+            _ => key,
+        };
         let caps = keys::caps_lock_on();
         let shift_space = key == " " && shift && self.session.style_shift_space();
         let caps_lower = caps && self.session.style_caps_lower();
