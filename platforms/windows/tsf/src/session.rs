@@ -289,6 +289,9 @@ impl Session {
         let Some(reply) = reply.filter(|r| r["ok"] == true) else {
             return false;
         };
+        // 順便記下引擎的回報，啟用時就知道要不要註冊符號表的熱鍵（Service::sync_board_hotkey）。
+        self.idle_info = Some(reply["info"].clone());
+        self.idle_generation = generation;
         self.mode_known = true;
         self.shared = reply["info"]["mode_memory"] == "shared";
         self.caps_lock_english = reply["info"]["caps_lock_english"] == "true";
@@ -444,6 +447,11 @@ impl Session {
     /// 整合風格的符號表（health 的 symbol_board，操作規則 symbol_board）：中文模式按 Ctrl＋Alt＋, 開關。答案跟著連線快取。
     pub fn symbol_board(&mut self) -> bool {
         self.idle_info_is("symbol_board", "true")
+    }
+
+    /// 同 symbol_board，但只看已經快取的回報、不往返（每次套用快照都會看）。
+    pub fn symbol_board_cached(&self) -> bool {
+        self.idle_info.as_ref().is_some_and(|v| v["symbol_board"] == "true")
     }
 
     /// 引擎收整合風格的 Ctrl＋標點（health 的 ctrl_punctuation_symbols，操作規則 symbols）：多 Ctrl＋[ ]，英文模式也收。
