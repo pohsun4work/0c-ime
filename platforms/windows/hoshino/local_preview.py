@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""在本機打包目前所在的 checkout，開 PR 前先裝起來實測，不必等 fork-release 發版。
+
+套件是未簽章的 internal-preview（scripts/package_windows.py --preview）。版本號是 fork 目前的版號再加一段
+（0.2.7-hoshino.4.1、.4.2…），排在下一個正式版之前，正式版發布後自動更新照常蓋過去。
+字典取官方同版本的原始碼 tarball；neural/ 沿用已安裝版本的那份（prepare_neural 要在 Linux 編 bytecode）。
+
+打包完在 build\\local-preview\\ 留下 install.ps1（local_install.ps1 的複本），會跳 UAC：安裝、整合風格的配方有變時
+重建風格；-Rollback 退回上一版並用舊版的配方重建風格。--install 打包完直接執行它。
+
+  py -3.12 platforms\\windows\\hoshino\\local_preview.py             # 在要測的 checkout 根目錄執行
+  powershell -ExecutionPolicy Bypass -File build\\local-preview\\install.ps1 [-Rollback]
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+import zipfile
+
+ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+sys.path.insert(0, str(ROOT / "scripts"))
+import fetch_assets  # noqa: E402
+import hf_models  # noqa: E402
+from package_release import prepare_data_manifest  # noqa: E402
+from source_release import digest, extract_dictionary, git  # noqa: E402
+
+ZUIN = Path(os.environ["LOCALAPPDATA"]) / "Zuin"
+OUT = ROOT / "build/local-preview"
+PUBLISHER = "Hoshino 0c-ime fork"  # 同 fork-release.yml
+SHELL_PATHS = ("platforms/windows/tsf", "platforms/windows/ui", "platforms/windows/common",
+               "platforms/windows/Cargo.toml", "platforms/windows/Cargo.lock")  # 同 fork-release.yml 判斷 shell 更新
+
+
+def fetch(url, target, expected):
+    """取代 fetch_assets.fetch：它在暫存檔還開著時改名，Windows 上會 WinError 32；hf_models.download 先關檔再改名。"""
+    if not (target.exists() and digest(target) == expected):
+        print(f"下載 {url}", flush=True)
+        hf_models.download(url, target)
+        if digest(target) != expected:
+            target.unlink()
+            raise ValueError(f"SHA-256 不符：{target.name}")
+    return target
+
+
+def ensure_data(tag):
+    """官方同版本原始碼 tarball 裡的字典，依這個 checkout 的字典 lock 核對；快取以 lock 的雜湊區分。
+    不用 fetch_assets.install：整包驗證會比對執行權限位元，只能在 POSIX 跑。"""
+    target = OUT / "data" / digest(ROOT / "data/dictionary.lock.json")[:12]
+    if not target.is_dir():
+        fetch_assets.fetch = fetch
+        tarball, _ = fetch_assets.download(tag, ROOT / "build/cache/releases", models=False)
+        extract_dictionary(tarball, target, ROOT)
+    return target
+
+
+def ensure_neural(tag, receipt, data):
+    """依安裝收據逐檔複製已安裝版本的 neural/ 並核對雜湊，執行期多出來的檔案不會帶進套件；快取以配對的字典區分。"""
+    target = OUT / "neural" / digest(data / "manifest.json")[:12]
+    if target.is_dir():
+        return target
+    if receipt is None:
+        raise ValueError("這台沒有安裝靈犀注音，取不到 neural/")
+    source = ZUIN / receipt["directory"]
+    try:
+        prepare_data_manifest(data, source / "neural")
+    except ValueError as error:
+        raise ValueError(f"已安裝的 {receipt['version']} 跟這個 checkout 的字典不配對（{error}）；先裝 {tag} 的 fork 正式版") from None
+    stage = target.with_name(target.name + ".partial")
+    shutil.rmtree(stage, ignore_errors=True)
+    for name, sha in receipt["files"].items():
+        if not name.startswith("neural/"):
+            continue
+        dest = stage / name.removeprefix("neural/")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source / name, dest)
+        if digest(dest) != sha:
+            raise ValueError(f"已安裝的檔案跟安裝收據不符：{name}")
+    stage.rename(target)
+    return target
+
+
+def archive_name(version):
+    return f"0c-{version}-windows-amd64-preview.zip"
+
+
+def next_version(base, installed):
+    """base 加一段序號，大於留著的包，也大於已安裝的本機版（rollback 之後也不會撞號）。"""
+    built = [p.name.removeprefix("0c-").removesuffix("-windows-amd64-preview.zip")
+             for p in (OUT / "release").glob(archive_name("*"))]
+    used = [int(m.group(1)) for v in (*built, installed or "") if (m := re.fullmatch(rf"{re.escape(base)}\.(\d+)", v))]
+    return f"{base}.{max(used, default=0) + 1}"
+
+
+def semver(version):
+    """semver 的先後：預覽版排在正式版前；預覽欄位數字比大小、排在文字前，前面都一樣時欄位多的較新。"""
+    core, _, pre = version.partition("-")
+    ids = tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in pre.split(".")) if pre else ()
+    return tuple(map(int, core.split("."))), not pre, ids
+
+
+def shell_changed(receipt, fallback):
+    """TSF DLL、候選窗（同 fork-release 判斷 shell 更新的路徑）跟已安裝那版的 commit 比有沒有變，算上還沒提交的改動。
+    已安裝的是有未提交改動的本機包時比不出來，當成有變；那個 commit 不在本機時改跟上次的 shell 發布比。"""
+    since = fallback
+    if receipt:
+        release = json.loads((ZUIN / receipt["directory"] / "release.json").read_text(encoding="utf-8"))
+        if release.get("dirty"):
+            return True
+        if subprocess.run(["git", "cat-file", "-e", release["revision"] + "^{commit}"], cwd=ROOT,
+                          capture_output=True).returncode == 0:
+            since = release["revision"]
+    return bool(git(ROOT, "diff", "--name-only", since, "--", *SHELL_PATHS)
+                or git(ROOT, "ls-files", "--others", "--exclude-standard", "--", *SHELL_PATHS))
+
+
+def stage_install(archive, shell):
+    """安裝腳本與它讀的 install.json 放在 build\\local-preview\\；風格要在安裝前用新版的 0c-update 重建，先從套件取出來。"""
+    updater = OUT / "updater/0c-update.exe"
+    updater.parent.mkdir(exist_ok=True)
+    with zipfile.ZipFile(archive) as z, z.open(f"{archive.stem}/0c-update.exe") as source, updater.open("wb") as target:
+        shutil.copyfileobj(source, target)
+    sha256 = archive.with_suffix(".zip.sha256").read_text(encoding="utf-8").split()[0]
+    (OUT / "install.json").write_text(json.dumps({"archive": str(archive), "sha256": sha256, "shell_changed": shell}),
+                                      encoding="utf-8")
+    script = OUT / "install.ps1"
+    shutil.copyfile(Path(__file__).parent / "local_install.ps1", script)
+    return script
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", help="指定版本號（預設自動遞增）")
+    parser.add_argument("--install", action="store_true", help="打包完直接執行安裝腳本（會跳 UAC）")
+    args = parser.parse_args()
+    os.environ["PYTHONUTF8"] = "1"  # 打包腳本讀寫的中文檔案都是 UTF-8
+    state = json.loads((ROOT / ".github/fork-state.json").read_text(encoding="utf-8"))
+    tag = state["upstream"]
+    base = f"{tag[1:]}-hoshino.{state['build']}"
+    receipt_path = ZUIN / "install-receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8")) if receipt_path.exists() else None
+    installed = receipt and receipt["version"]
+    version = args.version or next_version(base, installed)
+    started = time.monotonic()
+    try:
+        if installed and semver(version) <= semver(installed):
+            raise ValueError(f"{version} 沒有比已安裝的 {installed} 新，裝不上去；先 rebase 到最新的 main，或用 --version 指定")
+        data = ensure_data(tag)
+        neural = ensure_neural(tag, receipt, data)
+        settings = OUT / "settings"
+        # 設定程式的版本只用在「關於」頁（檔案版本資訊由打包腳本蓋上）：固定成 base，沒改設定程式時 cargo 不必重編。
+        subprocess.run([sys.executable, "scripts/build_settings_windows.py", "--version", base, "--out", str(settings)],
+                       cwd=ROOT, check=True)
+        subprocess.run([sys.executable, "scripts/package_windows.py", "--preview", "--data", str(data),
+                        "--neural", str(neural), "--settings", str(settings / "windows-amd64"),
+                        "--release-docs", "platforms/windows/hoshino", "--version", version,
+                        "--out", str(OUT / "release"), "--publisher", PUBLISHER], cwd=ROOT, check=True)
+        archive = OUT / "release" / archive_name(version)
+        # 一份約 350 MB，只留最新的；序號照樣從它和已安裝的版本往上數。
+        for old in (OUT / "release").glob(archive_name("*") + "*"):
+            if not old.name.startswith(archive.name):
+                old.unlink()
+        shell = shell_changed(receipt, state["shell_commit"])
+        script = stage_install(archive, shell)
+        print(f"已打包 {version}（{time.monotonic() - started:.0f} 秒）：{archive}", flush=True)
+        print("這版改到 TSF DLL 或候選窗，裝完要登出再登入。" if shell else "這版只改引擎，裝完不用登出。", flush=True)
+        if args.install:
+            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], check=True)
+        else:
+            print(f"安裝：powershell -ExecutionPolicy Bypass -File {script}")
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        parser.exit(1, f"local preview：{error}\n")
+
+
+if __name__ == "__main__":
+    main()
