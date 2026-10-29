@@ -17,8 +17,7 @@ pub const GUID_SYMBOL_BOARD: GUID = GUID::from_u128(0x958fda44_c373_4ec0_b086_2c
 const HOTKEY: TF_PRESERVEDKEY = TF_PRESERVEDKEY { uVKey: VK_HOTKEY, uModifiers: TF_MOD_CONTROL | TF_MOD_ALT };
 
 /// 把 Ctrl＋Alt＋, 註冊成 TSF 的保留鍵（同微軟注音）：直接用 TSF 的程式（VS Code 等 Chromium、UWP 的便籤）不把帶 Alt 的
-/// 組合鍵交給 OnTestKeyDown，只有保留鍵收得到。保留鍵在 TSF 判斷按鍵時就算處理了，不處理時也不會還給程式，所以只在
-/// 用得到時註冊（Service::sync_board_hotkey）。
+/// 組合鍵交給 OnTestKeyDown，只有保留鍵收得到。何時註冊見 Service::sync_board_hotkey。
 pub fn preserve(keystrokes: &ITfKeystrokeMgr, tid: u32) -> bool {
     let desc: Vec<u16> = "符號表".encode_utf16().collect();
     match unsafe { keystrokes.PreserveKey(tid, &GUID_SYMBOL_BOARD, &HOTKEY, &desc) } {
