@@ -1121,7 +1121,7 @@ func (s *Session) openCandidates(length int) {
 		for _, r := range s.syls[start:end] {
 			text.WriteString(string(r))
 		}
-		alternatives := symbolAlternatives(text.String())
+		alternatives := s.symbolChoices(text.String())
 		if (s.InputStyle.Punctuation == "standard" || s.InputStyle.Punctuation == "chewing") && (text.String() == "＼" || text.String() == "／") {
 			alternatives = []string{text.String()}
 			if text.String() == "＼" {
