@@ -51,8 +51,10 @@ type candState struct {
 	// 游標那個字（位置 single）的單字候選，翻頁就看得到，不必先按 Tab 換到單字。
 	split  int
 	single int
-	// keySpan 非 nil 時是整合風格跨英數的候選（mixed_span.go）：每一項怎麼替換 start/length，nil 是保持原樣。
-	keySpan []func()
+	// replace 是整合風格自己決定怎麼替換 start/length 的項目（mixed_span.go）：candidate index → 換法，nil 是保持原樣。
+	// across 時是跨英數的候選，每一項都在 replace 裡。
+	replace map[int]func()
+	across  bool
 }
 
 func (s *Session) candidatePage() int { return s.cand.cursor / s.pageSize() }
@@ -221,6 +223,7 @@ func New(m *personal.Model) *Session {
 		English:          english.Prototype(),
 		EmojiShortcut:    "equals",
 		EmojiEqualsFirst: true,
+		InputStyle:       defaultStyle,
 		locks:            map[int]decode.Lock{},
 	}
 }
@@ -389,6 +392,9 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		commit = s.output(commit, commit, s.readingPins(commit))
 		s.reset()
 	}
+	if r.Type == proto.Key {
+		s.rejudge()
+	}
 	s.refresh()
 	// 保護狀態／前文確認／撤銷可以在候選窗仍開啟時變更；不能留下過期的個人或關聯標示。
 	if s.cand != nil && !s.cand.mixed && (r.Private || r.Type == proto.Pause || r.Type == proto.Context || r.Type == proto.Forget) {
@@ -499,7 +505,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	if handled, commit, done := s.styleKey(k); done {
 		return handled, commit
 	}
-	k = s.normalizeVocabKey(k) // #123 的新鍵名在沒有對應功能時就是原本的鍵
+	k = s.normalizeVocabKey(s.normalizeMarkKey(k)) // #123 的新鍵名在沒有對應功能時就是原本的鍵
 	// 數字鍵盤永遠不是注音鍵（#75）：英文模式與候選選號同主鍵盤數字；沒在組字交還應用程式；
 	// 組字中以半形插在游標處，未打完的注音保留成符號（同 Shift＋字母）。
 	if c, ok := proto.KeypadChar(k); ok {
@@ -601,7 +607,11 @@ func (s *Session) key(k string) (handled bool, commit string) {
 			case "next":
 				s.moveHighlight(1)
 			default:
-				s.nextCandidateLength()
+				s.cycleCandidateLength(1)
+			}
+		case proto.KeyBackTab:
+			if s.InputStyle.CandidateBackTab != "" && s.InputStyle.CandidateTab == "length" { // 整合風格（candidate_backtab）
+				s.cycleCandidateLength(-1)
 			}
 		default:
 			if n := s.selectionIndex(k); n >= 0 {
@@ -1251,7 +1261,7 @@ func (s *Session) openAnchored(anchor, length int, before bool) bool {
 	if !s.openAt(pos, length) {
 		return false
 	}
-	if length > 1 && s.cand.keySpan == nil {
+	if length > 1 && !s.cand.across {
 		s.appendSingles(single)
 	}
 	s.cand.before = before
@@ -1366,6 +1376,7 @@ func (s *Session) openAt(pos, length int) bool {
 		return false
 	}
 	s.cand = &candState{start: pos, length: length, items: items, raw: length == 1, matched: matched, keyLiterals: keyLiterals}
+	s.addSpanChoices(s.cand) // 整合風格（mixed_resplit）
 	s.cand.labels = s.candidateLabels(s.cand)
 	return true
 }
@@ -1373,10 +1384,11 @@ func (s *Session) openAt(pos, length int) bool {
 func (s *Session) pages() int { return (len(s.cand.items) + s.pageSize() - 1) / s.pageSize() }
 
 // 候選開啟時 Tab 切至下一個較長詞長，最長後回到最短；不接受補全或提交。
-func (s *Session) nextCandidateLength() {
+// d 是 -1 時（整合風格的 Shift+Tab）反過來換到較短的，最短後回到最長。
+func (s *Session) cycleCandidateLength(d int) {
 	c := s.cand
 	if c != nil && c.mixed && !c.english && s.resplit() {
-		s.tabFromMixed()
+		s.tabFromMixed(d)
 		return
 	}
 	// 整合風格：照字面的字（英數、符號、原樣注音）也能換詞長；= 選單、符號表與打到一半的注音照舊不換。
@@ -1385,7 +1397,7 @@ func (s *Session) nextCandidateLength() {
 	}
 	anchor, maxLen := s.candidateAnchor(c)
 	for i := 1; i <= maxLen; i++ {
-		length := (c.length-1+i)%maxLen + 1
+		length := ((c.length-1+d*i)%maxLen+maxLen)%maxLen + 1
 		if s.openAnchored(anchor, length, c.before) {
 			return
 		}
@@ -1446,8 +1458,8 @@ func (s *Session) selectCandidate(id int) bool {
 		s.cand = nil
 		return true
 	}
-	if s.cand.keySpan != nil {
-		return s.selectKeySpan(id)
+	if _, ok := s.cand.replace[id]; ok {
+		return s.selectReplace(id)
 	}
 	if s.cand.mixed {
 		return s.selectMixed(id)
@@ -1517,6 +1529,7 @@ func (s *Session) accept() bool {
 func (s *Session) commit() string {
 	// Resolve pending English exactly as displayed; never accept a suggestion on Enter.
 	s.flushMixed()
+	s.rejudge()
 	s.finishUntoned() // 聲調選填：最後一個沒打聲調的音節也照解碼結果送出（#150）
 	if s.Rerank.Scorer == nil {
 		s.refresh()
