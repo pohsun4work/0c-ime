@@ -1,10 +1,12 @@
 package session
 
 import (
+	"math"
 	"slices"
 	"strings"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/input"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
@@ -158,8 +160,8 @@ type overwriteCase struct {
 
 // overwriteWanted：神經模型照前文（已確認的前文＋組字區 start 前的字）判斷要不要換成蓋完的音節；
 // 沒有神經模型、私人、暫停或沒有前文時不換。
+// 蓋完的字取 overwriteChars 裡神經模型分數最高的，不是官方切開時畫面上的字（車子的g塑 的「塑」）。
 //   - lead（前面多一個聲母）：那個字母讓蓋完的字的分數掉得夠多才是打錯（車子的g速），讓它更合理是要打的字母（我講過n次）。
-//     比的是蓋完的字，不是官方切開時畫面上的字（車子的g塑 的「塑」）。
 //   - 其他：蓋完的中文字比畫面上的樣子逐字加總高得夠多才換（打錯的按鍵照字面是亂碼，英文字照字面很順：ios7、json）。
 func (s *Session) overwriteWanted(c overwriteCase) bool {
 	left := s.neuralContext() + strings.Join(s.shownChars(c.start), "")
@@ -167,12 +169,14 @@ func (s *Session) overwriteWanted(c overwriteCase) bool {
 		return false
 	}
 	score := func(before string, r rune) (float64, bool) { return s.neuralChar(s.neuralWindow(before), r, c.syl) }
-	char, ok := s.overwriteChar(c.start, c.syl)
-	if !ok {
-		return false
+	var char rune
+	chinese := math.Inf(-1)
+	for _, r := range s.overwriteChars(c.start, c.syl) {
+		if v, ok := score(left, r); ok && v > chinese {
+			char, chinese = r, v
+		}
 	}
-	chinese, ok := score(left, char)
-	if !ok {
+	if char == 0 {
 		return false
 	}
 	if c.lead {
@@ -194,19 +198,32 @@ func (s *Session) overwriteWanted(c overwriteCase) bool {
 	return chinese-literal >= margin
 }
 
-// overwriteChar 是 syl 接在 start 前面的中文後面時解碼最好的字。
-func (s *Session) overwriteChar(start int, syl zhuyin.Syllable) (rune, bool) {
+// overwriteCharLimit：蓋完的音節除了接在前面的中文後面解碼最好的字，再給神經模型挑的常用單字數。
+const overwriteCharLimit = 3
+
+// overwriteChars 是 syl 蓋完可能出的字：接在 start 前面的中文後面解碼最好的字，加上這個讀音最常用的幾個單字。
+// 換了之後那個音節併進前面的中文一起由神經模型重排（車子的＋ㄙㄨˋ 是「速」，統計解碼是「塑」），所以讓神經模型挑。
+func (s *Session) overwriteChars(start int, syl zhuyin.Syllable) []rune {
+	var chars []rune
 	begin := start
 	for begin > 0 && !s.literals[begin-1] && start-begin < decode.MaxWordLen-1 {
 		begin--
 	}
 	dec := &decode.Decoder{Lex: s.model.Source(), Score: s.model, Beam: s.Opt.Beam, Continue: s.Opt.Continue}
-	words, ok := bestWords(dec, append(slices.Clone(s.syls[begin:start]), syl))
-	if !ok || len(words) == 0 {
-		return 0, false
+	if words, ok := bestWords(dec, append(slices.Clone(s.syls[begin:start]), syl)); ok && len(words) > 0 {
+		w := []rune(words[len(words)-1].word)
+		chars = append(chars, w[len(w)-1])
 	}
-	w := []rune(words[len(words)-1].word)
-	return w[len(w)-1], true
+	single := &decode.Decoder{Lex: s.model.Source(), Score: s.model}
+	for _, c := range single.Candidates(input.Exact{}.Expand([]zhuyin.Syllable{syl}), 0, 1, single.InitialLeft(), nil) {
+		if len(chars) > overwriteCharLimit {
+			break
+		}
+		if r := []rune(c.Entry.Surface); len(r) == 1 && !slices.Contains(chars, r[0]) {
+			chars = append(chars, r[0])
+		}
+	}
+	return chars
 }
 
 // overwriteGroup：units 的按鍵是打錯又補對的（↓ 清單先列蓋完的字，不看神經模型）。
