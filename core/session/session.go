@@ -1806,8 +1806,9 @@ func (s *Session) snapshot() proto.Snapshot {
 		if cl.Kind != "" {
 			cl.Title = s.paletteTitle()
 		}
-		if !s.cand.literal && !s.cand.mixed && cl.Length > 0 {
-			cl.Title = "修改「" + s.candidateText() + "」 · Tab 切換詞長"
+		if (!s.cand.literal || s.literalTabbable()) && !s.cand.mixed && cl.Length > 0 {
+			// 空白在標題裡看不出來，顯示成 ␣（整合風格跨英數的範圍才會有空白）。
+			cl.Title = "修改「" + strings.ReplaceAll(s.candidateText(), " ", "␣") + "」 · Tab 切換詞長"
 		}
 		s.boardSnapshot(cl)
 		// 選字鍵含 j、k（asdfghjkl;）時它們是選字，不是換字。

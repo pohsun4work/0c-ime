@@ -713,18 +713,31 @@ func (s *Session) learnMixedMemory() {
 	s.model.LearnMixedMemory(choices, used)
 }
 
-// openMemorySpan：↓ 落在照記憶換過的段落裡時開整段的候選（mp3／允／狁…），不從最後一個字（3）開始。
+// openMemorySpan：↓ 落在照記憶換過、或這次用 ↓ 換過解釋的段落裡時開整段的候選（mp3／允／狁…），不從最後一個字（3）開始。
 func (s *Session) openMemorySpan(pos int, before bool) bool {
-	i := s.memory.appliedAt(memorySpan{pos, pos + 1}, false)
-	if i < 0 {
+	p, ok := s.changedSpan(pos)
+	if !ok || p.end-p.start < 2 {
 		return false
 	}
-	p := s.memory.applied[i].memorySpan
 	anchor := p.start
 	if before {
 		anchor = p.end
 	}
-	return p.end-p.start > 1 && s.openAnchored(anchor, p.end-p.start, before)
+	return s.openAnchored(anchor, p.end-p.start, before)
+}
+
+// changedSpan 是 pos 所在、照記憶換過或這次用 ↓ 換過解釋（現在還是那個樣子）的段落。
+func (s *Session) changedSpan(pos int) (memorySpan, bool) {
+	p := memorySpan{pos, pos + 1}
+	if i := s.memory.appliedAt(p, false); i >= 0 {
+		return s.memory.applied[i].memorySpan, true
+	}
+	for _, c := range slices.Backward(s.memory.choices) {
+		if c.overlaps(p) && s.memoryFormIs(c.memorySpan, c.form) {
+			return c.memorySpan, true
+		}
+	}
+	return memorySpan{}, false
 }
 
 // forgetMemoryCandidate：候選窗反白的是照記憶換過的那段畫面上的樣子時，Shift＋Delete 刪掉讓它被換的紀錄、換回原本的樣子，
