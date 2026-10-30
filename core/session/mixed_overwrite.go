@@ -17,8 +17,8 @@ const (
 	// 我講過n次 +0.72 留著；43 句裡要留的最低是沿著y軸 -1.59，要換的最高是就是1譬 -1.20）。
 	overwriteLetterEffect = -1.6
 	// overwriteToneMargin：聲調鍵結尾時，蓋完的中文字比畫面上照字面的樣子逐字加總至少高這麼多才換
-	// （不要cl.3 吼 7.90 換、這是ios7 6.83 留）。
-	overwriteToneMargin = 7.0
+	// （我5jiy6 昨 12.02 換、這個js要 尿 8.79 留）；寧可留著讓 ↓ 選，也不把正常打的縮寫換成錯字。
+	overwriteToneMargin = 10.0
 	// overwriteSpaceMargin：空白（一聲）結尾時的門檻（看njg␣ 書 7.05 換、回傳json␣ 4.84 留）。
 	overwriteSpaceMargin = 6.0
 )
