@@ -227,17 +227,30 @@ func TestMixedMemoryExactNeedsPlausibility(t *testing.T) {
 	}
 }
 
-// ↓ 落在照記憶換過的段落時開整段（mp3／允…），Shift＋Tab 照樣換到較短的；沒照記憶換的英數照舊從最後一個字開始。
+// ↓ 落在照記憶換過、或這次用 ↓ 換過解釋的段落時開整段（mp3／允…），Shift＋Tab 照樣換到較短的；其他英數照舊從最後一個字開始。
 func TestMixedMemoryDownOpensWholeSpan(t *testing.T) {
+	whole := func(t *testing.T, s *Session) {
+		t.Helper()
+		snap := key(s, proto.KeyDown)
+		if items := itemTexts(snap); s.cand.start != 1 || s.cand.length != 3 || len(items) < 2 || items[0] != "mp3" || !slices.Contains(items, "允") {
+			t.Fatalf("整段：start=%d length=%d %q", s.cand.start, s.cand.length, items)
+		}
+		if snap.Candidates.Title != "修改「mp3」 · Tab 切換詞長" {
+			t.Fatalf("標題：%q", snap.Candidates.Title)
+		}
+	}
 	s := memorySession()
 	remember(s, "mp3", "我", "", mp3Literal)
 	typeContext(s, "ji3mp3")
-	if items := itemTexts(key(s, proto.KeyDown)); s.cand.start != 1 || s.cand.length != 3 || len(items) < 2 || items[0] != "mp3" || !slices.Contains(items, "允") {
-		t.Fatalf("整段：start=%d length=%d %q", s.cand.start, s.cand.length, items)
-	}
+	whole(t, s)
 	if key(s, proto.KeyBackTab); s.cand.start != 2 || s.cand.length != 2 {
 		t.Fatalf("Shift＋Tab：start=%d length=%d", s.cand.start, s.cand.length)
 	}
+	s = memorySession()
+	typeContext(s, "ji3mp3")
+	key(s, proto.KeyDown)
+	pickText(t, s, "mp3")
+	whole(t, s)
 	s = memorySession()
 	if snap := typeContext(s, "ji3npm "); snap.Text() != "我npm " {
 		t.Fatalf("前提（mixed_context）：%q", snap.Text())

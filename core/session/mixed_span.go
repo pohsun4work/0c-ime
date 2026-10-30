@@ -76,6 +76,15 @@ func (s *Session) keyUnits(start, end int) ([]keyUnit, bool) {
 	return units, len(units) > 0 && units[0].keys != " "
 }
 
+// literalTabbable：整合風格的字面清單（mp3 的 3、npm␣ 的空白）按 Tab 換得到別的詞長時，標題一樣提示 Tab（條件同 cycleCandidateLength）。
+func (s *Session) literalTabbable() bool {
+	if !s.resplit() || !s.canStepCandidate() {
+		return false
+	}
+	_, maxLen := s.candidateAnchor(s.cand)
+	return maxLen > 1
+}
+
 // keyMaxLen 是 Tab 換詞長的上限：n 是詞庫最長的詞長，連續查得到按鍵的範圍裡有照字面的字時延伸到最遠的那個字。
 func (s *Session) keyMaxLen(anchor int, before bool, n int) int {
 	if !s.resplit() {
