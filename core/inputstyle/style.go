@@ -43,6 +43,9 @@ type Rules struct {
 	CandidateBackTab string `json:"candidate_backtab,omitempty" fork:"blend"`
 	// context：記住 ↓ 換過的混打解釋（按鍵＋前一個字＋後一個音），下次照上下文決定要不要照記憶換；要有 mixed_resplit 的按鍵紀錄
 	MixedMemory string `json:"mixed_memory,omitempty" fork:"blend"`
+	// neural：打錯一個注音鍵又補上同一格的鍵時照微軟新注音後按的蓋掉先按的（5jiy6 是「昨」），由神經模型照前文決定換不換，
+	// ↓ 清單也列蓋完的字；要有 mixed_resplit 的按鍵紀錄
+	MixedOverwrite string `json:"mixed_overwrite,omitempty" fork:"blend"`
 }
 
 func (r Rules) Validate() error {
@@ -80,6 +83,7 @@ func (r Rules) Validate() error {
 		{"vocab_mark", r.VocabMark, []string{"", "extended"}},
 		{"candidate_backtab", r.CandidateBackTab, []string{"", "shorter"}},
 		{"mixed_memory", r.MixedMemory, []string{"", "context"}},
+		{"mixed_overwrite", r.MixedOverwrite, []string{"", "neural"}},
 	} {
 		ok := false
 		for _, v := range f.allowed {
@@ -152,6 +156,7 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 		p.Rules.VocabMark = "extended"
 		p.Rules.CandidateBackTab = "shorter"
 		p.Rules.MixedMemory = "context"
+		p.Rules.MixedOverwrite = "neural"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

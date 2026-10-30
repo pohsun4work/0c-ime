@@ -18,15 +18,18 @@ var zhuyinTextKeys = []string{"a", "2", "1"}
 func (s *Session) mixedContext() bool { return s.InputStyle.MixedContext != "" && s.resplit() }
 
 // rejudge：混打照官方判斷，每個按鍵處理完與送出前再照上下文重看查得回按鍵的部分：先照記憶（mixed_memory，rejudgeMemory），
-// 再照規則（mixed_context：rejudgePending、rejudgeUnits、rejudgeZhuyinText），改成的樣子官方也打得出來。
-// 待定按鍵還沒定案時只看游標前，後面的字等它定案再看。
+// 再照規則（mixed_context：rejudgePending、rejudgeUnits、rejudgeZhuyinText），最後看打錯又補對的鍵（mixed_overwrite），
+// 改成的樣子官方也打得出來。待定按鍵還沒定案時只看游標前，後面的字等它定案再看。
 // 鎖定（選過的字）、從 ↓ 明確選的不改；候選窗開著、注音或英文打到一半、標示中不看。
 func (s *Session) rejudge() {
-	if !s.mixedContext() && !s.mixedMemory() || s.english || s.cand != nil || !s.comp.Empty() || s.mark != nil {
+	if !s.mixedContext() && !s.mixedMemory() && !s.mixedOverwrite() || s.english || s.cand != nil || !s.comp.Empty() || s.mark != nil {
 		return
 	}
 	if s.mixedContext() {
 		s.rejudgePending()
+	}
+	if s.mixedOverwrite() {
+		s.rejudgeOverwritePending()
 	}
 	index, longest := s.memoryIndex()
 	for range rejudgePasses {
@@ -37,7 +40,10 @@ func (s *Session) rejudge() {
 		if s.rejudgeMemory(index, longest, end) {
 			continue
 		}
-		if !s.mixedContext() || !s.rejudgeUnits(end) && !s.rejudgeZhuyinText(end) {
+		if s.mixedContext() && (s.rejudgeUnits(end) || s.rejudgeZhuyinText(end)) {
+			continue
+		}
+		if !s.mixedOverwrite() || !s.rejudgeOverwrite(end) {
 			return
 		}
 	}
