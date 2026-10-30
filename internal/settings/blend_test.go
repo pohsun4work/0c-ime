@@ -26,7 +26,7 @@ func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
 		r.ShiftSpace != "disabled" || r.EnglishRanking != "frequency" || r.EnglishLearning != "dictionary" ||
 		r.Symbols != "microsoft" || r.Width != "shift_space" || r.SymbolBoard != "asus" || r.MixedResplit != "keys" ||
 		r.MixedContext != "rules" || r.VocabMark != "extended" || r.CandidateBackTab != "shorter" ||
-		r.MixedMemory != "context" {
+		r.MixedMemory != "context" || r.MixedOverwrite != "neural" {
 		t.Fatalf("blend recipe not applied: %+v %+v", s, r)
 	}
 	for _, item := range s.Profiles().Items {
