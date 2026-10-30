@@ -15,14 +15,14 @@ import (
 )
 
 // overwriteSession 是整合風格的混打 session；table 不是 nil 時接上假的神經模型（memoryScorer，沒列的字 -10）。
-func overwriteSession(table map[string]float64) *Session {
+func overwriteSession(table map[string]float64, extra ...word) *Session {
 	lex, sys := lexicon.NewMem(), lm.NewMem()
-	for _, e := range []word{
+	for _, e := range append([]word{
 		{"我", "ㄨㄛˇ", 1e-2}, {"昨", "ㄗㄨㄛˊ", 1e-3}, {"天", "ㄊㄧㄢ", 3e-3}, {"昨天", "ㄗㄨㄛˊ ㄊㄧㄢ", 1e-3},
 		{"速", "ㄙㄨˋ", 1e-3}, {"次", "ㄘˋ", 2e-3}, {"著", "ㄓㄨㄛˊ", 1e-3}, {"蘇", "ㄙㄨ", 1e-4}, {"個", "ㄍㄜ˙", 3e-3},
 		{"合", "ㄏㄜˊ", 1e-3}, {"哪", "ㄋㄟ˙", 1e-4}, {"偶", "ㄡˇ", 1e-4}, {"吼", "ㄏㄡˇ", 1e-4}, {"雖", "ㄙㄨㄟ", 1e-3},
 		{"片", "ㄆㄧㄢˋ", 1e-3}, {"什", "ㄕㄜˊ", 2e-3},
-	} {
+	}, extra...) {
 		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
 		sys.SetUni(e.w, e.p)
 	}
@@ -108,6 +108,16 @@ func TestMixedOverwriteNeural(t *testing.T) {
 		if snap := typeContext(s, tc.keys...); snap.Text() != tc.want {
 			t.Errorf("%s＋%q：%q，要 %q", tc.left, tc.keys, snap.Text(), tc.want)
 		}
+	}
+}
+
+// 前面多一個聲母、官方切開時畫面上的字（車g塑 的「塑」）跟蓋完會出的字（接在「車」後面是「速」）不同：字母效果照蓋完的字算。
+func TestMixedOverwriteLeadScoresOverwrittenChar(t *testing.T) {
+	s := overwriteSession(map[string]float64{"車速": -2, "車g速": -6, "車塑": -5, "車g塑": -5.5},
+		word{"車", "ㄔㄜ", 1e-3}, word{"塑", "ㄙㄨˋ", 5e-3}, word{"車速", "ㄔㄜ ㄙㄨˋ", 1e-3})
+	typeContext(s, "tk ")
+	if !s.overwriteWanted(overwriteCase{start: 1, syl: "ㄙㄨˋ", shown: []rune("g塑"), after: '塑', lead: true}) {
+		t.Error("車g塑 要照「速」算成打錯")
 	}
 }
 

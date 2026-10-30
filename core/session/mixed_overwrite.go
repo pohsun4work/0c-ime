@@ -11,7 +11,7 @@ import (
 
 // 神經模型判斷「打錯又補對」的門檻（log10），初值取自 2026-10-30 用本機神經模型實測的句子。
 const (
-	// overwriteLetterEffect：前面多一個聲母時，那個字母讓後面的字的分數掉得比這多才當成打錯（我g速 -3.32 蓋掉、
+	// overwriteLetterEffect：前面多一個聲母時，那個字母讓蓋完的字的分數掉得比這多才當成打錯（車子的g速 -3.32 蓋掉、
 	// 我講過n次 +0.72 留著；43 句裡要留的最低是沿著y軸 -1.59，要換的最高是就是1譬 -1.20）。
 	overwriteLetterEffect = -1.6
 	// overwriteToneMargin：聲調鍵結尾時，蓋完的中文字比畫面上照字面的樣子逐字加總至少高這麼多才換
@@ -158,7 +158,8 @@ type overwriteCase struct {
 
 // overwriteWanted：神經模型照前文（已確認的前文＋組字區 start 前的字）判斷要不要換成蓋完的音節；
 // 沒有神經模型、私人、暫停或沒有前文時不換。
-//   - lead（前面多一個聲母）：那個字母讓後面的字的分數掉得夠多才是打錯（我g速），讓它更合理是要打的字母（我講過n次）。
+//   - lead（前面多一個聲母）：那個字母讓蓋完的字的分數掉得夠多才是打錯（車子的g速），讓它更合理是要打的字母（我講過n次）。
+//     比的是蓋完的字，不是官方切開時畫面上的字（車子的g塑 的「塑」）。
 //   - 其他：蓋完的中文字比畫面上的樣子逐字加總高得夠多才換（打錯的按鍵照字面是亂碼，英文字照字面很順：ios7、json）。
 func (s *Session) overwriteWanted(c overwriteCase) bool {
 	left := s.neuralContext() + strings.Join(s.shownChars(c.start), "")
@@ -166,13 +167,9 @@ func (s *Session) overwriteWanted(c overwriteCase) bool {
 		return false
 	}
 	score := func(before string, r rune) (float64, bool) { return s.neuralChar(s.neuralWindow(before), r, c.syl) }
-	char := c.after
-	if char == 0 || !c.lead {
-		r, ok := s.overwriteChar(c.start, c.syl)
-		if !ok {
-			return false
-		}
-		char = r
+	char, ok := s.overwriteChar(c.start, c.syl)
+	if !ok {
+		return false
 	}
 	chinese, ok := score(left, char)
 	if !ok {
