@@ -122,6 +122,16 @@ func TestMixedOverwriteLeadScoresOverwrittenChar(t *testing.T) {
 	}
 }
 
+// 正常打的縮寫照字面也順（js要 的 j、u 都是介音，蓋完是「尿」）：差不到門檻就留著。
+func TestMixedOverwriteKeepsAbbreviation(t *testing.T) {
+	s := overwriteSession(map[string]float64{"這個尿": -4.46, "這個j": -6.07, "這個js": -2.83, "這個js要": -4.35},
+		word{"尿", "ㄋㄧㄠˋ", 1e-4})
+	s.documentEnabled, s.neuralLeft = true, "這個"
+	if s.overwriteWanted(overwriteCase{syl: "ㄋㄧㄠˋ", shown: []rune("js要"), after: '要'}) {
+		t.Error("這個js要 要留著")
+	}
+}
+
 // 不看神經模型就能排除的：英文字、好幾格重複、同一個鍵連按、大寫字母、前面緊接英數。沒列的字都是 -10，照分數一定會換。
 func TestMixedOverwriteStructureKeeps(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
