@@ -378,6 +378,9 @@ func (s *Session) mixedToneChars() (int, zhuyin.Syllable, []string) {
 			continue
 		}
 		done, ok := s.mixedReading(rest, sym)
+		if !ok && at == 0 && s.mixedOverwrite() { // 整合風格：打錯又補對的按鍵（5jiy6）列蓋完的字
+			_, done, ok = s.overwriteSyllable(raw)
+		}
 		if !ok {
 			continue
 		}

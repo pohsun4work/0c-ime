@@ -318,10 +318,16 @@ func (s *Session) openUnits(pos, length int, units []keyUnit) bool {
 		return true
 	}
 	add(s.shownText(pos, pos+length), nil)
-	groups := s.keyGroups(units)
-	for _, words := range s.chineseChoices(groups) {
-		add(s.keyGroupsText(groups, words), func() { s.insertKeyGroups(groups, words) })
+	chinese := func(groups []keyGroup) {
+		for _, words := range s.chineseChoices(groups) {
+			add(s.keyGroupsText(groups, words), func() { s.insertKeyGroups(groups, words) })
+		}
 	}
+	if g, ok := s.overwriteGroup(units); ok { // 整合風格（mixed_overwrite）：打錯又補對的按鍵先列蓋完的字
+		chinese([]keyGroup{g})
+	}
+	groups := s.keyGroups(units)
+	chinese(groups)
 	var english strings.Builder
 	for _, u := range units {
 		english.WriteString(u.keys + u.fixed)
