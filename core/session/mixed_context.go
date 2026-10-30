@@ -17,20 +17,27 @@ var zhuyinTextKeys = []string{"a", "2", "1"}
 // mixedContext：整合風格（操作規則 mixed_context），要有 mixed_resplit 的按鍵紀錄。
 func (s *Session) mixedContext() bool { return s.InputStyle.MixedContext != "" && s.resplit() }
 
-// rejudge：混打照官方判斷，每個按鍵處理完與送出前再照上下文重看查得回按鍵的部分，規則成立才改（rejudgePending、
-// rejudgeUnits、rejudgeZhuyinText），改成的樣子官方也打得出來。待定按鍵還沒定案時只看游標前，後面的字等它定案再看。
+// rejudge：混打照官方判斷，每個按鍵處理完與送出前再照上下文重看查得回按鍵的部分：先照記憶（mixed_memory，rejudgeMemory），
+// 再照規則（mixed_context：rejudgePending、rejudgeUnits、rejudgeZhuyinText），改成的樣子官方也打得出來。
+// 待定按鍵還沒定案時只看游標前，後面的字等它定案再看。
 // 鎖定（選過的字）、從 ↓ 明確選的不改；候選窗開著、注音或英文打到一半、標示中不看。
 func (s *Session) rejudge() {
-	if !s.mixedContext() || s.english || s.cand != nil || !s.comp.Empty() || s.mark != nil {
+	if !s.mixedContext() && !s.mixedMemory() || s.english || s.cand != nil || !s.comp.Empty() || s.mark != nil {
 		return
 	}
-	s.rejudgePending()
+	if s.mixedContext() {
+		s.rejudgePending()
+	}
+	index, longest := s.memoryIndex()
 	for range rejudgePasses {
 		end := len(s.syls)
 		if s.mixed.raw != "" {
 			end = s.cursor
 		}
-		if !s.rejudgeUnits(end) && !s.rejudgeZhuyinText(end) {
+		if s.rejudgeMemory(index, longest, end) {
+			continue
+		}
+		if !s.mixedContext() || !s.rejudgeUnits(end) && !s.rejudgeZhuyinText(end) {
 			return
 		}
 	}
@@ -217,14 +224,20 @@ func (s *Session) rejudgeZhuyinRun(run []zhuyinUnit) bool {
 	return false
 }
 
-// insertZhuyinUnit 照官方接空白留下注音的樣子（keepMixedSyllable）插入注音文的按鍵（a␣ 是 ㄇ）。
+// insertZhuyinUnit 照官方接空白留下注音的樣子（keepMixedSyllable）插入注音文的按鍵（a␣ 是 ㄇ），每個音節照它打的聲調；
+// 沒打聲調的音節照字面（同 ↓ 換成注音）。
 func (s *Session) insertZhuyinUnit(keys string) {
-	c, _ := s.mixedComposer(strings.TrimSuffix(keys, " "))
-	before := c.Clone()
-	done, _ := c.Add(zhuyin.Tone1)
-	at := s.cursor
-	s.insertSyllableLiteral(before, done)
-	s.keepResplitKeys(at, keys)
+	for _, g := range s.groupsOf(keys) {
+		if g.tone == 0 {
+			s.insertZhuyinLiteral(g)
+			continue
+		}
+		c := g.comp.Clone()
+		done, _ := c.Add(g.tone)
+		at := s.cursor
+		s.insertSyllableLiteral(g.comp, done)
+		s.keepResplitKeys(at, g.keys)
+	}
 }
 
 // markChosen：chosen（↓ 選了注音解釋，choice 2）時把待定按鍵完成的音節或注音（at 到游標）記成明確選的。
@@ -243,10 +256,11 @@ func (s *Session) markChosen(chosen bool, at int) {
 }
 
 // replaceSpan 把 [start, end) 換成 insert 插入的內容，游標在後面時跟著平移、在中間時移到換上的內容後面。
-// 有鎖定或明確選的時不換，回傳 false。換的前後都是照字面的字時，其他字照畫面保留（同 flushMixed），不換掉神經選的字。
+// 有鎖定、明確選的或照記憶換過的（memoryState.guards）時不換，回傳 false。換的前後都是照字面的字時，其他字照畫面保留
+// （同 flushMixed），不換掉神經選的字。
 func (s *Session) replaceSpan(start, end int, insert func()) bool {
 	for pos := start; pos < end; pos++ {
-		if s.lockedAt(pos) || s.mixedOrigins[pos].explicit {
+		if s.lockedAt(pos) || s.mixedOrigins[pos].explicit || s.memory.guards(pos) {
 			return false
 		}
 	}

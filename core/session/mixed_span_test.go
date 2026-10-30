@@ -87,7 +87,7 @@ func TestResplitTabFromPendingKeys(t *testing.T) {
 	}
 }
 
-// $20␣ 照字面留下；換到整段時空白當一聲，有「$單」（同華碩注音）。選了之後在字上按 ↓ 有原按鍵，選回英數。
+// $20␣ 照字面留下；換到整段時空白當一聲，有「$單」（同華碩注音）。選了之後在字上按 ↓ 開那整段（mixed_memory），有原按鍵，選回英數。
 func TestResplitDigitsToChinese(t *testing.T) {
 	s := resplitSession()
 	if snap := keys(s, "$", "2", "0", " "); snap.Text() != "$20 " {
@@ -101,10 +101,10 @@ func TestResplitDigitsToChinese(t *testing.T) {
 		t.Fatalf("選中文：%q", snap.Text())
 	}
 	snap := key(s, proto.KeyDown)
-	if !slices.Contains(itemTexts(snap), "20 ") {
+	if !slices.Contains(itemTexts(snap), "$20 ") {
 		t.Fatalf("中文字上的 ↓ 有原按鍵：%q", itemTexts(snap))
 	}
-	if snap := pickText(t, s, "20 "); snap.Text() != "$20 " {
+	if snap := pickText(t, s, "$20 "); snap.Text() != "$20 " {
 		t.Fatalf("選回原按鍵：%q", snap.Text())
 	}
 }
@@ -386,5 +386,24 @@ func TestResplitBackTabShortens(t *testing.T) {
 	keys(s, "j", "i", "3", "$", "2", "0", proto.KeyHome, proto.KeyDown)
 	if snap := key(s, proto.KeyBackTab); s.cand == nil || s.cand.length != 1 || !snap.Handled {
 		t.Fatalf("沒有這個規則照官方不動作：%+v", s.cand)
+	}
+}
+
+// 字面清單（npm␣ 的空白）按 Tab 換得到別的詞長時，標題一樣提示 Tab，空白顯示成 ␣；待定的標點（我,）沒有範圍，不提示。
+func TestResplitLiteralListTitle(t *testing.T) {
+	s := resplitSession()
+	if snap := typeContext(s, "ji3npm "); snap.Text() != "我npm " {
+		t.Fatalf("前提：%q", snap.Text())
+	}
+	if snap := key(s, proto.KeyDown); !s.cand.literal || snap.Candidates.Title != "修改「␣」 · Tab 切換詞長" {
+		t.Fatalf("空白：literal=%v %q", s.cand.literal, snap.Candidates.Title)
+	}
+	if snap := key(s, proto.KeyTab); snap.Candidates.Title != "修改「m␣」 · Tab 切換詞長" {
+		t.Fatalf("Tab：%q", snap.Candidates.Title)
+	}
+	s = resplitSession()
+	typeContext(s, "ji3,")
+	if snap := key(s, proto.KeyDown); snap.Candidates == nil || snap.Candidates.Title != "" {
+		t.Fatalf("待定的標點：%+v", snap.Candidates)
 	}
 }
