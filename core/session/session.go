@@ -1112,6 +1112,9 @@ func (s *Session) openCandidates(length int) {
 	if before {
 		pos = max(0, s.cursor-1)
 	}
+	if s.openMemorySpan(pos, before) { // 整合風格（mixed_memory）
+		return
+	}
 	if s.literals[pos] {
 		if p, ok := s.syllableLiteralAt(pos); ok {
 			s.openSyllableLiteral(p)

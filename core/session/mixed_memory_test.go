@@ -199,8 +199,51 @@ func TestMixedMemoryBackoffCorrectionAddsLocal(t *testing.T) {
 	if len(rs) != 2 || rs[0].Left != "我" || rs[0].Confirmed != 1 || rs[1].Left != "的" || !slices.Equal(rs[1].Form, mp3Chinese) {
 		t.Fatalf("記住的：%+v", rs)
 	}
-	if snap := typeContext(s, "2k7mp3"); snap.Text() != "的允" {
-		t.Fatalf("這個位置照新記的：%q", snap.Text())
+	if snap := typeContext(s, "2k7mp3"); snap.Text() != "的允" || len(s.memory.applied) != 1 || !s.memory.applied[0].hold() {
+		t.Fatalf("這個位置照新記的（跟官方一樣，不看合理度直接留著）：%q %+v", snap.Text(), s.memory.applied)
+	}
+}
+
+// 前後都對上的記憶要換成別的樣子時也看合理度（學過「我的i7」，「好的喔」不換），門檻照那一筆自己的確認次數放寬。
+func TestMixedMemoryExactNeedsPlausibility(t *testing.T) {
+	for _, tc := range []struct {
+		score     float64
+		confirmed int
+		want      string
+	}{
+		{-6, 1, "的mp3"},
+		{-3.5, 1, "的允"},
+		{-3.5, 3, "的mp3"}, // -4＋0.5×2＝-3
+	} {
+		s := memorySession()
+		var calls int
+		s.Rerank = rerank.Options{Weight: .1, TextWeight: 1, ContextRunes: rerank.MaxContextRunes, Scorer: memoryScorer(map[string]float64{"的允": tc.score}, &calls)}
+		for range tc.confirmed {
+			remember(s, "mp3", "的", "", mp3Literal)
+		}
+		if snap := typeContext(s, "2k7mp3"); snap.Text() != tc.want {
+			t.Errorf("的允 %v、確認 %d 次：%q，要 %q", tc.score, tc.confirmed, snap.Text(), tc.want)
+		}
+	}
+}
+
+// ↓ 落在照記憶換過的段落時開整段（mp3／允…），Shift＋Tab 照樣換到較短的；沒照記憶換的英數照舊從最後一個字開始。
+func TestMixedMemoryDownOpensWholeSpan(t *testing.T) {
+	s := memorySession()
+	remember(s, "mp3", "我", "", mp3Literal)
+	typeContext(s, "ji3mp3")
+	if items := itemTexts(key(s, proto.KeyDown)); s.cand.start != 1 || s.cand.length != 3 || len(items) < 2 || items[0] != "mp3" || !slices.Contains(items, "允") {
+		t.Fatalf("整段：start=%d length=%d %q", s.cand.start, s.cand.length, items)
+	}
+	if key(s, proto.KeyBackTab); s.cand.start != 2 || s.cand.length != 2 {
+		t.Fatalf("Shift＋Tab：start=%d length=%d", s.cand.start, s.cand.length)
+	}
+	s = memorySession()
+	if snap := typeContext(s, "ji3npm "); snap.Text() != "我npm " {
+		t.Fatalf("前提（mixed_context）：%q", snap.Text())
+	}
+	if key(s, proto.KeyDown); s.cand.length != 1 {
+		t.Fatalf("沒照記憶換的英數：length=%d", s.cand.length)
 	}
 }
 
@@ -224,8 +267,6 @@ func TestMixedMemoryShiftDeleteForgets(t *testing.T) {
 	remember(s, "mp3", "我", "", mp3Literal)
 	typeContext(s, "ji3mp3")
 	key(s, proto.KeyDown)
-	key(s, proto.KeyTab)
-	key(s, proto.KeyTab)
 	if items := itemTexts(key(s, proto.KeyDown)); s.cand.length != 3 || len(items) < 2 || items[s.cand.cursor] == "mp3" {
 		t.Fatalf("前提：反白 mp3 以外的項目：%q", items)
 	}

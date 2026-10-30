@@ -377,8 +377,8 @@ func (s *Session) chineseSyllable(keys string) (zhuyin.Syllable, bool) {
 	return groups[0].syllable()
 }
 
-// memoryDecide 決定 p（現在是 official 的樣子）要不要照 records 換：前一個字與後一個音都對上的紀錄直接照它；
-// 只有按鍵對上時，每筆紀錄都換成同樣子才照合理度決定，不一致時照官方。
+// memoryDecide 決定 p（現在是 official 的樣子）要不要照 records 換，換成別的樣子時都看合理度：前一個字與後一個音都對上的
+// 紀錄照它自己的確認次數（跟官方一樣時直接留著）；只有按鍵對上時，每筆紀錄都換成同樣子才照加總的確認次數，不一致時照官方。
 func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, official []personal.MixedToken) (memoryApplied, bool) {
 	if len(records) == 0 {
 		return memoryApplied{}, false
@@ -386,7 +386,8 @@ func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, off
 	here := personal.MixedRef{Keys: records[0].Keys, Left: s.memoryLeft(p.start), Right: s.memoryRight(p.end)}
 	for _, r := range records {
 		if r.MixedRef == here {
-			return memoryApplied{p, personal.MixedApplied{MixedRef: here, Exact: true, Form: r.Form}, official}, s.memoryInsertable(r.Form)
+			a := memoryApplied{p, personal.MixedApplied{MixedRef: here, Exact: true, Form: r.Form}, official}
+			return a, s.memoryInsertable(r.Form) && (a.hold() || s.memoryPlausible(p, official, r.Form, r.Confirmed))
 		}
 	}
 	form, confirmed := records[0].Form, 0
@@ -400,7 +401,7 @@ func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, off
 	return a, s.memoryInsertable(form) && s.memoryPlausible(p, official, form, confirmed)
 }
 
-// memoryPlausible：只有按鍵對上的記憶照合理度換。兩邊都沒有中文（a␣ ↔ ㄇ）時直接換，但附近有英文時不換成注音。
+// memoryPlausible：把 official 換成 form 時中文那一側合不合理。兩邊都沒有中文（a␣ ↔ ㄇ）時直接換，但附近有英文時不換成注音。
 func (s *Session) memoryPlausible(p memorySpan, official, form []personal.MixedToken, confirmed int) bool {
 	step := memoryConfirmStep * float64(confirmed-1)
 	english := 0.0
@@ -710,6 +711,20 @@ func (s *Session) learnMixedMemory() {
 		}
 	}
 	s.model.LearnMixedMemory(choices, used)
+}
+
+// openMemorySpan：↓ 落在照記憶換過的段落裡時開整段的候選（mp3／允／狁…），不從最後一個字（3）開始。
+func (s *Session) openMemorySpan(pos int, before bool) bool {
+	i := s.memory.appliedAt(memorySpan{pos, pos + 1}, false)
+	if i < 0 {
+		return false
+	}
+	p := s.memory.applied[i].memorySpan
+	anchor := p.start
+	if before {
+		anchor = p.end
+	}
+	return p.end-p.start > 1 && s.openAnchored(anchor, p.end-p.start, before)
 }
 
 // forgetMemoryCandidate：候選窗反白的是照記憶換過的那段畫面上的樣子時，Shift＋Delete 刪掉讓它被換的紀錄、換回原本的樣子，
