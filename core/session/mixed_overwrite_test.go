@@ -111,10 +111,11 @@ func TestMixedOverwriteNeural(t *testing.T) {
 	}
 }
 
-// 前面多一個聲母、官方切開時畫面上的字（車g塑 的「塑」）跟蓋完會出的字（接在「車」後面是「速」）不同：字母效果照蓋完的字算。
+// 前面多一個聲母：字母效果照神經模型挑的蓋完的字（接在「車」後面是「速」）算，不照官方切開時畫面上的字（車g塑 的「塑」），
+// 也不照統計解碼（「塑」比較常用）。
 func TestMixedOverwriteLeadScoresOverwrittenChar(t *testing.T) {
 	s := overwriteSession(map[string]float64{"車速": -2, "車g速": -6, "車塑": -5, "車g塑": -5.5},
-		word{"車", "ㄔㄜ", 1e-3}, word{"塑", "ㄙㄨˋ", 5e-3}, word{"車速", "ㄔㄜ ㄙㄨˋ", 1e-3})
+		word{"車", "ㄔㄜ", 1e-3}, word{"塑", "ㄙㄨˋ", 5e-3})
 	typeContext(s, "tk ")
 	if !s.overwriteWanted(overwriteCase{start: 1, syl: "ㄙㄨˋ", shown: []rune("g塑"), after: '塑', lead: true}) {
 		t.Error("車g塑 要照「速」算成打錯")
