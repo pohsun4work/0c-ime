@@ -222,11 +222,11 @@ func (s *Session) memoryRuns(end int) [][]memoryToken {
 }
 
 // memoryBoundary：pos 不在照字面的英數字中間（data␣ 裡的 a␣、mp3s 裡的 mp3 不是一段）。
-func (s *Session) memoryBoundary(pos int) bool {
-	alnum := func(p int) bool {
-		return p >= 0 && p < len(s.syls) && (s.letterAt(p) || s.literals[p] && isDigitText(string(s.syls[p])))
-	}
-	return !alnum(pos-1) || !alnum(pos)
+func (s *Session) memoryBoundary(pos int) bool { return !s.alnumAt(pos-1) || !s.alnumAt(pos) }
+
+// alnumAt：p 是照字面的英文字母或數字（alnumLiteralAt 連數字標點也算）。
+func (s *Session) alnumAt(p int) bool {
+	return p >= 0 && p < len(s.syls) && (s.letterAt(p) || s.literals[p] && isDigitText(string(s.syls[p])))
 }
 
 // memoryIndex 是每次重看用的記憶索引與最長的按鍵長度。
@@ -368,10 +368,16 @@ func (s *Session) formText(t personal.MixedToken) string {
 	return s.keyGroupsText(s.groupsOf(t.Keys), nil)
 }
 
-// chineseSyllable 是一個音節的按鍵（mp3）的讀音。
+// chineseSyllable 是一個音節的按鍵（mp3）的讀音；整合風格（mixed_overwrite）也認得打錯又補對的按鍵（5jiy6）。
 func (s *Session) chineseSyllable(keys string) (zhuyin.Syllable, bool) {
 	groups := s.groupsOf(keys)
 	if len(groups) != 1 || groups[0].literal {
+		if !s.mixedOverwrite() {
+			return "", false
+		}
+		if o, ok := s.overwriteReading(keys); ok {
+			return o.group.syllable()
+		}
 		return "", false
 	}
 	return groups[0].syllable()
@@ -601,10 +607,20 @@ func (s *Session) scoreCells(cells []memoryCell) (float64, bool) {
 	return sum / float64(chars), true
 }
 
+// neuralText：神經模型的單音節文字評分用得上（私人、暫停時不用）。
+func (s *Session) neuralText() bool {
+	opt := s.Rerank
+	return opt.Scorer != nil && opt.TextWeight > 0 && opt.ContextRunes > 0 && !s.private && !s.paused
+}
+
+// neuralWindow 是 before 最後面神經模型看得到的前文。
+func (s *Session) neuralWindow(before string) string {
+	return lastRunes(before, min(s.Rerank.ContextRunes, rerank.MaxContextRunes))
+}
+
 // neuralScore 是 segs 每個字照前文的平均 log10 機率（神經模型的單音節文字評分）；有一個字評不了就回傳 false。
 func (s *Session) neuralScore(segs []memorySeg) (float64, bool) {
-	opt := s.Rerank
-	if opt.Scorer == nil || opt.TextWeight <= 0 || opt.ContextRunes <= 0 || s.private || s.paused {
+	if !s.neuralText() {
 		return 0, false
 	}
 	var sum float64
@@ -612,7 +628,7 @@ func (s *Session) neuralScore(segs []memorySeg) (float64, bool) {
 	for _, g := range segs {
 		before := s.neuralContext() + g.before
 		for k, r := range []rune(g.word) {
-			v, ok := s.neuralChar(lastRunes(before, min(opt.ContextRunes, rerank.MaxContextRunes)), r, g.reading[k])
+			v, ok := s.neuralChar(s.neuralWindow(before), r, g.reading[k])
 			if !ok {
 				return 0, false
 			}
@@ -658,8 +674,11 @@ func (s *Session) neuralChar(context string, r rune, syl zhuyin.Syllable) (float
 // 把換了的部分記成這次的選擇，送出時學（learnMixedMemory）。
 func (s *Session) noteMemoryChoice(id int) func() {
 	c := s.cand
-	if !s.mixedMemory() || c.english || c.mixed {
+	if !s.mixedMemory() || c.english {
 		return func() {}
+	}
+	if c.mixed {
+		return s.notePendingOverwrite(id)
 	}
 	start, length := c.span(id)
 	tokens, ok := s.memoryTokens(start, start+length)

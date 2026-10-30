@@ -21,6 +21,7 @@
     - 組字中的標示（`core/session/mark_span.go`）：Shift＋Home／End 一次標到頭尾（同一直按 Shift＋←／→，最多 32 字）；標示中按 ↓ 同從開頭按 ↓ 再按 Tab 換到那個長度，中間有空白或符號也能換整段；整段英文按 Enter 加成「我的詞彙」的英文詞
     - 候選開著時 Shift＋Tab 是 Tab 的反方向（操作規則 candidate_backtab）：換到較短的詞長，最短再按回到最長；待定的按鍵同 Tab 先照畫面定案，不會換到切開注音的長度
     - 混打修正記憶（操作規則 mixed_memory，`core/session/mixed_memory.go`、`core/personal/mixed_memory.go`）：用 ↓ 把一段按鍵換成別的解釋（mp3 出「允」選回 mp3、「我ㄇ」選回 a、$20␣ 換成「$單」）再按 Enter，記住「按鍵＋前一個字＋後一個音 → 每段當英數、中文或注音」，存在 user.json 的 `MixedMemory`（最多 1024 筆，最久沒用到的先丟）。照記憶換之前看中文那一側合不合理（有神經模型時照前文評分，沒有時用語言模型；每個字平均 log10 機率以 -4 為界，每多確認一次、附近有英文都往不是中文那邊調）：前一個字、後一個音都對上的紀錄照它自己的確認次數（學過「我的i7」，「好的喔」不換），只有按鍵對上時每筆紀錄都要換成同樣子、確認次數加總；條件不再成立時換回（mp3 接著打出「允許」）。照記憶換的、這次用 ↓ 換過解釋的段落按 ↓ 直接開整段的候選（mp3／允／狁…），用 ↓ 改回會抵銷那筆記憶；候選窗反白畫面上的樣子時按 Shift＋Delete 刪掉記憶。中文選哪個字不記（官方的更正會記），私人欄位與暫停時照記憶換但不學
+    - 打錯又補對的注音鍵（操作規則 mixed_overwrite，`core/session/mixed_overwrite.go`）：同一格（聲母、介音或韻母）按了兩次時照微軟新注音後按的蓋掉先按的（5jiy6 是「昨」、gjn␣ 是「蘇」），由神經模型照前文決定換不換：前面多一個聲母（gnj4、nh4）時看那個字母讓後面的字更合理還是更不合理（車子的g速 換成「速」、我講過n次 留著），其他看蓋完的中文字比畫面上照字面的樣子合理多少（ios7、json␣ 照字面很順，留著）。沒有神經模型、私人、暫停或沒有前文時照舊；英文字、我的詞彙、前面緊接英數的不換。↓ 清單不看神經模型也列蓋完的字，選了再送出就由混打修正記憶記住
   - 整合風格跑官方測試：`go test -tags blendall ./core/session` 讓每個 session 都套用整合風格；預期不同的測試與原因列在 `core/session/testdata/blend_expected_diffs.txt`，`py -3.12 scripts/blend_official_diff.py` 核對其他官方測試都通過、列出的測試關掉對應的規則後也通過
   - 跟混打的相容：官方的規則照官方逐條判斷（`internal/settings` 的 `styleConflicts`）；fork 新加的規則欄位是為混打設計的，在 `inputstyle.Rules` 標 `fork:"blend"`，不在官方的衝突表上。非標準排列的限制也不算這些欄位（`internal/settings/mixed_compat.go` 的 `officialRulesDefault`）。
 
