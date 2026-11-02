@@ -1,5 +1,5 @@
 > [!NOTE]
-> 這是 [0c-biggo/0c-ime](https://github.com/0c-biggo/0c-ime) 的 hoshi 修改版（fork），輸入行為與更新來源都跟官方不同，差異見 [hoshi/README.md](hoshi/README.md)。
+> 這是 [0c-biggo/0c-ime](https://github.com/0c-biggo/0c-ime) 的修改版（fork），輸入行為與更新來源都跟官方不同，差異見 [hoshi/README.md](hoshi/README.md)。
 > 要安裝這個版本請到本 repo 的 [Releases](https://github.com/pohsun4work/0c-ime/releases/latest)（安裝方式見 [INSTALL.md](hoshi/windows/INSTALL.md)）；下方的官網、下載、回報問題連結都是官方版。
 
 <p align="center">
