@@ -77,7 +77,7 @@ func TestMixedContextRules(t *testing.T) {
 		{[]string{"img "}, "ㄕㄩㄛ", "img "},
 		{[]string{"tmp "}, "ㄔㄩㄣ", "tmp "},
 		// 數字鍵盤夾在字母中間的英數詞。
-		{[]string{"e", "KP2", "e"}, "ㄍ2ㄍ", "e2e"},
+		{[]string{"e", "KP2", "e"}, "ㄍ2e", "e2e"},
 		{[]string{"e", "KP2", "es"}, "ㄍ2es", "e2es"},
 		{[]string{"e", "KP2", "su"}, "ㄍ2ㄋㄧ", "e2su"},
 		{[]string{"e", "KP2"}, "ㄍ2", "e2"},
