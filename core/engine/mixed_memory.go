@@ -70,9 +70,6 @@ func keysZhuyin(keys string) string {
 	var c zhuyin.Composer
 	for _, k := range keys {
 		sym, ok := layout.Standard.Symbol(k)
-		if k == ' ' {
-			sym, ok = zhuyin.Tone1, true
-		}
 		if !ok {
 			b.WriteString(c.String())
 			c.Reset()

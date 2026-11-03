@@ -17,25 +17,30 @@ import (
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
-// memorySession 是整合風格的混打 session；允 單獨很少見（mp3 換掉它），允許、單是常見的詞。
-func memorySession() *Session {
+// wordSession 是整合風格的混打 session，詞庫與語言模型只有 words，英文字典只有 englishWords。
+func wordSession(words []word, englishWords ...string) *Session {
 	lex, sys := lexicon.NewMem(), lm.NewMem()
-	for _, e := range []word{
-		{"我", "ㄨㄛˇ", 1e-2}, {"的", "ㄉㄜ˙", 2e-2}, {"你", "ㄋㄧˇ", 5e-3}, {"好", "ㄏㄠˇ", 4e-3}, {"允", "ㄩㄣˇ", 1e-7},
-		{"許", "ㄒㄩˇ", 1e-4}, {"允許", "ㄩㄣˇ ㄒㄩˇ", 1e-3}, {"檔", "ㄉㄤˇ", 1e-4}, {"單", "ㄉㄢ", 1e-3}, {"喔", "ㄛ˙", 1e-4},
-	} {
+	for _, e := range words {
 		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
 	s.InputStyle = blendRules()
 	s.MixedInput, s.CtrlPunct = true, true
-	var words []english.Word
-	for _, w := range []string{"a", "is", "hello"} {
-		words = append(words, english.Word{Text: w, Weight: 3})
+	var dict []english.Word
+	for _, w := range englishWords {
+		dict = append(dict, english.Word{Text: w, Weight: 3})
 	}
-	s.English = english.New(words)
+	s.English = english.New(dict)
 	return s
+}
+
+// memorySession：允 單獨很少見（mp3 換掉它），允許、單是常見的詞。
+func memorySession() *Session {
+	return wordSession([]word{
+		{"我", "ㄨㄛˇ", 1e-2}, {"的", "ㄉㄜ˙", 2e-2}, {"你", "ㄋㄧˇ", 5e-3}, {"好", "ㄏㄠˇ", 4e-3}, {"允", "ㄩㄣˇ", 1e-7},
+		{"許", "ㄒㄩˇ", 1e-4}, {"允許", "ㄩㄣˇ ㄒㄩˇ", 1e-3}, {"檔", "ㄉㄤˇ", 1e-4}, {"單", "ㄉㄢ", 1e-3}, {"喔", "ㄛ˙", 1e-4},
+	}, "a", "is", "hello")
 }
 
 var (
@@ -439,19 +444,10 @@ func TestMixedMemorySurvivesRestoredInsert(t *testing.T) {
 
 // reversedSession 收了反序打得出的字（ps4 是嫩、u2 是低、i16 是博），照語言模型都夠合理。
 func reversedSession() *Session {
-	lex, sys := lexicon.NewMem(), lm.NewMem()
-	for _, e := range []word{
+	return wordSession([]word{
 		{"我", "ㄨㄛˇ", 1e-2}, {"很", "ㄏㄣˇ", 5e-3}, {"嫩", "ㄋㄣˋ", 1e-3}, {"低", "ㄉㄧ", 1e-3}, {"博", "ㄅㄛˊ", 1e-3},
 		{"億", "ㄧˋ", 1e-3}, {"允", "ㄩㄣˇ", 1e-3},
-	} {
-		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
-		sys.SetUni(e.w, e.p)
-	}
-	s := New(personal.NewModel(lex, sys))
-	s.InputStyle = blendRules()
-	s.MixedInput, s.CtrlPunct = true, true
-	s.English = english.New([]english.Word{{Text: "hello", Weight: 3}})
-	return s
+	}, "hello")
 }
 
 // 混打修正記憶開著時，字母開頭的反序在打聲調或空白之前照字面（Enter 送出字母），打了就是中文，句首、英文後面也是；
@@ -501,6 +497,47 @@ func TestMixedMemoryPendingAlnum(t *testing.T) {
 	}
 	if items := itemTexts(key(s, proto.KeyDown)); !slices.Contains(items, "嫩") {
 		t.Fatalf("↓：%q", items)
+	}
+
+	// 句首只有待定按鍵時，前一個字是確認過的前文；畫面跟送出一樣。
+	s = reversedSession()
+	remember(s, "ps4", "很", "", []personal.MixedToken{{Keys: "ps4", Kind: personal.MixedChinese}})
+	s.documentEnabled, s.Rerank.ContextRunes, s.neuralLeft = true, rerank.MaxContextRunes, "牛排很"
+	if snap := typeContext(s, "ps4"); snap.Text() != "嫩" {
+		t.Fatalf("前文是很的句首：%q", snap.Text())
+	}
+}
+
+// 單一個注音鍵接空白組成的字（g␣ 是詩）用 ↓ 選回原按鍵：同官方選過的注音文只記前一個字，前面是英數時不記；
+// 再從官方清單選注音就忘掉，照官方出注音。
+func TestMixedMemoryLoneKeyChinese(t *testing.T) {
+	s := wordSession([]word{{"我", "ㄨㄛˇ", 1e-2}, {"詩", "ㄕ", 1e-3}, {"天", "ㄊㄧㄢ", 1e-3}}, "hello")
+	if snap := typeContext(s, "hello g "); snap.Text() != "hello 詩" {
+		t.Fatalf("前提：%q", snap.Text())
+	}
+	key(s, proto.KeyDown)
+	pickText(t, s, "g ")
+	key(s, proto.KeyEnter)
+	if rs := memoryRecords(s); len(rs) != 0 {
+		t.Fatalf("英數後面不記：%+v", rs)
+	}
+	typeContext(s, "ji3g wu0 ")
+	downPick(t, s, 1, "g ")
+	if snap := key(s, proto.KeyEnter); snap.Commit != "我g 天" {
+		t.Fatalf("送出：%q", snap.Commit)
+	}
+	if rs := memoryRecords(s); len(rs) != 1 || rs[0].MixedRef != (personal.MixedRef{Keys: "g ", Left: "我"}) || rs[0].Confirmed != 1 {
+		t.Fatalf("記住的：%+v", rs)
+	}
+	typeContext(s, "ji3g ")
+	key(s, proto.KeyDown)
+	pickText(t, s, "ㄕ")
+	key(s, proto.KeyEnter)
+	if rs := memoryRecords(s); len(rs) != 0 {
+		t.Fatalf("選注音要忘掉：%+v", rs)
+	}
+	if snap := typeContext(s, "ji3g "); snap.Text() != "我ㄕ" {
+		t.Fatalf("忘掉後：%q", snap.Text())
 	}
 }
 

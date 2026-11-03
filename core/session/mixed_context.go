@@ -53,16 +53,22 @@ func (s *Session) rejudge() {
 	}
 }
 
+// pendingTone：待定按鍵以聲調鍵結尾、還是打出來的樣子（沒用 ↓ 選過、沒接受補全、不是英文字），官方照字面留著。
+func (s *Session) pendingTone() bool {
+	p := s.mixed
+	return p.choice == 0 && p.accepted == "" && !s.englishWord && s.explicitTone(p.raw) && s.mixedText() == p.raw
+}
+
 // rejudgePending 重看官方組不成字、照字面留著的待定「字母＋聲調鍵」：同一個字母多按了幾次（ggggk6、jji3 是什、我），
 // 或在兩個聲母之間切開、前段是英文（initialConflict）。
 func (s *Session) rejudgePending() {
 	repeats, initial := s.contextRule(inputstyle.ContextRepeats), s.contextRule(inputstyle.ContextInitial)
 	p := s.mixed
-	if !repeats && !initial || p.choice != 0 || p.accepted != "" || s.englishWord || !s.explicitTone(p.raw) {
+	if !repeats && !initial || !s.pendingTone() {
 		return
 	}
 	body := p.raw[:len(p.raw)-1]
-	if !isLetters(body) || s.knownEnglish(body) || s.mixedText() != p.raw {
+	if !isLetters(body) || s.knownEnglish(body) {
 		return
 	}
 	tone, _ := s.layout.Symbol(rune(p.raw[len(p.raw)-1]))

@@ -89,8 +89,7 @@ func (s *Session) overwriteAt(keys string) (overwrite, zhuyin.Syllable, bool) {
 // rejudgeOverwritePending：官方照字面留著的待定按鍵（5jiy6）是打錯又補對的時，換成蓋完的音節。
 func (s *Session) rejudgeOverwritePending() {
 	p := s.mixed
-	if p.choice != 0 || p.accepted != "" || s.englishWord || !s.explicitTone(p.raw) || s.mixedText() != p.raw ||
-		s.alnumAt(s.cursor-1) {
+	if !s.pendingTone() || s.alnumAt(s.cursor-1) {
 		return
 	}
 	if o, syl, ok := s.overwriteAt(p.raw); ok && s.overwriteWanted(overwriteCase{start: s.cursor, syl: syl, shown: []rune(p.raw), lead: o.lead}) {

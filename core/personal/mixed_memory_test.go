@@ -178,6 +178,17 @@ func TestMixedMemoryAgesByDays(t *testing.T) {
 		t.Fatalf("照常用著不淘汰、不算再確認：%+v", rs)
 	}
 
+	// 從別處套用時，按鍵與樣子相同、已經淘汰還沒清掉的紀錄不跟著救回來。
+	m = mixedModel()
+	m.AdvanceTime(1000 * daySeconds)
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: mp3Of, Form: mp3Literal}}, nil)
+	m.AdvanceTime(m.Store.Time + 130*daySeconds)
+	mine := MixedRef{"mp3", "我", ""}
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: mine, Form: mp3Literal}}, []MixedApplied{{MixedRef: MixedRef{"mp3", "柳", ""}, Form: mp3Literal}})
+	if _, ok := m.Store.MixedMemory[mp3Of.key()]; ok || len(mixedRecords(m, "mp3")) != 1 {
+		t.Fatalf("淘汰的被救回：%v", m.Store.MixedMemory)
+	}
+
 	// 舊版沒有 Evidence 的紀錄照常作用，下次學的時候從那天起算。
 	m = mixedModel()
 	m.AdvanceTime(1000 * daySeconds)

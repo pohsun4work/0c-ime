@@ -485,12 +485,10 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 		}
 		put("fuzzy", raw)
 	}
-	if _, unread := kept["blend"]; !unread && s.Blend != inputstyle.DefaultExtras() {
-		raw, err := json.Marshal(s.Blend)
-		if err != nil {
+	if _, unread := kept["blend"]; unread || s.Blend != inputstyle.DefaultExtras() {
+		if err := typed("blend", s.Blend); err != nil {
 			return nil, err
 		}
-		put("blend", raw)
 	}
 	names := make([]string, 0, len(kept))
 	for key := range kept {

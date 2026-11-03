@@ -26,7 +26,7 @@ func blendSwitch(key, label, description string, mixed bool, field func(*inputst
 
 func blendSpecs() []blendSpec {
 	return []blendSpec{
-		blendSwitch("mixed-resplit", "↓／Tab 跨過英數換整段", "↓ 可把幾個字一起換成英文、注音或中文，Tab 換詞長可跨過英數；↓ 換過的會記住，下次照前後文換",
+		blendSwitch("mixed-resplit", "↓／Tab 跨過英數換整段", "↓ 可把幾個字一起換成英文、注音或中文，Tab 換詞長可跨過英數",
 			true, func(x *inputstyle.Extras) *bool { return &x.MixedResplit }),
 		blendSwitch("mixed-repeats", "自動刪除冗餘注音", "同一個字母多按幾次再打聲調時合成一個字：ggggk6 是「什」",
 			true, func(x *inputstyle.Extras) *bool { return &x.MixedRepeats }),

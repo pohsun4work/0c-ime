@@ -233,7 +233,7 @@ func (s *Session) alnumAt(p int) bool {
 
 // memoryIndex 是每次重看用的記憶索引與最長的按鍵長度。
 func (s *Session) memoryIndex() (map[string][]personal.MixedRecord, int) {
-	if !s.mixedMemory() || len(s.syls) == 0 {
+	if !s.mixedMemory() {
 		return nil, 0
 	}
 	return s.model.MixedMemoryIndex()
@@ -334,8 +334,11 @@ func (s *Session) insertMemoryForm(form []personal.MixedToken) {
 		case personal.MixedLiteral:
 			s.insertMixedLiteral(t.Keys, false, false)
 		case personal.MixedChinese:
-			syl, _ := s.chineseSyllable(t.Keys)
-			s.insertMixedReading(syl, t.Keys)
+			if syl, ok := s.chineseSyllable(t.Keys); ok {
+				s.insertMixedReading(syl, t.Keys)
+			} else { // 只接得上原本游標前的字的讀音（readingContinues），換了位置組不成時照字面，不插空的音節
+				s.insertMixedLiteral(t.Keys, false, false)
+			}
 		case personal.MixedZhuyin:
 			s.insertZhuyinUnit(t.Keys)
 		}
@@ -380,19 +383,25 @@ func (s *Session) chineseSyllable(keys string) (zhuyin.Syllable, bool) {
 
 // memoryDecide 決定 p（現在是 official 的樣子）要不要照 records 換，換成別的樣子時都看合理度：前一個字與後一個音都對上的
 // 紀錄照它自己的確認次數（跟官方一樣時直接留著）；只有按鍵對上時，每筆紀錄都換成同樣子才換，不一致時照官方。
+// 單一個注音鍵接空白同官方選過的注音文（#208）只看前一個字、不從別處套用，換成注音的交給官方：注音文開關的選回原按鍵
+// （zhuyinDeclines）就是在這裡照字面留著，規則不再改成注音。
 func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, official []personal.MixedToken) (memoryApplied, bool) {
 	if len(records) == 0 {
 		return memoryApplied{}, false
 	}
-	if s.loneKeySpace(records[0].Keys) {
-		return s.loneKeyDecide(records, p, official)
+	here, ok := s.memoryRef(records[0].Keys, p)
+	if !ok {
+		return memoryApplied{}, false
 	}
-	here := personal.MixedRef{Keys: records[0].Keys, Left: s.memoryLeft(p.start), Right: s.memoryRight(p.end)}
+	lone := s.loneKeySpace(here.Keys)
 	for _, r := range records {
-		if r.MixedRef == here {
+		if r.MixedRef == here && !(lone && hasKind(r.Form, personal.MixedZhuyin)) {
 			a := memoryApplied{p, personal.MixedApplied{MixedRef: here, Exact: true, Form: r.Form}, official}
 			return a, s.memoryInsertable(r.Form) && (a.hold() || s.memoryPlausible(p, official, r.Form, r.Confirmed))
 		}
+	}
+	if lone {
+		return memoryApplied{}, false
 	}
 	form := records[0].Form
 	for _, r := range records {
@@ -715,11 +724,7 @@ func (s *Session) learnMixedMemory() {
 	}
 	var choices []personal.MixedChoice
 	for _, c := range s.memory.choices {
-		if s.memoryFormIs(c.memorySpan, c.form) {
-			ref := personal.MixedRef{Keys: joinKeys(c.form), Left: s.memoryLeft(c.start), Right: s.memoryRight(c.end)}
-			if s.loneKeySpace(ref.Keys) {
-				ref.Left, _ = s.zhuyinLeft(c.start) // 同 loneKeyDecide
-			}
+		if ref, ok := s.memoryRef(joinKeys(c.form), c.memorySpan); ok && s.memoryFormIs(c.memorySpan, c.form) {
 			choices = append(choices, personal.MixedChoice{MixedRef: ref, Form: c.form, Contest: c.contest})
 		}
 	}
@@ -731,7 +736,22 @@ func (s *Session) learnMixedMemory() {
 	for _, a := range picked {
 		s.model.ForgetMixedMemory(a)
 	}
-	s.model.LearnMixedMemory(append(choices, declines...), used)
+	for _, d := range declines { // 從官方清單選回原按鍵也是一次 ↓ 選擇，不重複算
+		if !slices.ContainsFunc(choices, func(c personal.MixedChoice) bool { return c.MixedRef == d.MixedRef }) {
+			choices = append(choices, d)
+		}
+	}
+	s.model.LearnMixedMemory(choices, used)
+}
+
+// memoryRef 是 p 這段按鍵記成與查找的位置。單一個注音鍵接空白同官方選過的注音文（zhuyinDeclines）只看前一個字，
+// 前面是英數、標點時不記也不查。
+func (s *Session) memoryRef(keys string, p memorySpan) (personal.MixedRef, bool) {
+	if s.loneKeySpace(keys) {
+		left, ok := s.zhuyinLeft(p.start)
+		return personal.MixedRef{Keys: keys, Left: left}, ok
+	}
+	return personal.MixedRef{Keys: keys, Left: s.memoryLeft(p.start), Right: s.memoryRight(p.end)}, true
 }
 
 // openMemorySpan：↓ 落在照記憶換過、或這次用 ↓ 換過解釋的段落裡時開整段的跨英數候選（mp3／允／狁…），不從最後一個字
@@ -812,8 +832,7 @@ func (s *Session) notePendingChoice(id int) func() {
 func (s *Session) rejudgeMemoryPending(index map[string][]personal.MixedRecord) {
 	p := s.mixed
 	records := index[p.raw]
-	if len(records) == 0 || p.choice != 0 || p.accepted != "" || s.englishWord || !s.explicitTone(p.raw) ||
-		s.mixedText() != p.raw || s.alnumAt(s.cursor-1) || s.alnumAt(s.cursor) {
+	if len(records) == 0 || !s.pendingTone() || s.alnumAt(s.cursor-1) || s.alnumAt(s.cursor) {
 		return
 	}
 	s.refresh()
@@ -839,22 +858,6 @@ func (s *Session) loneKeySpace(keys string) bool {
 	}
 	_, ok := s.keySymbol(keys[:1])
 	return ok
-}
-
-// loneKeyDecide 是單一個注音鍵接空白的 memoryDecide：同官方選過的注音文（#208）只看前一個字（zhuyinLeft），不從別處套用，
-// 換成注音的交給官方。注音文開關的選回原按鍵（zhuyinDeclines）就是在這裡照字面留著，規則不再改成注音。
-func (s *Session) loneKeyDecide(records []personal.MixedRecord, p memorySpan, official []personal.MixedToken) (memoryApplied, bool) {
-	left, ok := s.zhuyinLeft(p.start)
-	if !ok {
-		return memoryApplied{}, false
-	}
-	for _, r := range records {
-		if r.Left == left && !hasKind(r.Form, personal.MixedZhuyin) {
-			a := memoryApplied{p, personal.MixedApplied{MixedRef: r.MixedRef, Exact: true, Form: r.Form}, official}
-			return a, s.memoryInsertable(r.Form) && (a.hold() || s.memoryPlausible(p, official, r.Form, r.Confirmed))
-		}
-	}
-	return memoryApplied{}, false
 }
 
 // zhuyinDeclines 是送出時官方注音文事件（zhuyinKeyCommits）裡要記的，同一個前字與符號以最後一個為準：注音文開關開著時

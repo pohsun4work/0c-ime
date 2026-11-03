@@ -859,7 +859,7 @@ window.ZcVocab = function (ctx) {
     }
     if (!v.mixed) { el.mixed.append(h('p', { class: 'muted' }, '讀取中…')); return; }
     if (!v.mixed.length) {
-      el.mixed.append(h('div', { class: 'card vempty' }, h('p', { class: 'muted' }, '還沒有混打記憶。開著中英混打與「↓／Tab 跨過英數換整段」時，用 ↓ 換過再送出的會出現在這裡。')));
+      el.mixed.append(h('div', { class: 'card vempty' }, h('p', { class: 'muted' }, '還沒有混打記憶。開著中英混打時，用 ↓ 換過再送出的會出現在這裡。')));
     } else {
       const sel = v.mixedSel;
       const name = (x) => shownKeys(x.keys) + ' → ' + formText(x.form);
@@ -894,7 +894,7 @@ window.ZcVocab = function (ctx) {
     v.mixedSeq++; // 刪除前送出的讀取不再套用
     let r;
     try { r = await req({ op, texts: ids }); } catch (error) { r = { error: { message: String(error) } }; } finally { v.mixedBusy = false; }
-    if (!r.ok) { toast(errText(r), 'error'); return; }
+    if (!r.ok) { toast(errText(r), 'error'); loadMixed(); return; } // 上面作廢了進行中的讀取
     ids.forEach((id) => v.mixedSel.delete(id));
     v.mixed = r.mixed || [];
     v.mixedEnglish = r.english || [];

@@ -96,7 +96,7 @@ func (m *Model) changedMixed() { m.mixedIndex.groups = nil }
 
 // LearnMixedMemory 學一次送出裡的選擇。記憶換的段落被改成別的樣子時：前後都對上的那筆（Contest）扣一次確認
 // （只確認過一次就刪），這次不記新的，再選一次才記；從別處套用的不動原本那筆，另記這個位置的紀錄。
-// used 是這次送出裡照記憶換或留著、沒被改掉的段落，用到的紀錄移到最新、暫停衰減。淘汰的紀錄這時拿掉。
+// used 是這次送出裡照記憶換或留著、沒被改掉的段落，用到的紀錄移到最新、暫停衰減。淘汰的紀錄先拿掉，不跟著被用到或確認。
 func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 	if len(choices) == 0 && len(used) == 0 {
 		return
@@ -112,6 +112,7 @@ func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 			m.Store.MixedMemory[k] = r
 		}
 	}
+	maps.DeleteFunc(m.Store.MixedMemory, func(_ string, r MixedRecord) bool { return !r.alive(now) })
 	touch := func(k string, r MixedRecord) {
 		serial++
 		r.Serial = serial
@@ -140,7 +141,6 @@ func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 		r.Evidence = r.Evidence.add(now, confirmUnit)
 		touch(k, r)
 	}
-	maps.DeleteFunc(m.Store.MixedMemory, func(_ string, r MixedRecord) bool { return !r.alive(now) })
 	if extra := len(m.Store.MixedMemory) - maxMixedMemory; extra > 0 {
 		mm := m.Store.MixedMemory
 		oldest := slices.SortedFunc(maps.Keys(mm), func(a, b string) int { return cmp.Compare(mm[a].Serial, mm[b].Serial) })
@@ -169,7 +169,9 @@ func (m *Model) ForgetMixedMemory(a MixedApplied) bool {
 	for _, k := range keys {
 		delete(m.Store.MixedMemory, k)
 	}
-	m.changedMixed()
+	if len(keys) > 0 {
+		m.changedMixed()
+	}
 	return len(keys) > 0
 }
 

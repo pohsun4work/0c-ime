@@ -116,6 +116,9 @@ func main() {
 	if *symbols != "" && *symbols != "microsoft" {
 		check(fmt.Errorf("未知的標點操作 %q（microsoft）", *symbols))
 	}
+	if *symbols != "" && *inputStyle == "" {
+		check(fmt.Errorf("-symbols 要配 -input-style：零值規則不走風格的標點操作"))
+	}
 	eng.InputStyle.Symbols = *symbols
 	datadir.ApplyEnglishStyle(eng)
 	for _, id := range strings.FieldsFunc(*fuzzyPairs, func(r rune) bool { return r == ',' }) {
