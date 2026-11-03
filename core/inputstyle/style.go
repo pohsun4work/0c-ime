@@ -41,7 +41,7 @@ type Rules struct {
 	VocabMark string `json:"vocab_mark,omitempty" fork:"blend"`
 	// shorter：候選開著時 Shift＋Tab 是 Tab 的反方向，換到較短的詞長，最短再按回到最長（candidate_tab 是 length 時）
 	CandidateBackTab string `json:"candidate_backtab,omitempty" fork:"blend"`
-	// context：記住 ↓ 換過的混打解釋（按鍵＋前一個字＋後一個音），下次照上下文決定要不要照記憶換；要開著 mixed_resplit
+	// context：記住 ↓ 換過的混打解釋（按鍵＋前一個字＋後一個音），下次照上下文決定要不要照記憶換
 	MixedMemory string `json:"mixed_memory,omitempty" fork:"blend"`
 	// neural：打錯一個注音鍵又補上同一格的鍵時照微軟新注音後按的蓋掉先按的（5jiy6 是「昨」），由神經模型照前文決定換不換，
 	// ↓ 清單也列蓋完的字
@@ -143,13 +143,6 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 	switch id {
 	case "0c":
 		p.Name = "靈犀注音"
-	case "blend": // 不列進內建清單：用 0c-update profile copy blend 複製成自訂風格，不鎖設定。混打的開關是全域的（Extras）。
-		p.Name = "整合風格"
-		p.Behavior.MixedInput = true
-		p.Behavior.EnglishAutocomplete = true
-		p.Behavior.EmojiShortcut = "off"
-		p.Rules.Symbols = "microsoft"
-		p.Rules.ShiftSpace = "fullwidth"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

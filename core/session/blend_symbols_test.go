@@ -12,20 +12,22 @@ import (
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
+// blendSession 是舊版整合風格配方的設定。
 func blendSession() *Session {
-	s := styleSession("blend")
-	p, _ := inputstyle.Get("blend")
+	s := styleSession("0c")
 	s.InputStyle = blendRules()
-	s.MixedInput = p.Behavior.MixedInput
-	s.EnglishAutocomplete = p.Behavior.EnglishAutocomplete
+	s.MixedInput, s.EnglishAutocomplete, s.EmojiShortcut = true, true, "off"
 	return s
 }
 
-// blendRules 是整合風格的規則加上全部的全域開關（同 0c-cli 的 blend）。
-func blendRules() inputstyle.Rules {
-	p, _ := inputstyle.Get("blend")
-	return inputstyle.AllExtras().Apply(p.Rules)
+// blendBase 是舊版整合風格配方的規則。
+func blendBase() inputstyle.Rules {
+	p, _ := inputstyle.Get("0c")
+	p.Rules.Symbols, p.Rules.ShiftSpace = "microsoft", "fullwidth"
+	return p.Rules
 }
+
+func blendRules() inputstyle.Rules { return inputstyle.AllExtras().Apply(blendBase()) }
 
 type microsoftCase struct {
 	n                   string

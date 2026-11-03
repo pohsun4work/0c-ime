@@ -4,7 +4,7 @@ import "testing"
 
 // 整合風格加的欄位只接受空值（靈犀原本的做法）與各自的值。
 func TestBlendRulesRejectUnknownValues(t *testing.T) {
-	p, _ := Get("blend")
+	p, _ := Get("0c")
 	for _, edit := range []func(*Rules){
 		func(r *Rules) { r.Symbols = "asus" },
 		func(r *Rules) { r.Width = "fullwidth" },

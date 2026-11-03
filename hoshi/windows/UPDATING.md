@@ -21,15 +21,7 @@ fork 的 GitHub Actions（`.github/workflows/fork-release.yml`）每 12 小時�
 
 ## 整合風格有新功能時
 
-新功能多半是全域開關，更新後直接出現在設定程式，不用重建風格。整合風格本身是一份自訂風格，建好之後內容就固定了；release 說明寫到整合風格的配方有變時，每台電腦重新建一份，再刪掉舊的：
-
-```powershell
-.\0c-update.exe profile copy blend --name 整合風格 -apply
-.\0c-update.exe settings -json   # 在 profiles.items 找到舊的那份整合風格的 id
-.\0c-update.exe profile delete <舊的 id>
-```
-
-也可以在設定程式的「選用風格」刪掉舊的那份。
+新功能是全域開關，更新後直接出現在設定程式，不用重建風格。以前用 `0c-update profile copy blend` 建的「整合風格」照常能用，它現在就是一份普通的自訂風格。
 
 ## 什麼時候需要按「允許」
 

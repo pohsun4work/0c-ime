@@ -5,8 +5,8 @@
 （0.2.7-hoshi.4.1、.4.2…），排在下一個正式版之前，正式版發布後自動更新照常蓋過去。
 字典取官方同版本的原始碼 tarball；neural/ 沿用已安裝版本的那份（prepare_neural 要在 Linux 編 bytecode）。
 
-打包完在 build\\local-preview\\ 留下 install.ps1（local_install.ps1 的複本），會跳 UAC：安裝、整合風格的配方有變時
-重建風格；-Rollback 退回上一版並用舊版的配方重建風格。--install 打包完直接執行它。
+打包完在 build\\local-preview\\ 留下 install.ps1（local_install.ps1 的複本），會跳 UAC 安裝；-Rollback 退回上一版。
+--install 打包完直接執行它。
 
   py -3.12 hoshi\\windows\\local_preview.py             # 在要測的 checkout 根目錄執行
   powershell -ExecutionPolicy Bypass -File build\\local-preview\\install.ps1 [-Rollback]

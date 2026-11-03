@@ -54,7 +54,9 @@ func main() {
 	outputSimplified := flag.Bool("output-simplified", false, "送出時轉成簡體字（組字與候選仍是繁體）")
 	spaceSelects := flag.Bool("space-selects", true, "注音打完按空白選字；關閉時空白輸入空格、↓ 選字。重播需使用相同開關")
 	selectionKeys := flag.String("selection-keys", "1234567890", "選字鍵：1234567890、1234qweras 或 asdfghjkl;（數字仍照位置選字）。重播需使用相同選字鍵")
-	inputStyle := flag.String("input-style", "", "套用內建風格的操作規則（0c、blend、microsoft、chewing、mcbopomofo、macos）；其他設定照各旗標。空白為零值規則。重播需使用相同風格")
+	inputStyle := flag.String("input-style", "", "套用內建風格的操作規則（0c、microsoft、chewing、mcbopomofo、macos）；其他設定照各旗標。空白為零值規則。重播需使用相同風格")
+	extras := flag.String("extras", "", "整合風格的全域開關：default（設定畫面的預設值）或 all（全部開）；空白照官方。重播需使用相同設定")
+	symbols := flag.String("symbols", "", "標點操作「微軟半形參考」：microsoft；空白照風格的標點。重播需使用相同設定")
 	keyboardLayout := flag.String("keyboard-layout", "standard", "鍵盤排列：standard、eten（倚天 41 鍵，停用混打與 = 開 Emoji）或 hsu（許氏，停用混打）。重播需使用相同排列")
 	flag.Parse()
 
@@ -101,11 +103,21 @@ func main() {
 			check(fmt.Errorf("未知風格 %q", *inputStyle))
 		}
 		eng.InputStyle = p.Rules
-		if p.ID == "blend" { // 整合風格開全部的全域開關
-			eng.InputStyle = inputstyle.AllExtras().Apply(p.Rules)
-		}
-		datadir.ApplyEnglishStyle(eng)
 	}
+	switch *extras {
+	case "":
+	case "default":
+		eng.InputStyle = inputstyle.DefaultExtras().Apply(eng.InputStyle)
+	case "all":
+		eng.InputStyle = inputstyle.AllExtras().Apply(eng.InputStyle)
+	default:
+		check(fmt.Errorf("未知的全域開關 %q（default、all）", *extras))
+	}
+	if *symbols != "" && *symbols != "microsoft" {
+		check(fmt.Errorf("未知的標點操作 %q（microsoft）", *symbols))
+	}
+	eng.InputStyle.Symbols = *symbols
+	datadir.ApplyEnglishStyle(eng)
 	for _, id := range strings.FieldsFunc(*fuzzyPairs, func(r rune) bool { return r == ',' }) {
 		id, mode, _ := strings.Cut(strings.TrimSpace(id), "=")
 		p, ok := fuzzy.ParsePair(id)
@@ -155,6 +167,9 @@ func main() {
 		}
 		if *inputStyle != "" {
 			fmt.Fprintf(rec, "# 重播需要相同的風格：0c-cli -input-style %s\n", *inputStyle)
+		}
+		if *extras != "" || *symbols != "" {
+			fmt.Fprintf(rec, "# 重播需要相同的全域開關與標點操作：0c-cli -extras %q -symbols %q\n", *extras, *symbols)
 		}
 		if *advanceAfterSelect {
 			fmt.Fprintln(rec, "# 重播需要相同的選字後游標設定：0c-cli -advance-after-select")

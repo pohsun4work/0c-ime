@@ -19,7 +19,6 @@ func TestBlendExtrasSwitchRulesOneByOne(t *testing.T) {
 	noReversed := without(func(x *inputstyle.Extras) { x.MixedReversed = false })
 	noLiteral := without(func(x *inputstyle.Extras) { x.MixedLiteral = false })
 	noZhuyin := without(func(x *inputstyle.Extras) { x.MixedZhuyinText = false })
-	p, _ := inputstyle.Get("blend")
 	for _, tc := range []struct {
 		keys  []string
 		extra inputstyle.Extras
@@ -46,7 +45,7 @@ func TestBlendExtrasSwitchRulesOneByOne(t *testing.T) {
 			t.Fatalf("%q：官方與全部開著一樣（%q），測不出開關", tc.keys, full)
 		}
 		s := contextSession(true)
-		s.InputStyle = tc.extra.Apply(p.Rules)
+		s.InputStyle = tc.extra.Apply(blendBase())
 		want := official
 		if tc.full {
 			want = full

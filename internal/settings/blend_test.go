@@ -29,13 +29,25 @@ func roundTrip(t *testing.T, s Settings) (Settings, string) {
 	return back, string(raw)
 }
 
-func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
-	s := freshSettings()
-	if err := s.ProfileAction("copy", "blend", "整合風格"); err != nil {
+// blendStyle 照舊版整合風格配方設自訂風格。
+func blendStyle(t *testing.T, s *Settings) {
+	t.Helper()
+	if err := s.ProfileAction("copy", "0c", "整合風格"); err != nil {
 		t.Fatal(err)
 	}
+	for _, kv := range [][2]string{{"mixed-input", "on"}, {"english-autocomplete", "on"}, {"emoji-shortcut", "off"},
+		{"style-punctuation", "microsoft-halfwidth"}, {"style-shift-space", "fullwidth"}} {
+		if err := s.Set(kv[0], kv[1]); err != nil {
+			t.Fatalf("%s=%s: %v", kv[0], kv[1], err)
+		}
+	}
+}
+
+func TestBlendStyleIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
+	s := freshSettings()
+	blendStyle(t, &s)
 	p, r := s.ActiveProfile(), s.ProfileRules()
-	if p.Builtin || p.Source != "blend" || p.Name != "整合風格" {
+	if p.Builtin || p.Name != "整合風格" {
 		t.Fatalf("not a custom copy: %+v", p)
 	}
 	want := inputstyle.Rules{Punctuation: "0c", ShiftSpace: "fullwidth", Symbols: "microsoft"}
@@ -84,14 +96,12 @@ func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
 	}
 }
 
-// 整合風格改了官方的規則（標點、Shift＋空白），同官方的自訂風格只在標準排列可選。
-func TestBlendFollowsOfficialKeyboardLayoutLimit(t *testing.T) {
+// 改了官方規則（標點、Shift＋空白）的自訂風格同官方，只在標準排列可選。
+func TestBlendStyleFollowsOfficialKeyboardLayoutLimit(t *testing.T) {
 	s := freshSettings()
-	if err := s.Set("keyboard-layout", "eten"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.ProfileAction("copy", "blend", "整合風格"); err == nil || !strings.Contains(err.Error(), "標準注音排列") {
-		t.Fatalf("blend on eten: %v", err)
+	blendStyle(t, &s)
+	if err := s.Set("keyboard-layout", "eten"); err == nil || !strings.Contains(err.Error(), "標準注音排列") {
+		t.Fatalf("blend style on eten: %v", err)
 	}
 }
 
@@ -136,12 +146,11 @@ func TestBlendSettingsAreGlobal(t *testing.T) {
 func TestBlendMigratesLegacyRecipe(t *testing.T) {
 	legacy := func(active bool) Settings {
 		s := freshSettings()
-		if err := s.ProfileAction("copy", "blend", "整合風格"); err != nil {
-			t.Fatal(err)
-		}
+		blendStyle(t, &s)
 		st := s.store()
 		for i := range st.Items {
-			if st.Items[i].Source == "blend" {
+			if !st.Items[i].Builtin {
+				st.Items[i].Source = "blend" // 舊版從配方複製
 				r := &st.Items[i].Rules
 				r.ShiftSpace, r.Width, r.EnglishRanking, r.EnglishLearning, r.SymbolBoard = "disabled", "shift_space", "frequency", "dictionary", "asus"
 				r.MixedResplit, r.MixedContext, r.VocabMark, r.CandidateBackTab, r.MixedMemory, r.MixedOverwrite = "keys", "rules", "extended", "shorter", "context", "neural"
