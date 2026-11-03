@@ -28,13 +28,11 @@ type Rules struct {
 	EnglishLearning string `json:"english_learning,omitempty" fork:"blend"` // dictionary：英文字典裡的詞確認 3 次就學會、不限天數
 	// microsoft：中文模式的標點照按鍵出半形（全形時照微軟新注音的全形），` 不開符號選單；Ctrl＋標點多 [ ] Shift+;，英文模式也打全形標點
 	Symbols string `json:"symbols,omitempty" fork:"blend"`
-	// shift_space：舊版整合風格的 Shift＋空白，讀進來換成 shift_space＝fullwidth（混打開著時判成英數的段落轉全形）
-	Width string `json:"width,omitempty" fork:"blend"`
 	// asus：Ctrl＋Alt＋, 開華碩注音的符號表（鍵盤形狀，一般／數學／特殊三頁）
 	SymbolBoard string `json:"symbol_board,omitempty" fork:"blend"`
 	// keys：↓／Tab 換詞長可以跨英數，整段換成英文、注音或中文
 	MixedResplit string `json:"mixed_resplit,omitempty" fork:"blend"`
-	// 每次按鍵後與送出前照上下文重看混打的判斷，逗號列出開著的規則（舊的 rules 是全部）：initial 聲母衝突、
+	// 每次按鍵後與送出前照上下文重看混打的判斷，逗號列出開著的規則：initial 聲母衝突、
 	// repeats 重複鍵、reversed 反序的英文字、zhuyin 注音文、literal 不是音節的注音與數字鍵盤夾在字母中間的英數詞
 	MixedContext string `json:"mixed_context,omitempty" fork:"blend"`
 	// extended：組字中的標示多 Shift＋Home／End 標到頭尾、↓ 換整段、整段英文按 Enter 加成英文詞
@@ -76,7 +74,6 @@ func (r Rules) Validate() error {
 		{"english_ranking", r.EnglishRanking, []string{"", "frequency"}},
 		{"english_learning", r.EnglishLearning, []string{"", "dictionary"}},
 		{"symbols", r.Symbols, []string{"", "microsoft"}},
-		{"width", r.Width, []string{"", "shift_space"}},
 		{"symbol_board", r.SymbolBoard, []string{"", "asus"}},
 		{"mixed_resplit", r.MixedResplit, []string{"", "keys"}},
 		{"vocab_mark", r.VocabMark, []string{"", "extended"}},

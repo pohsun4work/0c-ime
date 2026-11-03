@@ -27,7 +27,6 @@
     - 標點操作多第 5 個選項「微軟半形參考」（操作規則 symbols＝microsoft，punctuation 照靈犀）：沒有反引號前綴，標點照微軟出半形；「Ctrl＋標點打全形」選它時多 Ctrl＋[ ] 打「」，英文模式也適用。可以跟不打聲調並用，這時組字中的 \ 出半形 \（打成「西\你」），頓號改用 Ctrl＋'
     - Shift＋空白併進官方的「切換全半形」：中英混打作用時用整合風格的全形（混打照常判斷，判成英數的段落轉全形），沒有時照官方。所以拿掉官方「Shift＋空白切換全半形時關閉中英混打」那條衝突，改了兩個官方測試（`profiles_test.go` 的 TestCustomRulesCannotBypassCompatibility 改用 Tab 調整斷詞、TestStyleRulesDisableOnlyConflictingFeatures 的 fullwidth 不再停用混打）；另外三個列出全部設定項的官方測試（TestItemsListEveryKeyWithCurrentValue、TestETenDisablesMixedAndEmojiItems、TestHsuDisablesOnlyMixedInput）把新加的項目算進去或略過
     - 「我的詞彙」多一頁「混打記憶」：按鍵｜前一個字｜後一個音｜換成｜確認次數，可以勾選多筆刪除；下面列自動學會的英文字，可以移除或不再學（引擎指令 mixed、mixed-remove，`core/engine/mixed_memory.go`）
-    - 舊版整合風格把開關存在風格的規則裡：讀設定時沒有 `blend` 就從選用的（沒有就第一份）整合風格搬過來，風格只留 symbols，舊的 width 換成 Shift＋空白切換全半形
   - 整合風格跑官方測試：`go test -tags blendall ./core/session` 讓每個 session 都套用整合風格；預期不同的測試與原因列在 `core/session/testdata/blend_expected_diffs.txt`，`py -3.12 scripts/blend_official_diff.py` 核對其他官方測試都通過、列出的測試關掉對應的規則後也通過
   - 跟混打的相容：官方的規則照官方逐條判斷（`internal/settings` 的 `styleConflicts`，拿掉了 Shift＋空白那條）；fork 加的規則欄位在 `inputstyle.Rules` 標 `fork:"blend"`，風格只存 symbols，其他由全域開關在引擎啟動時填上（`Settings.EngineRules`）。非標準排列的限制照官方：規則不是預設值的風格（含整合風格）只在標準排列可選。
 

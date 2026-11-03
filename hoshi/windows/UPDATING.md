@@ -21,7 +21,7 @@ fork 的 GitHub Actions（`.github/workflows/fork-release.yml`）每 12 小時�
 
 ## 整合風格有新功能時
 
-新功能是全域開關，更新後直接出現在設定程式，不用重建風格。以前用 `0c-update profile copy blend` 建的「整合風格」照常能用，它現在就是一份普通的自訂風格。
+新功能是全域開關，更新後直接出現在設定程式，不用重建風格。
 
 ## 什麼時候需要按「允許」
 

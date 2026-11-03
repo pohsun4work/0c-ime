@@ -3,7 +3,6 @@ package settings
 import (
 	"bytes"
 	"encoding/json"
-	"reflect"
 
 	"github.com/0c-biggo/0c-ime/core/inputstyle"
 )
@@ -93,75 +92,20 @@ func blendDisabledBy(reason string) string {
 	return ""
 }
 
-// loadBlend 讀設定檔的 blend（ok 是檔案有這一項）；讀不懂時回傳 false，原文留到存檔。沒有這一項時從舊版的整合風格
-// （風格規則裡的 fork 欄位）搬過來。風格裡的 fork 欄位一律拿掉，只留 symbols；舊的 width 換成 Shift＋空白切換全半形。
+// loadBlend 讀設定檔的 blend（ok 是檔案有這一項）；讀不懂時回傳 false，原文留到存檔。
 func (s *Settings) loadBlend(raw json.RawMessage, ok bool) bool {
-	x, readable := inputstyle.DefaultExtras(), true
-	if ok {
-		known := json.Unmarshal(raw, &x) == nil && (x.EnglishRanking == "frequency" || x.EnglishRanking == "alphabetical")
-		if !known {
-			x = inputstyle.DefaultExtras()
-		}
-		strict := json.NewDecoder(bytes.NewReader(raw))
-		strict.DisallowUnknownFields()
-		readable = known && strict.Decode(&inputstyle.Extras{}) == nil // 新版多的開關：認得的照讀，原文留到使用者改它
+	s.Blend = inputstyle.DefaultExtras()
+	if !ok {
+		return true
+	}
+	x := inputstyle.DefaultExtras()
+	if json.Unmarshal(raw, &x) != nil || x.EnglishRanking != "frequency" && x.EnglishRanking != "alphabetical" {
+		return false
 	}
 	s.Blend = x
-	if s.profiles == "" || s.readOnly || s.profileInvalid {
-		return readable
-	}
-	st := s.store()
-	var legacy inputstyle.Extras
-	found, changed := false, false
-	for i, p := range st.Items {
-		if from, has := legacyExtras(p.Rules); has && (!found || p.ID == st.Active) {
-			legacy, found = from, true
-		}
-		st.Items[i].Rules = profileRules(p.Rules)
-		changed = changed || st.Items[i].Rules != p.Rules
-	}
-	if found && !ok {
-		s.Blend = legacy
-	}
-	if changed {
-		s.putStore(st)
-	}
-	return readable
-}
-
-// profileRules 拿掉風格規則裡 symbols 以外的 fork 欄位（改由全域開關管），舊的 width 換成 Shift＋空白切換全半形。
-// 標點操作改過、不是靈犀的也拿掉 symbols：照使用者選的標點，不顯示成微軟半形參考。
-func profileRules(r inputstyle.Rules) inputstyle.Rules {
-	if r.Width == "shift_space" {
-		r.ShiftSpace = "fullwidth"
-	}
-	if r.Punctuation != "0c" {
-		r.Symbols = ""
-	}
-	v := reflect.ValueOf(&r).Elem()
-	for _, f := range reflect.VisibleFields(v.Type()) {
-		if f.Tag.Get("fork") != "" && f.Name != "Symbols" {
-			v.FieldByIndex(f.Index).SetZero()
-		}
-	}
-	return r
-}
-
-// legacyExtras：舊版整合風格存在風格規則裡的開關。
-func legacyExtras(r inputstyle.Rules) (inputstyle.Extras, bool) {
-	if r.MixedResplit == "" && r.MixedContext == "" && r.MixedOverwrite == "" && r.SymbolBoard == "" && r.EnglishRanking == "" {
-		return inputstyle.Extras{}, false
-	}
-	x := inputstyle.Extras{
-		MixedResplit: r.MixedResplit != "", MixedOverwrite: r.MixedOverwrite != "", SymbolBoard: r.SymbolBoard != "",
-		MixedRepeats: r.ContextRule(inputstyle.ContextRepeats), MixedReversed: r.ContextRule(inputstyle.ContextReversed),
-		MixedZhuyinText: r.ContextRule(inputstyle.ContextZhuyin), MixedLiteral: r.ContextRule(inputstyle.ContextLiteral),
-		EnglishRanking: "alphabetical",
-	}
-	if r.EnglishRanking != "" {
-		x.EnglishRanking = "frequency"
-	}
-	return x, true
+	strict := json.NewDecoder(bytes.NewReader(raw))
+	strict.DisallowUnknownFields()
+	return strict.Decode(&inputstyle.Extras{}) == nil // 新版多的開關：認得的照讀，原文留到使用者改它
 }
 
 // EngineRules 是引擎用的操作規則：風格的規則加上整合風格的全域開關。

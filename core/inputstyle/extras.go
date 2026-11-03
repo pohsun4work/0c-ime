@@ -28,7 +28,7 @@ func AllExtras() Extras {
 	return Extras{true, true, true, true, true, true, true, "frequency"}
 }
 
-// 上下文重看的各條規則（mixed_context 列出開著的；舊的 rules 是全部）。
+// 上下文重看的各條規則（mixed_context 列出開著的）。
 const (
 	ContextInitial  = "initial"
 	ContextRepeats  = "repeats"
@@ -71,9 +71,6 @@ func (x Extras) Apply(r Rules) Rules {
 
 // ContextRule 回報上下文重看的這一條開著沒有。
 func (r Rules) ContextRule(name string) bool {
-	if r.MixedContext == "rules" {
-		return true
-	}
 	for c := range strings.SplitSeq(r.MixedContext, ",") {
 		if c == name {
 			return true
@@ -82,9 +79,9 @@ func (r Rules) ContextRule(name string) bool {
 	return false
 }
 
-// validContext：空值、舊的 rules，或 contextRules 照順序、不重複的子集合。
+// validContext：空值，或 contextRules 照順序、不重複的子集合。
 func validContext(v string) bool {
-	if v == "" || v == "rules" {
+	if v == "" {
 		return true
 	}
 	at := 0

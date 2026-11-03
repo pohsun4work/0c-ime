@@ -29,7 +29,7 @@ func roundTrip(t *testing.T, s Settings) (Settings, string) {
 	return back, string(raw)
 }
 
-// blendStyle 照舊版整合風格配方設自訂風格。
+// blendStyle 照作者的設定（INSTALL.md）建自訂風格。
 func blendStyle(t *testing.T, s *Settings) {
 	t.Helper()
 	if err := s.ProfileAction("copy", "0c", "整合風格"); err != nil {
@@ -53,7 +53,7 @@ func TestBlendStyleIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
 	want := inputstyle.Rules{Punctuation: "0c", ShiftSpace: "fullwidth", Symbols: "microsoft"}
 	if !s.MixedInput || !s.EnglishAutocomplete || s.Toneless || s.EmojiShortcut != "off" || !s.CtrlPunctuation ||
 		r.Punctuation != want.Punctuation || r.ShiftSpace != want.ShiftSpace || r.Symbols != want.Symbols ||
-		profileRules(r) != r || s.BlendWidth() != "shift_space" {
+		s.BlendWidth() != "shift_space" {
 		t.Fatalf("blend recipe not applied: %+v %+v", s, r)
 	}
 	if e := s.EngineRules(); e != inputstyle.DefaultExtras().Apply(r) {
@@ -139,62 +139,6 @@ func TestBlendSettingsAreGlobal(t *testing.T) {
 	}
 	if len(BlendRunning("")) != 0 {
 		t.Fatal("old engines report no extras")
-	}
-}
-
-// 舊版的整合風格把開關存在風格的規則裡：讀進來搬成全域開關、風格只留 symbols，width 換成 Shift＋空白切換全半形。
-func TestBlendMigratesLegacyRecipe(t *testing.T) {
-	legacy := func(active bool) Settings {
-		s := freshSettings()
-		blendStyle(t, &s)
-		st := s.store()
-		for i := range st.Items {
-			if !st.Items[i].Builtin {
-				st.Items[i].Source = "blend" // 舊版從配方複製
-				r := &st.Items[i].Rules
-				r.ShiftSpace, r.Width, r.EnglishRanking, r.EnglishLearning, r.SymbolBoard = "disabled", "shift_space", "frequency", "dictionary", "asus"
-				r.MixedResplit, r.MixedContext, r.VocabMark, r.CandidateBackTab, r.MixedMemory, r.MixedOverwrite = "keys", "rules", "extended", "shorter", "context", "neural"
-			}
-		}
-		s.putStore(st)
-		if !active {
-			if err := s.ProfileAction("select", "0c", ""); err != nil {
-				t.Fatal(err)
-			}
-		}
-		return s
-	}
-	for _, active := range []bool{true, false} {
-		back, raw := roundTrip(t, legacy(active))
-		if back.ReadOnly() || back.Blend != inputstyle.AllExtras() || strings.Contains(raw, `"blend":{`) {
-			t.Fatalf("legacy recipe (active %v) not migrated: %+v", active, back.Blend)
-		}
-		for _, p := range back.store().Items {
-			if p.Rules != profileRules(p.Rules) || p.Source == "blend" && (p.Rules.Symbols != "microsoft" || p.Rules.ShiftSpace != "fullwidth") {
-				t.Fatalf("legacy fields kept: %+v", p.Rules)
-			}
-		}
-		if again, raw := roundTrip(t, back); again.Blend != back.Blend || !strings.Contains(raw, `"blend":{`) {
-			t.Fatalf("migrated extras not saved: %s", raw)
-		}
-	}
-	// 檔案已有 blend 時以它為準，風格裡留下的舊欄位照樣拿掉。
-	s := legacy(true)
-	s.Blend = inputstyle.Extras{EnglishRanking: "alphabetical"}
-	if back, _ := roundTrip(t, s); back.Blend != s.Blend || back.ProfileRules() != profileRules(back.ProfileRules()) {
-		t.Fatalf("saved extras overridden: %+v", back.Blend)
-	}
-	// 舊版改過標點操作的（那時只改 punctuation）照改過的標點，不顯示成微軟半形參考。
-	s = legacy(true)
-	st := s.store()
-	for i := range st.Items {
-		if st.Items[i].Source == "blend" {
-			st.Items[i].Rules.Punctuation = "standard"
-		}
-	}
-	s.putStore(st)
-	if back, _ := roundTrip(t, s); back.ProfileRules().Symbols != "" || itemsByKey(back)["style-punctuation"].Value != "standard" {
-		t.Fatalf("changed punctuation: %+v", back.ProfileRules())
 	}
 }
 

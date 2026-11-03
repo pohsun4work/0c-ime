@@ -12,7 +12,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
-// blendSession 是舊版整合風格配方的設定。
+// blendSession 是作者的設定（INSTALL.md）。
 func blendSession() *Session {
 	s := styleSession("0c")
 	s.InputStyle = blendRules()
@@ -20,7 +20,7 @@ func blendSession() *Session {
 	return s
 }
 
-// blendBase 是舊版整合風格配方的規則。
+// blendBase 是作者的設定（INSTALL.md）的規則。
 func blendBase() inputstyle.Rules {
 	p, _ := inputstyle.Get("0c")
 	p.Rules.Symbols, p.Rules.ShiftSpace = "microsoft", "fullwidth"
