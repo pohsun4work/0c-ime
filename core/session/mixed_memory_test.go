@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/english"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -364,48 +365,50 @@ func TestMixedMemoryNeuralPlausibility(t *testing.T) {
 	}
 }
 
-// 合理度門檻：每多確認一次、附近有英文都比較容易把中文換掉。
+// 合理度門檻：同一個位置每多確認一次、附近有英文都比較容易把中文換掉；別的位置確認再多次也照門檻。
 func TestMixedMemoryThresholdAdjustments(t *testing.T) {
 	for _, tc := range []struct {
-		keys      string
-		confirmed int
-		want      string
+		keys, left string
+		confirmed  int
+		want       string
 	}{
-		{"2k7mp3", 1, "的允"},
-		{"2k7mp3", 3, "的mp3"},             // -4＋0.5×2＝-3
-		{"hello 2k7mp3", 1, "hello 的mp3"}, // -4＋1＝-3
+		{"2k7mp3", "的", 1, "的允"},
+		{"2k7mp3", "的", 3, "的mp3"},             // -4＋0.5×2＝-3
+		{"2k7mp3", "我", 3, "的允"},               // 別的位置：-4
+		{"hello 2k7mp3", "我", 1, "hello 的mp3"}, // -4＋1＝-3
 	} {
 		s := memorySession()
 		var calls int
 		s.Rerank = rerank.Options{Weight: .1, TextWeight: 1, ContextRunes: rerank.MaxContextRunes, Scorer: memoryScorer(map[string]float64{"的允": -3.5, "hello 的允": -3.5}, &calls)}
 		for range tc.confirmed {
-			remember(s, "mp3", "我", "", mp3Literal)
+			remember(s, "mp3", tc.left, "", mp3Literal)
 		}
 		if snap := typeContext(s, tc.keys); snap.Text() != tc.want {
-			t.Errorf("%q 確認 %d 次：%q，要 %q", tc.keys, tc.confirmed, snap.Text(), tc.want)
+			t.Errorf("%q 在「%s」後確認 %d 次：%q，要 %q", tc.keys, tc.left, tc.confirmed, snap.Text(), tc.want)
 		}
 	}
 }
 
-// 兩邊都沒有中文（a␣ ↔ ㄇ）的記憶直接換，但附近有英文時不換成注音；也不從英文字中間切出來。
+// 兩邊都沒有中文的記憶直接換，但附近有英文時不換成注音；單一個注音鍵接空白（a␣ ↔ ㄇ）交給官方選過的注音文，
+// 不照記憶換。也不從英文字中間切出來。
 func TestMixedMemoryZhuyinNotInEnglish(t *testing.T) {
-	m := []personal.MixedToken{{Keys: "a ", Kind: personal.MixedZhuyin}}
+	a, one := personal.MixedToken{Keys: "a ", Kind: personal.MixedZhuyin}, personal.MixedToken{Keys: "1 ", Kind: personal.MixedZhuyin}
+	for _, tc := range []struct {
+		n, keys, left, typed, want string
+		form                       []personal.MixedToken
+	}{
+		{"句首", "a 1 ", "", "a 1 ", "ㄇㄅ", []personal.MixedToken{a, one}},
+		{"附近有英文", "a 1 ", " ", "hello a 1 ", "hello a 1 ", []personal.MixedToken{a, one}},
+		{"單一個注音鍵", "a ", "", "a ", "a ", []personal.MixedToken{a}},
+	} {
+		s := memorySession()
+		s.InputStyle.MixedContext = inputstyle.ContextInitial // 不讓注音文的規則先換
+		remember(s, tc.keys, tc.left, "", tc.form)
+		if snap := typeContext(s, tc.typed); snap.Text() != tc.want {
+			t.Errorf("%s：%q，要 %q", tc.n, snap.Text(), tc.want)
+		}
+	}
 	s := memorySession()
-	remember(s, "a ", "你", "", m)
-	if snap := typeContext(s, "a a "); snap.Text() != "ㄇㄇ" {
-		t.Fatalf("前提（mixed_context）：%q", snap.Text())
-	}
-	s = memorySession()
-	remember(s, "a ", "你", "", m)
-	if snap := typeContext(s, "hello a "); snap.Text() != "hello a " {
-		t.Fatalf("附近有英文：%q", snap.Text())
-	}
-	s = memorySession()
-	remember(s, "a ", "", "", m)
-	if snap := typeContext(s, "a "); snap.Text() != "ㄇ" {
-		t.Fatalf("句首：%q", snap.Text())
-	}
-	s = memorySession()
 	remember(s, "is ", "h", "", []personal.MixedToken{{Keys: "is ", Kind: personal.MixedChinese}})
 	if !s.memoryBoundary(0) {
 		t.Fatal("空的組字區")
@@ -431,5 +434,113 @@ func TestMixedMemorySurvivesRestoredInsert(t *testing.T) {
 	s.restoreSyllables(saved)
 	if !slices.EqualFunc(s.memory.applied, want, func(a, b memoryApplied) bool { return a.memorySpan == b.memorySpan }) {
 		t.Fatalf("還原後：%+v", s.memory.applied)
+	}
+}
+
+// reversedSession 收了反序打得出的字（ps4 是嫩、u2 是低、i16 是博），照語言模型都夠合理。
+func reversedSession() *Session {
+	lex, sys := lexicon.NewMem(), lm.NewMem()
+	for _, e := range []word{
+		{"我", "ㄨㄛˇ", 1e-2}, {"很", "ㄏㄣˇ", 5e-3}, {"嫩", "ㄋㄣˋ", 1e-3}, {"低", "ㄉㄧ", 1e-3}, {"博", "ㄅㄛˊ", 1e-3},
+		{"億", "ㄧˋ", 1e-3}, {"允", "ㄩㄣˇ", 1e-3},
+	} {
+		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
+		sys.SetUni(e.w, e.p)
+	}
+	s := New(personal.NewModel(lex, sys))
+	s.InputStyle = blendRules()
+	s.MixedInput, s.CtrlPunct = true, true
+	s.English = english.New([]english.Word{{Text: "hello", Weight: 3}})
+	return s
+}
+
+// 混打修正記憶開著時，字母開頭的反序在打聲調或空白之前照字面（Enter 送出字母），打了就是中文，句首、英文後面也是；
+// 數字開頭照官方，官方表上的英數詞（ps4）照字面。個人英文認得的英數詞交給混打記憶，不再一律照字面。
+func TestMixedReversedBecomesChineseAfterTone(t *testing.T) {
+	for _, tc := range []struct{ keys, want string }{
+		{"u2", "u2"}, {"u2 ", "低"}, {"cp3u2", "很u2"}, {"cp3u2 ", "很低"}, {"hello u2 ", "hello 低"}, {"i16", "博"},
+		{"ps4", "ps4"}, {"70u4", "70億"},
+	} {
+		s := reversedSession()
+		mixedType(s, tc.keys)
+		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
+			t.Errorf("%q：%q，要 %q", tc.keys, got, tc.want)
+		}
+	}
+	s := reversedSession()
+	s.model.Store.English = map[string]personal.EnglishEvidence{
+		"mp3": {Text: "mp3", Confirmed: 3, Days: 2, Updated: s.model.Store.Time, Day: s.model.Store.Time / 86400},
+	}
+	if snap := mixedType(s, "mp3"); snap.Text() != "允" {
+		t.Errorf("個人英文認得的 mp3：%q", snap.Text())
+	}
+}
+
+// 照字面的 ps4 用 ↓ 選「嫩」送出就記住，同一個位置再打時打完聲調就換（Enter 前畫面就是嫩）；用 ↓ 選回 ps4 抵銷，↓ 照樣列嫩。
+func TestMixedMemoryPendingAlnum(t *testing.T) {
+	s := reversedSession()
+	if snap := typeContext(s, "cp3ps4"); snap.Text() != "很ps4" {
+		t.Fatalf("前提（官方）：%q", snap.Text())
+	}
+	key(s, proto.KeyDown)
+	pickText(t, s, "嫩")
+	if snap := key(s, proto.KeyEnter); snap.Commit != "很嫩" {
+		t.Fatalf("送出：%q", snap.Commit)
+	}
+	if rs := memoryRecords(s); len(rs) != 1 || rs[0].MixedRef != (personal.MixedRef{Keys: "ps4", Left: "很"}) || !slices.Equal(rs[0].Form, []personal.MixedToken{{Keys: "ps4", Kind: personal.MixedChinese}}) {
+		t.Fatalf("記住的：%+v", rs)
+	}
+	if snap := typeContext(s, "cp3ps4"); snap.Text() != "很嫩" {
+		t.Fatalf("同一個位置再打：%q", snap.Text())
+	}
+	key(s, proto.KeyDown)
+	pickText(t, s, "ps4")
+	key(s, proto.KeyEnter)
+	if snap := typeContext(s, "cp3ps4"); snap.Text() != "很ps4" {
+		t.Fatalf("選回後：%q", snap.Text())
+	}
+	if items := itemTexts(key(s, proto.KeyDown)); !slices.Contains(items, "嫩") {
+		t.Fatalf("↓：%q", items)
+	}
+}
+
+// 注音文把 我2␣ 換成 我ㄉ；用 ↓ 選回 2␣ 送出就記住，同一個前字不再換、別的前字照換，再選回 ㄉ 就忘掉。
+func TestMixedMemoryZhuyinDecline(t *testing.T) {
+	s := memorySession()
+	if snap := typeContext(s, "ji32 "); snap.Text() != "我ㄉ" {
+		t.Fatalf("前提（注音文）：%q", snap.Text())
+	}
+	key(s, proto.KeyDown)
+	pickText(t, s, "2 ")
+	if snap := key(s, proto.KeyEnter); snap.Commit != "我2 " {
+		t.Fatalf("送出：%q", snap.Commit)
+	}
+	if rs := memoryRecords(s); len(rs) != 1 || rs[0].MixedRef != (personal.MixedRef{Keys: "2 ", Left: "我"}) || rs[0].Form[0].Kind != personal.MixedLiteral {
+		t.Fatalf("記住的：%+v", rs)
+	}
+	if snap := typeContext(s, "su32 "); snap.Text() != "你ㄉ" {
+		t.Fatalf("別的前字：%q", snap.Text())
+	}
+	key(s, proto.KeyEnter)
+	if snap := typeContext(s, "ji32 "); snap.Text() != "我2 " {
+		t.Fatalf("同一個前字：%q", snap.Text())
+	}
+	downPick(t, s, 1, "ㄉ")
+	key(s, proto.KeyEnter)
+	if rs := memoryRecords(s); len(rs) != 0 {
+		t.Fatalf("選回 ㄉ 要忘掉：%+v", rs)
+	}
+	if snap := typeContext(s, "ji32 "); snap.Text() != "我ㄉ" {
+		t.Fatalf("忘掉後：%q", snap.Text())
+	}
+
+	s = memorySession()
+	remember(s, "2 ", "我", "", []personal.MixedToken{{Keys: "2 ", Kind: personal.MixedLiteral}})
+	s.InputStyle.MixedContext = inputstyle.ContextInitial
+	typeContext(s, "ji32 ")
+	downPick(t, s, 1, "ㄉ")
+	key(s, proto.KeyEnter)
+	if rs := memoryRecords(s); len(rs) != 0 {
+		t.Fatalf("注音文關著時選 ㄉ 也要忘掉：%+v", rs)
 	}
 }

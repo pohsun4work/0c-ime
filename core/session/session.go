@@ -1121,7 +1121,7 @@ func (s *Session) openCandidates(length int) {
 			s.cand.before = before // 整合風格的 Tab 從這裡換詞長
 			return
 		}
-		if u, ok := s.keyUnitAt(pos); s.resplit() && ok {
+		if u, ok := s.keyUnitAt(pos); s.resplit() && ok && !s.zhuyinKeyList(pos) {
 			anchor := u.start
 			if before {
 				anchor = u.end
@@ -1403,7 +1403,7 @@ func (s *Session) cycleCandidateLength(d int) {
 	anchor, maxLen := s.candidateAnchor(c)
 	for i := 1; i <= maxLen; i++ {
 		length := ((c.length-1+d*i)%maxLen+maxLen)%maxLen + 1
-		if s.openAnchored(anchor, length, c.before) {
+		if s.openTabLength(anchor, length, c.before) {
 			return
 		}
 	}
@@ -1438,7 +1438,7 @@ func (s *Session) moveHighlight(d int) {
 		if l == 1 && c.split > 0 {
 			continue
 		}
-		if s.openAnchored(anchor, l, c.before) {
+		if s.openTabLength(anchor, l, c.before) {
 			if d < 0 {
 				s.cand.cursor = len(s.cand.items) - 1
 				if s.cand.split > 0 {

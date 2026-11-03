@@ -9,8 +9,14 @@ import (
 // 整合風格（操作規則 mixed_memory）的混打修正記憶：使用者用 ↓ 把一段按鍵換成別的解釋（英數、中文、注音）再送出時，
 // 記下「按鍵＋前一個字＋後一個音 → 每段當什麼」；下次同樣的按鍵要不要照記憶換，由 session 照上下文決定。
 // 中文要哪個字不記，交給更正（corrections.go）。
+//
+// 照天數淘汰，同選過的注音文（zhuyin_keys.go）：一次確認約 4 個月，照記憶換到或留著、沒被改掉的暫停衰減；
+// maxMixedMemory 是保險，超過時先丟最久沒用到的。
 
-const maxMixedMemory = 1024
+const (
+	maxMixedMemory   = 1024
+	mixedMemoryFloor = zhuyinKeyFloor
+)
 
 // MixedToken 是一段按鍵與它的解釋。
 type MixedToken struct {
@@ -33,8 +39,15 @@ func (r MixedRef) key() string { return r.Keys + "\t" + r.Left + "\t" + r.Right 
 type MixedRecord struct {
 	MixedRef
 	Form      []MixedToken
-	Confirmed int    // 確認次數；被反向選取時扣一次
-	Serial    uint64 // 最後一次學到或用到的順序，滿了先丟最舊的
+	Confirmed int           // 確認次數；被反向選取時扣一次
+	Serial    uint64        // 最後一次學到或用到的順序，滿了先丟最舊的
+	Evidence  UsageEvidence // 學到時累加、用到時暫停衰減
+}
+
+// alive：舊版沒有 Evidence 的紀錄不衰減，下次學的時候起算。
+func (r MixedRecord) alive(now int64) bool {
+	e := r.Evidence.at(now)
+	return r.Evidence == UsageEvidence{} || e.Short+e.Long >= mixedMemoryFloor
 }
 
 // MixedChoice 是一次送出時使用者用 ↓ 換過的一段。Contest 是選之前那段照前後都對上的記憶換過（或留著），換它的那筆。
@@ -51,21 +64,26 @@ type MixedApplied struct {
 	Form  []MixedToken
 }
 
-// mixedIndex 快取依按鍵分組的紀錄；Store 換掉或記憶改變（changedMixed）時重建。
+// mixedIndex 快取依按鍵分組的紀錄；Store 換掉、記憶改變（changedMixed）或換日時重建。
 type mixedIndex struct {
 	store   *Store
 	count   int
+	day     int64
 	groups  map[string][]MixedRecord
 	longest int
 }
 
-// MixedMemoryIndex 依按鍵分組全部紀錄（組內順序固定）與最長的按鍵長度。回傳的 map 是共用的，不要修改。
+// MixedMemoryIndex 依按鍵分組還沒淘汰的紀錄（組內順序固定）與最長的按鍵長度。回傳的 map 是共用的，不要修改。
 func (m *Model) MixedMemoryIndex() (map[string][]MixedRecord, int) {
 	idx := &m.mixedIndex
-	if idx.groups == nil || idx.store != m.Store || idx.count != len(m.Store.MixedMemory) {
-		*idx = mixedIndex{store: m.Store, count: len(m.Store.MixedMemory), groups: map[string][]MixedRecord{}}
+	day := m.Store.Time / daySeconds
+	if idx.groups == nil || idx.store != m.Store || idx.count != len(m.Store.MixedMemory) || idx.day != day {
+		*idx = mixedIndex{store: m.Store, count: len(m.Store.MixedMemory), day: day, groups: map[string][]MixedRecord{}}
 		for _, k := range slices.Sorted(maps.Keys(m.Store.MixedMemory)) {
 			r := m.Store.MixedMemory[k]
+			if !r.alive(m.Store.Time) {
+				continue
+			}
 			idx.groups[r.Keys] = append(idx.groups[r.Keys], r)
 			idx.longest = max(idx.longest, len(r.Keys))
 		}
@@ -78,7 +96,7 @@ func (m *Model) changedMixed() { m.mixedIndex.groups = nil }
 
 // LearnMixedMemory 學一次送出裡的選擇。記憶換的段落被改成別的樣子時：前後都對上的那筆（Contest）扣一次確認
 // （只確認過一次就刪），這次不記新的，再選一次才記；從別處套用的不動原本那筆，另記這個位置的紀錄。
-// used 是這次送出裡照記憶換、沒被改掉的段落，用到的紀錄移到最新。
+// used 是這次送出裡照記憶換或留著、沒被改掉的段落，用到的紀錄移到最新、暫停衰減。淘汰的紀錄這時拿掉。
 func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 	if len(choices) == 0 && len(used) == 0 {
 		return
@@ -87,7 +105,13 @@ func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 	if m.Store.MixedMemory == nil {
 		m.Store.MixedMemory = map[string]MixedRecord{}
 	}
-	serial := m.mixedSerial()
+	serial, now := m.mixedSerial(), m.Store.Time
+	for k, r := range m.Store.MixedMemory {
+		if r.Evidence == (UsageEvidence{}) {
+			r.Evidence = r.Evidence.add(now, confirmUnit)
+			m.Store.MixedMemory[k] = r
+		}
+	}
 	touch := func(k string, r MixedRecord) {
 		serial++
 		r.Serial = serial
@@ -95,7 +119,9 @@ func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 	}
 	for _, a := range used {
 		for _, k := range m.appliedKeys(a) {
-			touch(k, m.Store.MixedMemory[k])
+			r := m.Store.MixedMemory[k]
+			r.Evidence.Updated = max(r.Evidence.Updated, now)
+			touch(k, r)
 		}
 	}
 	for _, c := range choices {
@@ -111,8 +137,10 @@ func (m *Model) LearnMixedMemory(choices []MixedChoice, used []MixedApplied) {
 		}
 		r.MixedRef, r.Form = c.MixedRef, slices.Clone(c.Form)
 		r.Confirmed++
+		r.Evidence = r.Evidence.add(now, confirmUnit)
 		touch(k, r)
 	}
+	maps.DeleteFunc(m.Store.MixedMemory, func(_ string, r MixedRecord) bool { return !r.alive(now) })
 	if extra := len(m.Store.MixedMemory) - maxMixedMemory; extra > 0 {
 		mm := m.Store.MixedMemory
 		oldest := slices.SortedFunc(maps.Keys(mm), func(a, b string) int { return cmp.Compare(mm[a].Serial, mm[b].Serial) })
@@ -174,9 +202,14 @@ func (m *Model) mixedSerial() uint64 {
 // ID 是這筆記憶在 Store.MixedMemory 的鍵，「混打記憶」頁用它指出要刪哪幾筆。
 func (r MixedRef) ID() string { return r.key() }
 
-// MixedMemoryRecords 是全部的混打記憶，最近學到或用到的在前。
+// MixedMemoryRecords 是還沒淘汰的混打記憶，最近學到或用到的在前。
 func (m *Model) MixedMemoryRecords() []MixedRecord {
-	out := slices.Collect(maps.Values(m.Store.MixedMemory))
+	var out []MixedRecord
+	for _, r := range m.Store.MixedMemory {
+		if r.alive(m.Store.Time) {
+			out = append(out, r)
+		}
+	}
 	slices.SortFunc(out, func(a, b MixedRecord) int { return cmp.Compare(b.Serial, a.Serial) })
 	return out
 }

@@ -22,7 +22,8 @@ func (s *Session) contextRule(name string) bool {
 
 // rejudge：混打照官方判斷，每個按鍵處理完與送出前再照上下文重看：先看待定的按鍵（rejudgePending），查得回按鍵的部分
 // 再照記憶（mixed_memory，rejudgeMemory）、照規則（mixed_context：rejudgeUnits、rejudgeZhuyinText），最後看打錯又補對的鍵
-// （mixed_overwrite），改成的樣子官方也打得出來。待定按鍵還沒定案時只看游標前，後面的字等它定案再看。
+// （mixed_overwrite），改成的樣子官方也打得出來。待定按鍵還沒定案時只看游標前，後面的字等它定案再看；
+// 官方照字面留著、打完聲調鍵的待定按鍵（ps4）也照記憶換（rejudgeMemoryPending）。
 // 鎖定（選過的字）、從 ↓ 明確選的不改；候選窗開著、注音或英文打到一半、標示中不看。
 func (s *Session) rejudge() {
 	if !s.mixedInput() || s.english || s.cand != nil || !s.comp.Empty() || s.mark != nil {
@@ -32,8 +33,9 @@ func (s *Session) rejudge() {
 	if s.mixedOverwrite() {
 		s.rejudgeOverwritePending()
 	}
-	zhuyinText := s.contextRule(inputstyle.ContextZhuyin)
 	index, longest := s.memoryIndex()
+	s.rejudgeMemoryPending(index)
+	zhuyinText := s.contextRule(inputstyle.ContextZhuyin)
 	for range rejudgePasses {
 		end := len(s.syls)
 		if s.mixed.raw != "" {
@@ -272,11 +274,11 @@ func (s *Session) markChosen(chosen bool, at int) {
 }
 
 // replaceSpan 把 [start, end) 換成 insert 插入的內容，游標在後面時跟著平移、在中間時移到換上的內容後面。
-// 有鎖定、明確選的或照記憶換過的（memoryState.guards）時不換，回傳 false。換的前後都是照字面的字時，其他字照畫面保留
+// 有鎖定、明確選的（含官方清單選的注音文）或照記憶換過的（memoryState.guards）時不換，回傳 false。換的前後都是照字面的字時，其他字照畫面保留
 // （同 flushMixed），不換掉神經選的字。
 func (s *Session) replaceSpan(start, end int, insert func()) bool {
 	for pos := start; pos < end; pos++ {
-		if s.lockedAt(pos) || s.mixedOrigins[pos].explicit || s.memory.guards(pos) {
+		if o := s.mixedOrigins[pos]; s.lockedAt(pos) || o.explicit || o.zhuyinKey == zhuyinKeyPicked || s.memory.guards(pos) {
 			return false
 		}
 	}

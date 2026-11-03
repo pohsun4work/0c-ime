@@ -7,7 +7,6 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/input"
-	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -224,37 +223,4 @@ func (s *Session) overwriteChars(start int, syl zhuyin.Syllable) []rune {
 		}
 	}
 	return chars
-}
-
-// overwriteGroup：units 的按鍵是打錯又補對的（↓ 清單先列蓋完的字，不看神經模型）。
-func (s *Session) overwriteGroup(units []keyUnit) (keyGroup, bool) {
-	if !s.mixedOverwrite() {
-		return keyGroup{}, false
-	}
-	var keys strings.Builder
-	for _, u := range units {
-		if u.fixed != "" || u.keypad {
-			return keyGroup{}, false
-		}
-		keys.WriteString(u.keys)
-	}
-	o, ok := s.overwriteReading(keys.String())
-	return o.group, ok
-}
-
-// notePendingOverwrite：待定按鍵的 ↓ 選了蓋完的字（5jiy6 選「昨」）時記成這次的選擇，送出時學（同 noteMemoryChoice）。
-func (s *Session) notePendingOverwrite(id int) func() {
-	c, raw, at := s.cand, s.mixed.raw, s.cursor
-	if _, ok := c.mixedChars[id]; !ok || c.mixedAt != 0 || !s.mixedOverwrite() {
-		return func() {}
-	}
-	if _, ok := s.overwriteReading(raw); !ok {
-		return func() {}
-	}
-	return func() {
-		p, form := memorySpan{at, at + 1}, []personal.MixedToken{{Keys: raw, Kind: personal.MixedChinese}}
-		if s.memoryFormIs(p, form) {
-			s.memory.choices = append(s.memory.choices, memoryChoice{memorySpan: p, form: form})
-		}
-	}
 }

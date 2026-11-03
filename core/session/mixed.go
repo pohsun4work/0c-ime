@@ -534,7 +534,7 @@ func (s *Session) finishMixedTone(key string) bool {
 			s.insertMixedTyped(done, raw[at:]+key)
 			return true
 		}
-		if _, ok := s.mixedReading(raw, sym); ok && !s.mixedAfterChinese() {
+		if _, ok := s.mixedReading(raw, sym); ok && !s.mixedAfterChinese() && !s.reversedChinese(raw) {
 			return false
 		}
 	}
@@ -811,7 +811,7 @@ var keysSecondTokens = map[string]bool{"mp3": true, "mp4": true}
 // literalToken（#249）：t 是已知的英數詞，或個人英文已經認得（選回原按鍵幾次學到的 mp3）。個人英文要大小寫也相同：
 // 大寫不是注音鍵，學到 A87 不代表打注音的 a87（嗎）也要照字面。
 func (s *Session) literalToken(t string) bool {
-	return literalTokens[t] || s.personalEnglishAllowed() && s.model.EnglishKnownAs(t)
+	return literalTokens[t] || !s.mixedMemory() && s.personalEnglishAllowed() && s.model.EnglishKnownAs(t) // 整合風格：學到的英數詞交給混打記憶
 }
 
 // digitThenLetters（#249）：緊接在字面數字（3 4 6 7 是聲調鍵，先照字面送出）後面的待定字母，只有一鍵（4k、6j）或
@@ -837,7 +837,7 @@ func (s *Session) alnumThenSpace(raw string, tone rune) bool {
 		done, ok := s.mixedReading(raw, tone)
 		return ok && s.mixedSyllableScore(done) < mixedUnknownWordFloor
 	}
-	return s.reversedAlnum(raw) && !s.mixedAfterChinese()
+	return s.reversedAlnum(raw) && !s.mixedAfterChinese() && !s.reversedChinese(raw)
 }
 
 // neutralInitial（#249）：單一個聲母鍵接輕聲（n7 ㄙ˙、g7 ㄕ˙）只會是詞的後段（意思、鑰匙），不跟前面的中文成詞時是型號，照字面，

@@ -5,8 +5,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/rerank"
@@ -14,11 +16,11 @@ import (
 )
 
 // mixedMemory：整合風格（操作規則 mixed_memory），記住 ↓ 換過的混打解釋（personal.LearnMixedMemory），
-// 下次同樣的按鍵照上下文決定要不要照記憶換；要開著 mixed_resplit（記的是它 ↓ 換過的）。
-func (s *Session) mixedMemory() bool { return s.InputStyle.MixedMemory != "" && s.resplit() }
+// 下次同樣的按鍵照上下文決定要不要照記憶換。中英混打開著就作用，不看其他開關。
+func (s *Session) mixedMemory() bool { return s.InputStyle.MixedMemory != "" && s.mixedInput() }
 
-// 只有按鍵對上（前一個字或後一個音不同）的記憶看中文那一側的合理度：每個字平均的 log10 機率。記憶把中文換掉時，
-// 中文低於門檻才換；記憶換成中文時，中文到門檻才換。每多確認一次、附近有英文都往「不是中文」那邊調。
+// 照記憶換之前看中文那一側的合理度：每個字平均的 log10 機率。記憶把中文換掉時，中文低於門檻才換；記憶換成中文時，
+// 中文到門檻才換。附近有英文往「不是中文」那邊調；同一個位置（前一個字、後一個音都對上）每多確認一次也是，別的位置照門檻。
 const (
 	memoryThreshold    = -4.0
 	memoryConfirmStep  = 0.5
@@ -368,26 +370,22 @@ func (s *Session) formText(t personal.MixedToken) string {
 	return s.keyGroupsText(s.groupsOf(t.Keys), nil)
 }
 
-// chineseSyllable 是一個音節的按鍵（mp3）的讀音；整合風格（mixed_overwrite）也認得打錯又補對的按鍵（5jiy6）。
+// chineseSyllable 是 syllableGroup 的讀音。
 func (s *Session) chineseSyllable(keys string) (zhuyin.Syllable, bool) {
-	groups := s.groupsOf(keys)
-	if len(groups) != 1 || groups[0].literal {
-		if !s.mixedOverwrite() {
-			return "", false
-		}
-		if o, ok := s.overwriteReading(keys); ok {
-			return o.group.syllable()
-		}
-		return "", false
+	if g, ok := s.syllableGroup(keys); ok {
+		return g.syllable()
 	}
-	return groups[0].syllable()
+	return "", false
 }
 
 // memoryDecide 決定 p（現在是 official 的樣子）要不要照 records 換，換成別的樣子時都看合理度：前一個字與後一個音都對上的
-// 紀錄照它自己的確認次數（跟官方一樣時直接留著）；只有按鍵對上時，每筆紀錄都換成同樣子才照加總的確認次數，不一致時照官方。
+// 紀錄照它自己的確認次數（跟官方一樣時直接留著）；只有按鍵對上時，每筆紀錄都換成同樣子才換，不一致時照官方。
 func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, official []personal.MixedToken) (memoryApplied, bool) {
 	if len(records) == 0 {
 		return memoryApplied{}, false
+	}
+	if s.loneKeySpace(records[0].Keys) {
+		return s.loneKeyDecide(records, p, official)
 	}
 	here := personal.MixedRef{Keys: records[0].Keys, Left: s.memoryLeft(p.start), Right: s.memoryRight(p.end)}
 	for _, r := range records {
@@ -396,15 +394,14 @@ func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, off
 			return a, s.memoryInsertable(r.Form) && (a.hold() || s.memoryPlausible(p, official, r.Form, r.Confirmed))
 		}
 	}
-	form, confirmed := records[0].Form, 0
+	form := records[0].Form
 	for _, r := range records {
 		if !slices.Equal(r.Form, form) {
 			return memoryApplied{}, false
 		}
-		confirmed += r.Confirmed
 	}
 	a := memoryApplied{p, personal.MixedApplied{MixedRef: here, Form: form}, official}
-	return a, s.memoryInsertable(form) && s.memoryPlausible(p, official, form, confirmed)
+	return a, s.memoryInsertable(form) && s.memoryPlausible(p, official, form, 1)
 }
 
 // memoryPlausible：把 official 換成 form 時中文那一側合不合理。兩邊都沒有中文（a␣ ↔ ㄇ）時直接換，但附近有英文時不換成注音。
@@ -678,7 +675,7 @@ func (s *Session) noteMemoryChoice(id int) func() {
 		return func() {}
 	}
 	if c.mixed {
-		return s.notePendingOverwrite(id)
+		return s.notePendingChoice(id)
 	}
 	start, length := c.span(id)
 	tokens, ok := s.memoryTokens(start, start+length)
@@ -699,7 +696,7 @@ func (s *Session) noteMemoryChoice(id int) func() {
 		for len(trim) > 0 && len(after) > 0 && trim[len(trim)-1].MixedToken == after[len(after)-1].MixedToken {
 			trim, after = trim[:len(trim)-1], after[:len(after)-1]
 		}
-		if len(after) == 0 {
+		if len(after) == 0 || s.loneZhuyinText(after) || s.loneZhuyinText(trim) {
 			return
 		}
 		choice := memoryChoice{memorySpan: memorySpan{after[0].start, after[len(after)-1].end}, form: tokensOf(after)}
@@ -711,7 +708,7 @@ func (s *Session) noteMemoryChoice(id int) func() {
 	}
 }
 
-// learnMixedMemory 在送出時學這次 ↓ 換過、還是那個樣子的段落；照記憶換過、沒被改掉的紀錄算用到。私人、暫停時不學。
+// learnMixedMemory 在送出時學這次 ↓ 換過、還是那個樣子的段落；照記憶換過或留著、沒被改掉的紀錄算用到。私人、暫停時不學。
 func (s *Session) learnMixedMemory() {
 	if !s.mixedMemory() || s.paused || s.private || s.localBlocked {
 		return
@@ -720,29 +717,33 @@ func (s *Session) learnMixedMemory() {
 	for _, c := range s.memory.choices {
 		if s.memoryFormIs(c.memorySpan, c.form) {
 			ref := personal.MixedRef{Keys: joinKeys(c.form), Left: s.memoryLeft(c.start), Right: s.memoryRight(c.end)}
+			if s.loneKeySpace(ref.Keys) {
+				ref.Left, _ = s.zhuyinLeft(c.start) // 同 loneKeyDecide
+			}
 			choices = append(choices, personal.MixedChoice{MixedRef: ref, Form: c.form, Contest: c.contest})
 		}
 	}
 	var used []personal.MixedApplied
 	for _, a := range s.memory.applied {
-		if !a.hold() {
-			used = append(used, a.MixedApplied)
-		}
+		used = append(used, a.MixedApplied)
 	}
-	s.model.LearnMixedMemory(choices, used)
+	declines, picked := s.zhuyinDeclines()
+	for _, a := range picked {
+		s.model.ForgetMixedMemory(a)
+	}
+	s.model.LearnMixedMemory(append(choices, declines...), used)
 }
 
-// openMemorySpan：↓ 落在照記憶換過、或這次用 ↓ 換過解釋的段落裡時開整段的候選（mp3／允／狁…），不從最後一個字（3）開始。
+// openMemorySpan：↓ 落在照記憶換過、或這次用 ↓ 換過解釋的段落裡時開整段的跨英數候選（mp3／允／狁…），不從最後一個字
+// （3）開始；「↓／Tab 跨過英數」關著也一樣。單一個注音鍵接空白（2␣）照官方的清單（#208）。
 func (s *Session) openMemorySpan(pos int, before bool) bool {
 	p, ok := s.changedSpan(pos)
-	if !ok || p.end-p.start < 2 {
+	n := p.end - p.start
+	if !ok || n < 2 || n == 2 && s.zhuyinKeyList(p.start) || !s.openKeySpan(p.start, n) {
 		return false
 	}
-	anchor := p.start
-	if before {
-		anchor = p.end
-	}
-	return s.openAnchored(anchor, p.end-p.start, before)
+	s.cand.before = before
+	return true
 }
 
 // changedSpan 是 pos 所在、照記憶換過或這次用 ↓ 換過解釋（現在還是那個樣子）的段落。
@@ -780,4 +781,106 @@ func (s *Session) forgetMemoryCandidate() bool {
 	s.memory.blocked = append(s.memory.blocked, memorySpan{a.start, end})
 	s.notices = append(s.notices, "不再自動換："+a.Keys)
 	return true
+}
+
+// reversedChinese：整合風格（混打記憶）的字母開頭、順序顛倒的英數寫法（k54、u2␣）在句首、空白或英文後面也同緊接中文時
+// 組成中文（官方 #249 留英數），要英數時用 ↓ 選回原按鍵、照記憶；數字開頭的（70億）照官方。
+func (s *Session) reversedChinese(raw string) bool {
+	return s.mixedMemory() && raw != "" && unicode.IsLetter(rune(raw[0]))
+}
+
+// notePendingChoice：待定按鍵的 ↓ 選了整串組成的中文字（ps4 選「嫩」、5jiy6 選「昨」）時記成這次的選擇，送出時學
+// （同 noteMemoryChoice）。
+func (s *Session) notePendingChoice(id int) func() {
+	c, raw, at := s.cand, s.mixed.raw, s.cursor
+	if _, ok := c.mixedChars[id]; !ok || c.mixedAt != 0 {
+		return func() {}
+	}
+	if _, ok := s.chineseSyllable(raw); !ok {
+		return func() {}
+	}
+	return func() {
+		p, form := memorySpan{at, at + 1}, []personal.MixedToken{{Keys: raw, Kind: personal.MixedChinese}}
+		if s.memoryFormIs(p, form) {
+			s.memory.choices = append(s.memory.choices, memoryChoice{memorySpan: p, form: form})
+		}
+	}
+}
+
+// rejudgeMemoryPending：官方照字面留著的待定按鍵（ps4、lv24）打完聲調鍵就照記憶換，不等送出或接著打的字：
+// 畫面跟送出的一樣，換上的字按 ↓ 也選得回原按鍵、抵銷記憶。
+func (s *Session) rejudgeMemoryPending(index map[string][]personal.MixedRecord) {
+	p := s.mixed
+	records := index[p.raw]
+	if len(records) == 0 || p.choice != 0 || p.accepted != "" || s.englishWord || !s.explicitTone(p.raw) ||
+		s.mixedText() != p.raw || s.alnumAt(s.cursor-1) || s.alnumAt(s.cursor) {
+		return
+	}
+	s.refresh()
+	a, ok := s.memoryDecide(records, memorySpan{s.cursor, s.cursor}, literalForm(p.raw))
+	if !ok || a.hold() {
+		return
+	}
+	s.clearMixed()
+	s.insertMemoryForm(a.Form)
+	a.end = s.cursor
+	s.memory.applied = append(s.memory.applied, a)
+}
+
+// loneZhuyinText：單一個注音鍵接空白的注音文（我2␣ 的 ㄉ）交給官方選過的注音文（#208），混打記憶不記。
+func (s *Session) loneZhuyinText(form []memoryToken) bool {
+	return len(form) == 1 && form[0].Kind == personal.MixedZhuyin && s.loneKeySpace(form[0].Keys)
+}
+
+// loneKeySpace：keys 是單一個注音鍵接空白（2␣）。
+func (s *Session) loneKeySpace(keys string) bool {
+	if len(keys) != 2 || keys[1] != ' ' {
+		return false
+	}
+	_, ok := s.keySymbol(keys[:1])
+	return ok
+}
+
+// loneKeyDecide 是單一個注音鍵接空白的 memoryDecide：同官方選過的注音文（#208）只看前一個字（zhuyinLeft），不從別處套用，
+// 換成注音的交給官方。注音文開關的選回原按鍵（zhuyinDeclines）就是在這裡照字面留著，規則不再改成注音。
+func (s *Session) loneKeyDecide(records []personal.MixedRecord, p memorySpan, official []personal.MixedToken) (memoryApplied, bool) {
+	left, ok := s.zhuyinLeft(p.start)
+	if !ok {
+		return memoryApplied{}, false
+	}
+	for _, r := range records {
+		if r.Left == left && !hasKind(r.Form, personal.MixedZhuyin) {
+			a := memoryApplied{p, personal.MixedApplied{MixedRef: r.MixedRef, Exact: true, Form: r.Form}, official}
+			return a, s.memoryInsertable(r.Form) && (a.hold() || s.memoryPlausible(p, official, r.Form, r.Confirmed))
+		}
+	}
+	return memoryApplied{}, false
+}
+
+// zhuyinDeclines 是送出時官方注音文事件（zhuyinKeyCommits）裡要記的，同一個前字與符號以最後一個為準：注音文開關開著時
+// 選回原按鍵的記成照字面（declines），選了注音的刪掉那筆（picked）。
+func (s *Session) zhuyinDeclines() (declines []personal.MixedChoice, picked []personal.MixedApplied) {
+	last := map[personal.MixedRef]personal.ZhuyinKeyAction{}
+	var refs []personal.MixedRef
+	for _, e := range s.zhuyinKeyCommits() {
+		ref := personal.MixedRef{Keys: s.layout.Keys(zhuyin.Syllable(e.Symbol)), Left: e.Left} // 連同一聲的空白：2␣
+		if _, seen := last[ref]; !seen {
+			refs = append(refs, ref)
+		}
+		last[ref] = e.Action
+	}
+	zhuyinText := s.contextRule(inputstyle.ContextZhuyin)
+	for _, ref := range refs {
+		switch {
+		case last[ref] == personal.ZhuyinKeyDrop && zhuyinText:
+			declines = append(declines, personal.MixedChoice{MixedRef: ref, Form: literalForm(ref.Keys)})
+		case last[ref] == personal.ZhuyinKeyPick:
+			picked = append(picked, personal.MixedApplied{MixedRef: ref, Exact: true})
+		}
+	}
+	return declines, picked
+}
+
+func literalForm(keys string) []personal.MixedToken {
+	return []personal.MixedToken{{Keys: keys, Kind: personal.MixedLiteral}}
 }

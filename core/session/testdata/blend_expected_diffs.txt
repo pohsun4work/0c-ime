@@ -51,15 +51,18 @@ TestMixedLiteralPhoneticKeyDownOffersSymbol mixed_context,mixed_resplit：注音
 # mixed_context（Phase 4）：混打照上下文重看
 TestMixedLoneInitialSpaceKeepsZhuyin mixed_context：注音文，緊接在中文後面的 2␣ 是 ㄉ
 
-# 官方 0.2.8 的注音文學習（#208）與英數詞學習（#249）：fork 的 ↓ 清單與混打記憶蓋過官方的做法
-TestZhuyinHabitFirstTypeStaysLiteral mixed_context：注音文第一次就把 我2␣ 換成 我ㄉ，不等 ↓ 選過才學
-TestZhuyinHabitPendingPick mixed_context：注音文第一次就把 我2␣ 換成 我ㄉ，不等 ↓ 選過才學
-TestZhuyinHabitBackOut mixed_resplit：↓ 清單是 fork 的，沒有連空白的「2␣」可以選回
-TestZhuyinHabitBackPickDropsSpaceAndRestores mixed_resplit：↓ 選 ㄉ 不連後面的空白一起換（我ㄉ␣天）
-TestZhuyinHabitNarrowScope mixed_resplit：↓ 選 ㄉ 不連後面的空白一起換（我ㄉ␣）
-TestZhuyinHabitForgetAndAge mixed_resplit：↓ 選 ㄉ 不連後面的空白一起換（我ㄉ␣）
-TestZhuyinHabitFollowsNeuralDisplay mixed_resplit：↓ 選 ㄉ 不連後面的空白一起換（我ㄉ␣）
-TestZhuyinHabitPrivateAndPaused mixed_resplit：↓ 選 ㄉ 不連後面的空白一起換（我ㄉ␣）
-TestZhuyinHabitOnlyFinalChoiceCounts mixed_resplit：↓ 清單是 fork 的，沒有「2␣」與 ㄉˊ 等聲調
-TestZhuyinHabitLeavesOtherLiteralsAlone mixed_resplit：混打記憶把學到的 ㄉ 也套到 我2. 的 2
+# 官方 0.2.8 的注音文學習（#208）：注音文開著時直接換成注音，不等 ↓ 選過才學
+TestZhuyinHabitFirstTypeStaysLiteral mixed_context：注音文第一次就把 我2␣ 換成 我ㄉ
+TestZhuyinHabitPendingPick mixed_context：注音文第一次就把 我2␣ 換成 我ㄉ
+TestZhuyinHabitBackPickDropsSpaceAndRestores mixed_context：注音文第一次就是 我ㄉ天
+TestZhuyinHabitNarrowScope mixed_context：注音文不看前一個字選過沒有，有2␣ 也是 有ㄉ
+TestZhuyinHabitForgetAndAge mixed_context：注音文不看學過沒有，不再學之後照樣是 我ㄉ
+TestZhuyinHabitFollowsNeuralDisplay mixed_context：注音文不看學過沒有，真窩2␣ 也是 真窩ㄉ
+TestZhuyinHabitPrivateAndPaused mixed_context：注音文暫停時照樣把 我2␣ 換成 我ㄉ
+TestZhuyinHabitLeavesOtherLiteralsAlone mixed_context：注音文直接換、沒經過 ↓ 選，沒有學習紀錄
+
+# 官方 0.2.8 的英數詞（#249）：混打修正記憶開著時，字母開頭的反序打了聲調或空白就是中文，學到的英數詞交給混打記憶
+TestMixedAlnumTokenStaysLiteral mixed_memory：u2␣ 是低、i16 是博，只有還沒打聲調或空白時照字面（u2⏎ 是 u2）
+TestMixedAlnumTokenOffersChinese mixed_memory：i16 畫面上是博，↓ 第一項是博不是 i16
+TestMixedLearnedTokenStaysLiteral mixed_memory：個人英文認得的 mp3 不再一律照字面，照混打記憶
 TestMixedTokenPickedBackIsLearned mixed_memory：混打記憶把選回的 mp3 立刻記住，第一天就先出 mp3
