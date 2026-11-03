@@ -147,7 +147,7 @@ func featuresOf() features { return features{Vocab: true} }
 
 // runningValues 把引擎 health 回報的啟動配置換成設定的命令列寫法；沒有回報的項目不出現。
 func runningValues(info map[string]string) map[string]string {
-	out := map[string]string{}
+	out := settings.BlendRunning(info["blend"]) // 整合風格的全域開關
 	for _, key := range []string{"candidate-cursor", "candidate-layout", "emoji-shortcut", "keyboard-layout", "toggle-key", "mode-memory", "start-mode", "selection-keys"} {
 		if value := info[strings.ReplaceAll(key, "-", "_")]; value != "" {
 			out[key] = value

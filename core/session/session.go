@@ -100,7 +100,7 @@ type Session struct {
 	styleCycle   *candState
 	InputStyle   inputstyle.Rules
 	fullWidth    bool
-	wide         bool           // 整合風格（操作規則 width）的全形；跟 fullWidth 分開，官方的全形在按鍵當下就出字，會搶在混打之前
+	wide         bool           // 整合風格的全形（混打作用時 Shift＋空白，styleKey）；跟 fullWidth 分開，官方的全形在按鍵當下就出字，會搶在混打之前
 	wideTyped    map[int]string // 全形時打的位置 → 畫面上的全形字
 	symbolPrefix bool
 	styleGrid    bool
@@ -1121,7 +1121,7 @@ func (s *Session) openCandidates(length int) {
 			s.cand.before = before // 整合風格的 Tab 從這裡換詞長
 			return
 		}
-		if u, ok := s.keyUnitAt(pos); s.resplit() && ok {
+		if u, ok := s.keyUnitAt(pos); s.resplit() && ok && !s.zhuyinKeyList(pos) {
 			anchor := u.start
 			if before {
 				anchor = u.end
@@ -1403,7 +1403,7 @@ func (s *Session) cycleCandidateLength(d int) {
 	anchor, maxLen := s.candidateAnchor(c)
 	for i := 1; i <= maxLen; i++ {
 		length := ((c.length-1+d*i)%maxLen+maxLen)%maxLen + 1
-		if s.openAnchored(anchor, length, c.before) {
+		if s.openTabLength(anchor, length, c.before) {
 			return
 		}
 	}

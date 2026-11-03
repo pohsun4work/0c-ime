@@ -28,7 +28,7 @@ var errEngineBusy = errors.New("另一個引擎正在使用個人資料")
 func offlineVocabOp(op string) bool {
 	switch op {
 	case engine.VocabLearned, engine.VocabKeep, engine.VocabForget, engine.VocabUnlearn, engine.VocabForgotten,
-		engine.VocabRelearn, engine.VocabLearnedUndo:
+		engine.VocabRelearn, engine.VocabLearnedUndo, engine.VocabMixed, engine.VocabMixedRemove:
 		return false // 要讀寫學習資料，只能交給引擎
 	}
 	return true

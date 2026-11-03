@@ -4,14 +4,13 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/english"
-	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/rerank"
+	"github.com/0c-biggo/0c-ime/core/vocab"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -30,8 +29,7 @@ func resplitSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	p, _ := inputstyle.Get("blend")
-	s.InputStyle = p.Rules
+	s.InputStyle = blendRules()
 	s.MixedInput = true
 	s.English = english.New([]english.Word{{Text: "even", Weight: 3}})
 	return s
@@ -299,18 +297,47 @@ func TestResplitPrefixSyllableKeepsKeys(t *testing.T) {
 	}
 }
 
-// 純中文的 Tab 照舊只換到最長的詞長，不會一路延伸到整句。
-func TestResplitChineseTabStaysWithinWordLength(t *testing.T) {
+// Tab 換詞長同 Shift 標示：跨過空白到組字區頭尾（我hello␣你），純中文也一樣，最多 vocab.MaxWordRunes 字，再按回到一個字。
+func TestResplitTabReachesWholeComposition(t *testing.T) {
+	for _, tc := range []struct {
+		keys []string
+		want []string
+	}{
+		{[]string{"j", "i", "3", "h", "e", "l", "l", "o", " ", "s", "u", "3", proto.KeyHome, proto.KeyDown},
+			[]string{"我h", "我he", "我hel", "我hell", "我hello", "我hello ", "我hello 你", "我"}},
+		{[]string{"j", "i", "3", "h", "e", "l", "l", "o", " ", "s", "u", "3", proto.KeyDown}, // 前方模式往左延伸
+			[]string{" 你", "o 你", "lo 你", "llo 你", "ello 你", "hello 你", "我hello 你", "你"}},
+	} {
+		s := resplitSession()
+		keys(s, tc.keys...)
+		var got []string
+		for range tc.want {
+			got = append(got, itemTexts(key(s, proto.KeyTab))[0])
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%q：%q，要 %q", tc.keys, got, tc.want)
+		}
+	}
 	s := resplitSession()
-	limit := decode.MaxLen(s.dec.Lex)
-	for range limit + 2 {
+	for range vocab.MaxWordRunes + 2 {
 		keys(s, "j", "i", "3")
 	}
 	keys(s, proto.KeyHome, proto.KeyDown)
-	for range limit + 2 {
-		if key(s, proto.KeyTab); s.cand == nil || s.cand.length > limit {
-			t.Fatalf("詞長上限 %d：%+v", limit, s.cand)
-		}
+	longest := 0
+	for range vocab.MaxWordRunes {
+		key(s, proto.KeyTab)
+		longest = max(longest, s.cand.length)
+	}
+	if longest != vocab.MaxWordRunes || s.cand.length != 1 {
+		t.Fatalf("最長換到 %d、現在 %d", longest, s.cand.length)
+	}
+
+	// ↑／↓ 走過清單頭尾照官方只換到有詞的長度：你 ↑ 回到同一份清單的最後一項，不跳到 ␣你。
+	s = resplitSession()
+	keys(s, "j", "i", "3", "h", "e", "l", "l", "o", " ", "s", "u", "3", proto.KeyDown)
+	key(s, proto.KeyUp)
+	if c := s.cand; c == nil || c.length != 1 || c.cursor != len(c.items)-1 {
+		t.Fatalf("↑ 走過開頭：%+v", c)
 	}
 }
 

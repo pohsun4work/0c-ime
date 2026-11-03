@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 )
 
 const (
@@ -100,6 +101,8 @@ type Settings struct {
 	// 中英混打的自動判斷停用（與混打二選一），已儲存的 mixed_input 不動，關掉這一項就照舊。
 	Toneless bool  `json:"toneless"`
 	Fuzzy    Fuzzy `json:"fuzzy,omitzero"`
+	// Blend 是整合風格的全域開關（blend.go）；跟預設不同時才寫進設定檔。
+	Blend inputstyle.Extras `json:"blend"`
 	// 0.2.0 開發期間的內部開關 preview_0_2（#128）已拿掉：自訂詞彙、加詞按鍵、「我的片語」、本機 API 等
 	// 入口 0.2.0 起所有人都有。舊檔裡的 preview_0_2 不論值為何都忽略，存檔時移除（retiredKeys）。
 
@@ -241,7 +244,7 @@ func (s Settings) FuzzyConfig() fuzzy.Config {
 
 func Default() Settings {
 	s := Settings{Selection: Neural, Punctuation: false, DocumentContext: true, CandidateCursor: defaultCandidateCursor(runtime.GOOS), CandidateLayout: "vertical", EmojiShortcut: "equals", EmojiEqualsFirst: true, EscClear: true, SpaceSelects: true, KeyboardLayout: LayoutStandard, SelectionKeys: SelectDigits, CtrlPunctuation: true,
-		ToggleKey: defaultToggleKey(runtime.GOOS), ModeMemory: defaultModeMemory(runtime.GOOS), StartMode: StartZhuyin}
+		ToggleKey: defaultToggleKey(runtime.GOOS), ModeMemory: defaultModeMemory(runtime.GOOS), StartMode: StartZhuyin, Blend: inputstyle.DefaultExtras()}
 	s.LeftShift = s.TogglesLeft() // 舊欄位跟著切換鍵：Windows 預設左右 Shift 時是 true（#206）
 	return s
 }
@@ -415,6 +418,9 @@ func (s *Settings) UnmarshalJSON(b []byte) error {
 	if raw, ok := take("input_profile"); ok {
 		s.loadProfiles(raw)
 	}
+	if raw, ok := take("blend"); !s.loadBlend(raw, ok) {
+		kept["blend"] = raw
+	}
 	for key, raw := range members {
 		kept[key] = raw
 	}
@@ -478,6 +484,11 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 			return nil, err
 		}
 		put("fuzzy", raw)
+	}
+	if _, unread := kept["blend"]; unread || s.Blend != inputstyle.DefaultExtras() {
+		if err := typed("blend", s.Blend); err != nil {
+			return nil, err
+		}
 	}
 	names := make([]string, 0, len(kept))
 	for key := range kept {
@@ -744,6 +755,9 @@ func (s Settings) disabledReasonOn(goos, key string) string {
 	if reason := s.styleConflictReason(key); reason != "" {
 		return reason
 	}
+	if reason := s.blendDisabledReason(goos, key); reason != "" {
+		return reason
+	}
 	switch key {
 	case "mixed-input", "emoji-shortcut", "emoji-equals-first":
 		if s.KeyboardLayout == LayoutETen {
@@ -779,6 +793,9 @@ const startModeLockedReason = "不用 Shift 切換時固定從注音開始"
 func disabledBy(reason string) string {
 	if rule := styleConflictRule(reason); rule != "" {
 		return rule // 輸入習慣的規則（#233）
+	}
+	if key := blendDisabledBy(reason); key != "" {
+		return key
 	}
 	switch reason {
 	case "倚天 41 鍵時關閉", "許氏排列時關閉":
@@ -853,7 +870,7 @@ func specs() []spec {
 		r := r
 		out = append(out, spec{r.key, r.label, r.description, r.get(inputstyleDefaultRules()), r.values, func(s Settings) string { return r.get(s.ProfileRules()) }})
 	}
-	return out
+	return append(out, blendSettingSpecs()...)
 }
 
 // tonelessDescription 是「不打聲調也能選字」（#150）的說明：怎麼切音節、空白還是一聲、混打停用。
@@ -913,6 +930,9 @@ func ctrlPunctuationDescription(goos string) string {
 		d += "，Konsole 的 Ctrl＋Shift＋9／0 分割畫面"
 	}
 	d += "），要保留時可以關掉；英文模式不受影響"
+	if goos == "windows" {
+		d += "。標點操作選微軟半形參考時，Ctrl＋[ ] 打「」，英文模式也適用" // 整合風格：外殼只有 Windows 送這些鍵
+	}
 	if goos == "windows" {
 		// 輸入法直接切換熱鍵 0x104（Ctrl＋Shift＋0 → 日文輸入法）是繁體中文 Windows 的預設值，日文沒裝也作用，
 		// 在 TSF 之前就被系統拿走。負責人決定保留這個鍵、不改系統熱鍵。
@@ -1025,6 +1045,9 @@ func (s Settings) Items() []Item {
 		if sp, ok := lookupRule(out[i].Key); ok {
 			out[i].ValueLabels = sp.labels
 		}
+		if sp, ok := lookupBlend(out[i].Key); ok {
+			out[i].ValueLabels = sp.labels
+		}
 		if out[i].Key == "candidate-layout" {
 			out[i].ValueLabels = map[string]string{"vertical": "直排", "grid": "多排", "horizontal": "橫排"}
 		}
@@ -1087,6 +1110,11 @@ func (s *Settings) set(key, value string) error {
 	}
 	if rule, ok := lookupRule(key); ok {
 		return s.setRule(rule, value)
+	}
+	if b, ok := lookupBlend(key); ok {
+		b.set(&s.Blend, value)
+		s.forget("blend")
+		return nil
 	}
 	switch key {
 	case "selection":

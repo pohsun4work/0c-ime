@@ -204,6 +204,11 @@ button.icon {
 .vactions { display: inline-flex; align-items: center; gap: 4px; }
 .vrow.learned { grid-template-columns: auto minmax(5.5em, max-content) minmax(0, 1fr) auto auto; }
 .vrow.forgotten { grid-template-columns: auto minmax(0, 1fr) auto; }
+/* 每列各自是 grid：欄寬用 px／rem 固定，標題列（字小一號）跟內容列才對得齊。 */
+.vrow.mixed { grid-template-columns: 16px 8rem 4.5rem 5rem minmax(0, 1fr) 4rem 3rem; }
+.vrow.mixed > * { min-width: 0; overflow-wrap: anywhere; }
+.vrow.mixed.vhdr { padding: 6px 0; }
+.vkeys { font-family: ui-monospace, Consolas, monospace; font-weight: 500; }
 .vsel, .vcheck input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .vbulk { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .vbulk .vactions { margin-left: auto; }
@@ -277,6 +282,7 @@ input.port { width: 8em; }
   .vrow.learned > .vword, .vrow.learned > .vreading, .vrow.learned > .vmeta { grid-column: 2; }
   .vrow.learned > :last-child { grid-column: 3; grid-row: 1 / span 3; }
   .batches .vrow { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .vrow.mixed { grid-template-columns: 16px 5.5rem 3rem 3.5rem minmax(0, 1fr) 3rem 3rem; gap: 4px 8px; }
   .batches .bwho { display: none; }
   .bdetail { padding-left: 0; }
 }

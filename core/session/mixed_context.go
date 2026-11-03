@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -14,24 +15,27 @@ const rejudgePasses = 8
 // zhuyinTextKeys 是會改成注音文的按鍵：其他字母接空白官方已經留成注音（c␣ 是 ㄏ，#190），a 是英文字、1 2 是數字。
 var zhuyinTextKeys = []string{"a", "2", "1"}
 
-// mixedContext：整合風格（操作規則 mixed_context），要有 mixed_resplit 的按鍵紀錄。
-func (s *Session) mixedContext() bool { return s.InputStyle.MixedContext != "" && s.resplit() }
+// contextRule：整合風格（操作規則 mixed_context）的這一條開著。
+func (s *Session) contextRule(name string) bool {
+	return s.InputStyle.ContextRule(name) && s.mixedInput()
+}
 
-// rejudge：混打照官方判斷，每個按鍵處理完與送出前再照上下文重看查得回按鍵的部分：先照記憶（mixed_memory，rejudgeMemory），
-// 再照規則（mixed_context：rejudgePending、rejudgeUnits、rejudgeZhuyinText），最後看打錯又補對的鍵（mixed_overwrite），
-// 改成的樣子官方也打得出來。待定按鍵還沒定案時只看游標前，後面的字等它定案再看。
+// rejudge：混打照官方判斷，每個按鍵處理完與送出前再照上下文重看：先看待定的按鍵（rejudgePending），查得回按鍵的部分
+// 再照記憶（mixed_memory，rejudgeMemory）、照規則（mixed_context：rejudgeUnits、rejudgeZhuyinText），最後看打錯又補對的鍵
+// （mixed_overwrite），改成的樣子官方也打得出來。待定按鍵還沒定案時只看游標前，後面的字等它定案再看；
+// 官方照字面留著、打完聲調鍵的待定按鍵（ps4）也照記憶換（rejudgeMemoryPending）。
 // 鎖定（選過的字）、從 ↓ 明確選的不改；候選窗開著、注音或英文打到一半、標示中不看。
 func (s *Session) rejudge() {
-	if !s.mixedContext() && !s.mixedMemory() && !s.mixedOverwrite() || s.english || s.cand != nil || !s.comp.Empty() || s.mark != nil {
+	if !s.mixedInput() || s.english || s.cand != nil || !s.comp.Empty() || s.mark != nil {
 		return
 	}
-	if s.mixedContext() {
-		s.rejudgePending()
-	}
+	s.rejudgePending()
 	if s.mixedOverwrite() {
 		s.rejudgeOverwritePending()
 	}
 	index, longest := s.memoryIndex()
+	s.rejudgeMemoryPending(index)
+	zhuyinText := s.contextRule(inputstyle.ContextZhuyin)
 	for range rejudgePasses {
 		end := len(s.syls)
 		if s.mixed.raw != "" {
@@ -40,7 +44,7 @@ func (s *Session) rejudge() {
 		if s.rejudgeMemory(index, longest, end) {
 			continue
 		}
-		if s.mixedContext() && (s.rejudgeUnits(end) || s.rejudgeZhuyinText(end)) {
+		if s.rejudgeUnits(end) || zhuyinText && s.rejudgeZhuyinText(end) {
 			continue
 		}
 		if !s.mixedOverwrite() || !s.rejudgeOverwrite(end) {
@@ -49,24 +53,34 @@ func (s *Session) rejudge() {
 	}
 }
 
+// pendingTone：待定按鍵以聲調鍵結尾、還是打出來的樣子（沒用 ↓ 選過、沒接受補全、不是英文字），官方照字面留著。
+func (s *Session) pendingTone() bool {
+	p := s.mixed
+	return p.choice == 0 && p.accepted == "" && !s.englishWord && s.explicitTone(p.raw) && s.mixedText() == p.raw
+}
+
 // rejudgePending 重看官方組不成字、照字面留著的待定「字母＋聲調鍵」：同一個字母多按了幾次（ggggk6、jji3 是什、我），
 // 或在兩個聲母之間切開、前段是英文（initialConflict）。
 func (s *Session) rejudgePending() {
+	repeats, initial := s.contextRule(inputstyle.ContextRepeats), s.contextRule(inputstyle.ContextInitial)
 	p := s.mixed
-	if p.choice != 0 || p.accepted != "" || s.englishWord || !s.explicitTone(p.raw) {
+	if !repeats && !initial || !s.pendingTone() {
 		return
 	}
 	body := p.raw[:len(p.raw)-1]
-	if !isLetters(body) || s.knownEnglish(body) || s.mixedText() != p.raw {
+	if !isLetters(body) || s.knownEnglish(body) {
 		return
 	}
 	tone, _ := s.layout.Symbol(rune(p.raw[len(p.raw)-1]))
-	if merged := collapseRepeats(body); merged != body && s.keysInSyllableOrder(merged) {
+	if merged := collapseRepeats(body); repeats && merged != body && s.keysInSyllableOrder(merged) {
 		if done, ok := s.mixedReading(merged, tone); ok {
 			s.clearMixed()
 			s.insertMixedTyped(done, p.raw)
 			return
 		}
+	}
+	if !initial {
+		return
 	}
 	if at, done, ok := s.initialConflict(body, tone); ok {
 		s.clearMixed()
@@ -92,10 +106,14 @@ func (s *Session) initialConflict(body string, tone rune) (int, zhuyin.Syllable,
 	return 0, "", false
 }
 
-// rejudgeUnits 照規則改 end 前的一個 keyUnit，改了回報 true：反序打的英文字接空白（url␣ 是交，照順序打注音不會反序，
-// #119）與不是國語音節的注音接空白（npm␣ 是 ㄙㄩㄣ）改回英數；重複鍵（ggg＋什）合成一個音節（mergeRepeats）；
-// 數字鍵盤打斷的單一字母注音（e KP2 的 ㄍ）改回字母。
+// rejudgeUnits 照規則改 end 前的一個 keyUnit，改了回報 true：反序打的英文字接空白（reversed：url␣ 是交，照順序打注音
+// 不會反序，#119）與不是國語音節的注音接空白（literal：npm␣ 是 ㄙㄩㄣ）改回英數；重複鍵（repeats：ggg＋什）合成一個
+// 音節（mergeRepeats）；數字鍵盤打斷的單一字母注音（literal：e KP2 的 ㄍ）改回字母。
 func (s *Session) rejudgeUnits(end int) bool {
+	reversed, literal, repeats := s.contextRule(inputstyle.ContextReversed), s.contextRule(inputstyle.ContextLiteral), s.contextRule(inputstyle.ContextRepeats)
+	if !reversed && !literal && !repeats {
+		return false
+	}
 	var units []keyUnit
 	for pos := 0; pos < end; {
 		u, ok := s.keyUnitAt(pos)
@@ -111,16 +129,16 @@ func (s *Session) rejudgeUnits(end int) bool {
 		p, pending := s.pendingLiteralAt(u.start)
 		chinese, letters := !s.literals[u.start], space && isLetters(body)
 		switch {
-		case letters && chinese && !s.keysInSyllableOrder(body) && s.knownEnglish(body),
-			letters && pending && p.tone == 1 && !p.untoned && len(body) >= 2 && !p.syllable().Legal():
+		case reversed && letters && chinese && !s.keysInSyllableOrder(body) && s.knownEnglish(body),
+			literal && letters && pending && p.tone == 1 && !p.untoned && len(body) >= 2 && !p.syllable().Legal():
 			if s.replaceSpan(u.start, u.end, func() { s.insertMixedLiteral(u.keys, false, false) }) {
 				return true
 			}
-		case chinese && s.explicitTone(u.keys):
+		case repeats && chinese && s.explicitTone(u.keys):
 			if s.mergeRepeats(units[:i], u) {
 				return true
 			}
-		case u.keypad && i > 0:
+		case literal && u.keypad && i > 0:
 			if prev := units[i-1]; prev.end == u.start && s.untonedLetterAt(prev.start) &&
 				s.replaceSpan(prev.start, prev.end, func() { s.insertMixedLiteral(prev.keys, false, false) }) {
 				return true
@@ -136,7 +154,7 @@ func (s *Session) mergeRepeats(before []keyUnit, u keyUnit) bool {
 	start, head := u.start, ""
 	for i := len(before) - 1; i >= 0; i-- {
 		b := before[i]
-		if b.end != start || !s.plainLiteralAt(b.start) || b.keys != u.keys[:1] {
+		if b.end != start || !s.plainLiteralAt(b.start) || s.mixedOrigins[b.start].keyed || b.keys != u.keys[:1] {
 			break
 		}
 		start, head = b.start, b.keys+head
@@ -242,13 +260,13 @@ func (s *Session) insertZhuyinUnit(keys string) {
 		done, _ := c.Add(g.tone)
 		at := s.cursor
 		s.insertSyllableLiteral(g.comp, done)
-		s.keepResplitKeys(at, g.keys)
+		s.keepMixedKeys(at, g.keys)
 	}
 }
 
 // markChosen：chosen（↓ 選了注音解釋，choice 2）時把待定按鍵完成的音節或注音（at 到游標）記成明確選的。
 func (s *Session) markChosen(chosen bool, at int) {
-	if !chosen || !s.mixedContext() {
+	if !chosen || !s.keyRecords() {
 		return
 	}
 	if s.mixedOrigins == nil {
@@ -262,11 +280,11 @@ func (s *Session) markChosen(chosen bool, at int) {
 }
 
 // replaceSpan 把 [start, end) 換成 insert 插入的內容，游標在後面時跟著平移、在中間時移到換上的內容後面。
-// 有鎖定、明確選的或照記憶換過的（memoryState.guards）時不換，回傳 false。換的前後都是照字面的字時，其他字照畫面保留
+// 有鎖定、明確選的（含官方清單選的注音文）或照記憶換過的（memoryState.guards）時不換，回傳 false。換的前後都是照字面的字時，其他字照畫面保留
 // （同 flushMixed），不換掉神經選的字。
 func (s *Session) replaceSpan(start, end int, insert func()) bool {
 	for pos := start; pos < end; pos++ {
-		if s.lockedAt(pos) || s.mixedOrigins[pos].explicit || s.memory.guards(pos) {
+		if o := s.mixedOrigins[pos]; s.lockedAt(pos) || o.explicit || o.zhuyinKey == zhuyinKeyPicked || s.memory.guards(pos) {
 			return false
 		}
 	}
@@ -328,7 +346,7 @@ func (s *Session) letterAt(pos int) bool {
 // keypadWordLetters：待定的字母 raw 接在數字鍵盤夾在字母中間的英數詞後面（e KP2 e 的第二個 e）：畫面照字面、
 // 接空白也是英數（mixedText、finishMixedTone），接聲調鍵照舊組成中文（B KP1 x.6 是 B1樓）。
 func (s *Session) keypadWordLetters(raw string) bool {
-	return s.mixedContext() && isLetters(raw) && s.keypadWordBefore(s.cursor)
+	return s.contextRule(inputstyle.ContextLiteral) && isLetters(raw) && s.keypadWordBefore(s.cursor)
 }
 
 // keypadWordBefore：pos 前面是字母接數字鍵盤的數字，中間可以隔著照字面的字母（e2、e2e）。

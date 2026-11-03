@@ -7,7 +7,6 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/input"
-	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -23,8 +22,8 @@ const (
 	overwriteSpaceMargin = 6.0
 )
 
-// mixedOverwrite：整合風格（操作規則 mixed_overwrite），要有 mixed_resplit 的按鍵紀錄。
-func (s *Session) mixedOverwrite() bool { return s.InputStyle.MixedOverwrite != "" && s.resplit() }
+// mixedOverwrite：整合風格（操作規則 mixed_overwrite）。
+func (s *Session) mixedOverwrite() bool { return s.InputStyle.MixedOverwrite != "" && s.mixedInput() }
 
 // overwrite 是一段按鍵照微軟新注音「同一格後按的蓋掉先按的」組成的音節（group 的 keys 是全部的按鍵）。
 // lead：被蓋掉的是第一個鍵、緊接著另一個聲母（gnj4 的 g、nh4 的 n），那個鍵也可能是要打的字母（n次）。
@@ -90,8 +89,7 @@ func (s *Session) overwriteAt(keys string) (overwrite, zhuyin.Syllable, bool) {
 // rejudgeOverwritePending：官方照字面留著的待定按鍵（5jiy6）是打錯又補對的時，換成蓋完的音節。
 func (s *Session) rejudgeOverwritePending() {
 	p := s.mixed
-	if p.choice != 0 || p.accepted != "" || s.englishWord || !s.explicitTone(p.raw) || s.mixedText() != p.raw ||
-		s.alnumAt(s.cursor-1) {
+	if !s.pendingTone() || s.alnumAt(s.cursor-1) {
 		return
 	}
 	if o, syl, ok := s.overwriteAt(p.raw); ok && s.overwriteWanted(overwriteCase{start: s.cursor, syl: syl, shown: []rune(p.raw), lead: o.lead}) {
@@ -224,37 +222,4 @@ func (s *Session) overwriteChars(start int, syl zhuyin.Syllable) []rune {
 		}
 	}
 	return chars
-}
-
-// overwriteGroup：units 的按鍵是打錯又補對的（↓ 清單先列蓋完的字，不看神經模型）。
-func (s *Session) overwriteGroup(units []keyUnit) (keyGroup, bool) {
-	if !s.mixedOverwrite() {
-		return keyGroup{}, false
-	}
-	var keys strings.Builder
-	for _, u := range units {
-		if u.fixed != "" || u.keypad {
-			return keyGroup{}, false
-		}
-		keys.WriteString(u.keys)
-	}
-	o, ok := s.overwriteReading(keys.String())
-	return o.group, ok
-}
-
-// notePendingOverwrite：待定按鍵的 ↓ 選了蓋完的字（5jiy6 選「昨」）時記成這次的選擇，送出時學（同 noteMemoryChoice）。
-func (s *Session) notePendingOverwrite(id int) func() {
-	c, raw, at := s.cand, s.mixed.raw, s.cursor
-	if _, ok := c.mixedChars[id]; !ok || c.mixedAt != 0 || !s.mixedOverwrite() {
-		return func() {}
-	}
-	if _, ok := s.overwriteReading(raw); !ok {
-		return func() {}
-	}
-	return func() {
-		p, form := memorySpan{at, at + 1}, []personal.MixedToken{{Keys: raw, Kind: personal.MixedChinese}}
-		if s.memoryFormIs(p, form) {
-			s.memory.choices = append(s.memory.choices, memoryChoice{memorySpan: p, form: form})
-		}
-	}
 }

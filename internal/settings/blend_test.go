@@ -2,7 +2,10 @@ package settings
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 )
 
 func itemsByKey(s Settings) map[string]Item {
@@ -13,41 +16,63 @@ func itemsByKey(s Settings) map[string]Item {
 	return items
 }
 
-func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
-	s := freshSettings()
-	if err := s.ProfileAction("copy", "blend", "整合風格"); err != nil {
+func roundTrip(t *testing.T, s Settings) (Settings, string) {
+	t.Helper()
+	raw, err := json.Marshal(s)
+	if err != nil {
 		t.Fatal(err)
 	}
-	p, r := s.ActiveProfile(), s.ProfileRules()
-	if p.Builtin || p.Source != "blend" || p.Name != "整合風格" {
-		t.Fatalf("not a custom copy: %+v", p)
-	}
-	if !s.MixedInput || !s.EnglishAutocomplete || s.Toneless || s.EmojiShortcut != "off" || !s.CtrlPunctuation ||
-		r.ShiftSpace != "disabled" || r.EnglishRanking != "frequency" || r.EnglishLearning != "dictionary" ||
-		r.Symbols != "microsoft" || r.Width != "shift_space" || r.SymbolBoard != "asus" || r.MixedResplit != "keys" ||
-		r.MixedContext != "rules" || r.VocabMark != "extended" || r.CandidateBackTab != "shorter" ||
-		r.MixedMemory != "context" || r.MixedOverwrite != "neural" {
-		t.Fatalf("blend recipe not applied: %+v %+v", s, r)
-	}
-	for _, item := range s.Profiles().Items {
-		if item.ID == p.ID && item.Summary[0] != "Shift＋空白切換全半形（混打照常）" {
-			t.Errorf("summary: %q", item.Summary)
-		}
-	}
-	for key, item := range itemsByKey(s) {
-		if item.Locked {
-			t.Errorf("%s locked", key)
-		}
-		if (key == "mixed-input" || key == "english-autocomplete") && item.Disabled {
-			t.Errorf("%s disabled: %s", key, item.DisabledReason)
-		}
-	}
-	raw, _ := json.Marshal(s)
 	var back Settings
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.ReadOnly() || back.ProfileRules() != r || !back.MixedInput {
+	return back, string(raw)
+}
+
+// blendStyle 照作者的設定（INSTALL.md）建自訂風格。
+func blendStyle(t *testing.T, s *Settings) {
+	t.Helper()
+	if err := s.ProfileAction("copy", "0c", "整合風格"); err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range [][2]string{{"mixed-input", "on"}, {"english-autocomplete", "on"}, {"emoji-shortcut", "off"},
+		{"style-punctuation", "microsoft-halfwidth"}, {"style-shift-space", "fullwidth"}} {
+		if err := s.Set(kv[0], kv[1]); err != nil {
+			t.Fatalf("%s=%s: %v", kv[0], kv[1], err)
+		}
+	}
+}
+
+func TestBlendStyleIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
+	s := freshSettings()
+	blendStyle(t, &s)
+	p, r := s.ActiveProfile(), s.ProfileRules()
+	if p.Builtin || p.Name != "整合風格" {
+		t.Fatalf("not a custom copy: %+v", p)
+	}
+	want := inputstyle.Rules{Punctuation: "0c", ShiftSpace: "fullwidth", Symbols: "microsoft"}
+	if !s.MixedInput || !s.EnglishAutocomplete || s.Toneless || s.EmojiShortcut != "off" || !s.CtrlPunctuation ||
+		r.Punctuation != want.Punctuation || r.ShiftSpace != want.ShiftSpace || r.Symbols != want.Symbols ||
+		s.BlendWidth() != "shift_space" {
+		t.Fatalf("blend recipe not applied: %+v %+v", s, r)
+	}
+	if e := s.EngineRules(); e != inputstyle.DefaultExtras().Apply(r) {
+		t.Fatalf("engine rules: %+v", e)
+	}
+	items := itemsByKey(s)
+	if items["style-punctuation"].Value != "microsoft-halfwidth" || items["style-shift-space"].Value != "fullwidth" {
+		t.Fatalf("style items: %+v %+v", items["style-punctuation"], items["style-shift-space"])
+	}
+	for key, item := range items {
+		if item.Locked {
+			t.Errorf("%s locked", key)
+		}
+		if item.Disabled {
+			t.Errorf("%s disabled: %s", key, item.DisabledReason)
+		}
+	}
+	back, _ := roundTrip(t, s)
+	if back.ReadOnly() || back.ProfileRules() != r || !back.MixedInput || back.Blend != s.Blend {
 		t.Fatalf("blend copy did not round trip: %+v", back.ProfileRules())
 	}
 	// 官方的規則照官方逐條判斷能不能跟混打並用：Tab 輪換可以，Tab 調整斷詞要先關掉混打才能改。
@@ -66,18 +91,149 @@ func TestBlendIsAnUnlockedCustomCopyThatKeepsMixedInput(t *testing.T) {
 	if reason := itemsByKey(back)["mixed-input"].DisabledReason; reason != "Tab 調整斷詞時關閉" {
 		t.Fatalf("mixed input should be disabled by the official rule: %q", reason)
 	}
+	if back.BlendWidth() != "" {
+		t.Fatal("official full width without mixed input")
+	}
 }
 
-func TestBlendIsAvailableOnEveryKeyboardLayout(t *testing.T) {
+// 改了官方規則（標點、Shift＋空白）的自訂風格同官方，只在標準排列可選。
+func TestBlendStyleFollowsOfficialKeyboardLayoutLimit(t *testing.T) {
 	s := freshSettings()
-	if err := s.Set("keyboard-layout", "eten"); err != nil {
+	blendStyle(t, &s)
+	if err := s.Set("keyboard-layout", "eten"); err == nil || !strings.Contains(err.Error(), "標準注音排列") {
+		t.Fatalf("blend style on eten: %v", err)
+	}
+}
+
+// 全域開關不跟著風格：換風格（含鎖定的內建風格）照舊、照樣能改；跟預設一樣時不寫進設定檔。
+func TestBlendSettingsAreGlobal(t *testing.T) {
+	s := freshSettings()
+	if _, raw := roundTrip(t, s); strings.Contains(raw, `"blend":{`) {
+		t.Fatalf("default extras written: %s", raw)
+	}
+	if err := s.ProfileAction("select", "microsoft", ""); err != nil {
 		t.Fatal(err)
 	}
-	// 整合風格沒改官方的操作規則，不受「此風格目前支援標準注音排列」限制；混打照倚天排列的規則停用。
-	if err := s.ProfileAction("copy", "blend", "整合風格"); err != nil {
+	if err := s.Set("mixed-zhuyin-text", "on"); err != nil {
 		t.Fatal(err)
 	}
-	if reason := itemsByKey(s)["mixed-input"].DisabledReason; reason != "倚天 41 鍵時關閉" {
-		t.Fatalf("unexpected mixed input state on eten: %q", reason)
+	if err := s.Set("english-ranking", "alphabetical"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProfileAction("select", "0c", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Blend.MixedZhuyinText || s.Blend.EnglishRanking != "alphabetical" || s.EngineRules().EnglishRanking != "" ||
+		!s.EngineRules().ContextRule(inputstyle.ContextZhuyin) {
+		t.Fatalf("extras not kept: %+v", s.Blend)
+	}
+	back, raw := roundTrip(t, s)
+	if back.Blend != s.Blend || !strings.Contains(raw, `"blend":{`) {
+		t.Fatalf("extras did not round trip: %s", raw)
+	}
+	running := BlendRunning(back.BlendKey())
+	for _, b := range blendSpecs() {
+		if v, _ := back.Value(b.key); running[b.key] != v {
+			t.Errorf("%s running %q, setting %q", b.key, running[b.key], v)
+		}
+	}
+	if len(BlendRunning("")) != 0 {
+		t.Fatal("old engines report no extras")
+	}
+}
+
+// 讀不懂的 blend 留原文寫回，改了任何一個開關才換成這一版的。
+func TestBlendKeepsUnreadableValue(t *testing.T) {
+	var s Settings
+	if err := json.Unmarshal([]byte(`{"schema":1,"blend":{"english_ranking":"newer"}}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Blend != inputstyle.DefaultExtras() {
+		t.Fatalf("unreadable extras: %+v", s.Blend)
+	}
+	if _, raw := roundTrip(t, s); !strings.Contains(raw, `"newer"`) {
+		t.Fatalf("unreadable extras dropped: %s", raw)
+	}
+	if err := s.Set("mixed-resplit", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if _, raw := roundTrip(t, s); strings.Contains(raw, `"newer"`) || strings.Count(raw, `"blend":`) != 1 {
+		t.Fatalf("explicit change kept the old value: %s", raw)
+	}
+	// 新版多的開關：認得的照讀，原文寫回。
+	s = Settings{}
+	if err := json.Unmarshal([]byte(`{"schema":1,"blend":{"mixed_resplit":false,"english_ranking":"frequency","mixed_future":true}}`), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Blend.MixedResplit || s.Blend.EnglishRanking != "frequency" {
+		t.Fatalf("known extras not read: %+v", s.Blend)
+	}
+	if _, raw := roundTrip(t, s); !strings.Contains(raw, `"mixed_future"`) {
+		t.Fatalf("newer extras dropped: %s", raw)
+	}
+}
+
+// 混打的開關跟著中英混打停用；關掉「↓／Tab 跨過英數換整段」不停用其他開關。
+func TestBlendDisabledReasons(t *testing.T) {
+	s := freshSettings()
+	if err := s.ProfileAction("copy", "0c", "custom"); err != nil {
+		t.Fatal(err)
+	}
+	by := func(s Settings) map[string]string {
+		out := map[string]string{}
+		for _, b := range blendSpecs() {
+			out[b.key] = itemsByKey(s)[b.key].DisabledBy
+		}
+		return out
+	}
+	off := by(s)
+	for _, b := range blendSpecs() {
+		if want := map[bool]string{true: "mixed-input"}[b.mixed]; off[b.key] != want {
+			t.Errorf("mixed off: %s by %q", b.key, off[b.key])
+		}
+	}
+	if err := s.Set("mixed-input", "on"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("mixed-resplit", "off"); err != nil {
+		t.Fatal(err)
+	}
+	for key, by := range by(s) {
+		if by != "" {
+			t.Errorf("resplit off: %s by %q", key, by)
+		}
+	}
+	if err := s.Set("toneless", "on"); err == nil {
+		if got := by(s)["mixed-repeats"]; got != "toneless" {
+			t.Errorf("toneless: mixed-repeats by %q", got)
+		}
+	} else if !strings.Contains(err.Error(), "聲調") {
+		t.Fatal(err)
+	}
+}
+
+// 標點操作的「微軟半形參考」是 symbols：標點照靈犀，所以跟不打聲調可以並用；換回其他選項就拿掉。
+func TestPunctuationMicrosoftHalfwidth(t *testing.T) {
+	s := freshSettings()
+	if err := s.ProfileAction("copy", "0c", "custom"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("style-punctuation", "microsoft-halfwidth"); err != nil {
+		t.Fatal(err)
+	}
+	if r := s.ProfileRules(); r.Punctuation != "0c" || r.Symbols != "microsoft" {
+		t.Fatalf("halfwidth: %+v", r)
+	}
+	if err := s.Set("toneless", "on"); err != nil {
+		t.Fatalf("toneless with halfwidth punctuation: %v", err)
+	}
+	if err := s.Set("toneless", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("style-punctuation", "microsoft"); err != nil {
+		t.Fatal(err)
+	}
+	if r := s.ProfileRules(); r.Punctuation != "microsoft" || r.Symbols != "" || itemsByKey(s)["style-punctuation"].Value != "microsoft" {
+		t.Fatalf("back to microsoft: %+v", r)
 	}
 }

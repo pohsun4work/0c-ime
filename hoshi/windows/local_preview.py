@@ -5,8 +5,8 @@
 （0.2.7-hoshi.4.1、.4.2…），排在下一個正式版之前，正式版發布後自動更新照常蓋過去。
 字典取官方同版本的原始碼 tarball；neural/ 沿用已安裝版本的那份（prepare_neural 要在 Linux 編 bytecode）。
 
-打包完在 build\\local-preview\\ 留下 install.ps1（local_install.ps1 的複本），會跳 UAC：安裝、整合風格的配方有變時
-重建風格；-Rollback 退回上一版並用舊版的配方重建風格。--install 打包完直接執行它。
+打包完在 build\\local-preview\\ 留下 install.ps1（local_install.ps1 的複本），會跳 UAC 安裝；-Rollback 退回上一版。
+--install 打包完直接執行它。
 
   py -3.12 hoshi\\windows\\local_preview.py             # 在要測的 checkout 根目錄執行
   powershell -ExecutionPolicy Bypass -File build\\local-preview\\install.ps1 [-Rollback]
@@ -119,7 +119,7 @@ def shell_changed(receipt, fallback):
 
 
 def stage_install(archive, shell):
-    """安裝腳本與它讀的 install.json 放在 build\\local-preview\\；風格要在安裝前用新版的 0c-update 重建，先從套件取出來。"""
+    """安裝腳本與它讀的 install.json 放在 build\\local-preview\\；用新版的 0c-update 安裝，先從套件取出來。"""
     updater = OUT / "updater/0c-update.exe"
     updater.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(archive) as z, z.open(f"{archive.stem}/0c-update.exe") as source, updater.open("wb") as target:
@@ -167,7 +167,7 @@ def main():
         shell = shell_changed(receipt, state["shell_commit"])
         script = stage_install(archive, shell)
         print(f"已打包 {version}（{time.monotonic() - started:.0f} 秒）：{archive}", flush=True)
-        print("這版改到 TSF DLL 或候選窗，裝完要登出再登入。" if shell else "這版只改引擎，裝完不用登出。", flush=True)
+        print("這版改到 TSF DLL 或候選窗，裝完已經開著的應用程式要重新開啟。" if shell else "這版只改引擎，裝完直接生效。", flush=True)
         if args.install:
             subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)], check=True)
         else:

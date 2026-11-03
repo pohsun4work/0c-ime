@@ -7,17 +7,27 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/input"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/proto"
+	"github.com/0c-biggo/0c-ime/core/vocab"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
-// resplit：整合風格（操作規則 mixed_resplit），組字區查得回原按鍵，↓／Tab 換詞長可以跨過英數，整段換成英文、注音或中文。
+// resplit：整合風格（操作規則 mixed_resplit），↓／Tab 換詞長可以跨過英數，整段換成英文、注音或中文。
 func (s *Session) resplit() bool { return s.InputStyle.MixedResplit != "" && s.mixedInput() }
 
-// resplitKeepsLiteral：整合風格只有接著打的字、↓ 與 Esc 把游標前的原樣注音收回待定按鍵。方向鍵、Enter 這類鍵收回後
+// keyRecords：整合風格要查回按鍵的規則（含混打記憶）開著時，組字區記得原按鍵（keepMixedKeys、markKeyed）。聲母衝突只看
+// 待定的按鍵，只開它時照官方。
+func (s *Session) keyRecords() bool {
+	r := s.InputStyle
+	context := r.MixedContext != "" && r.MixedContext != inputstyle.ContextInitial
+	return (r.MixedResplit != "" || context || r.MixedOverwrite != "" || r.MixedMemory != "") && s.mixedInput()
+}
+
+// keepsLiteral：整合風格只有接著打的字、↓ 與 Esc 把游標前的原樣注音收回待定按鍵。方向鍵、Enter 這類鍵收回後
 // 同一鍵又定案，定案沿用收回前的路徑，神經選字時會多出一個字（ㄍ2ㄍ 按 ← 變 ㄍㄍ2ㄍ）。
-func (s *Session) resplitKeepsLiteral(k string) bool {
-	return s.resplit() && len([]rune(k)) != 1 && k != proto.KeyDown && k != proto.KeyEscape
+func (s *Session) keepsLiteral(k string) bool {
+	return s.keyRecords() && len([]rune(k)) != 1 && k != proto.KeyDown && k != proto.KeyEscape
 }
 
 // keyUnit 是組字區裡一段查得回原按鍵的位置：中文音節、英數與符號各一格，原樣注音連同聲調整個算一段。
@@ -85,42 +95,42 @@ func (s *Session) literalTabbable() bool {
 	return maxLen > 1
 }
 
-// keyMaxLen 是 Tab 換詞長的上限：n 是詞庫最長的詞長，連續查得到按鍵的範圍裡有照字面的字時延伸到最遠的那個字。
+// keyMaxLen 是 Tab 換詞長的上限：n 是詞庫最長的詞長；整合風格同 Shift 標示，到組字區的頭尾（跨過空白），最多 vocab.MaxWordRunes 字。
 func (s *Session) keyMaxLen(anchor int, before bool, n int) int {
 	if !s.resplit() {
 		return n
 	}
-	return max(n, s.keyRun(anchor, before))
+	reach := len(s.syls) - anchor
+	if before {
+		reach = anchor
+	}
+	return max(n, min(reach, vocab.MaxWordRunes))
 }
 
-// keyRun 是從 anchor 往後（before 時往前）連續查得到按鍵、到最遠一個照字面的字的長度；空白只能是最右邊一格。
-func (s *Session) keyRun(anchor int, before bool) int {
-	pos, far := anchor, anchor
+// openTabLength 開 Tab 換到的詞長；整合風格查不到詞或中間有分隔的空白時同標示那段按 ↓（openMarkSpan），
+// 但不切開一段按鍵（su 打的 ㄋㄧ 不換到只剩 ㄧ）。
+func (s *Session) openTabLength(anchor, length int, before bool) bool {
+	if s.openAnchored(anchor, length, before) {
+		return true
+	}
+	start := anchor
 	if before {
-		for pos > 0 {
-			u, ok := s.keyUnitAt(pos - 1)
-			if !ok || u.end != pos || u.keys == " " && pos != anchor {
-				break
-			}
-			if pos = u.start; s.literals[pos] {
-				far = pos
-			}
-		}
-		return anchor - far
+		start -= length
 	}
-	for pos < len(s.syls) {
-		u, ok := s.keyUnitAt(pos)
-		if !ok || u.start != pos {
-			break
-		}
-		if pos = u.end; s.literals[u.start] {
-			far = pos
-		}
-		if u.keys == " " {
-			break
-		}
+	if !s.resplit() || length < 2 || !s.unitEdge(start) || !s.unitEdge(start+length) || !s.openMarkSpan(start, start+length) {
+		return false
 	}
-	return far - anchor
+	s.cand.before = before
+	return true
+}
+
+// unitEdge：pos 不在一段按鍵的中間。
+func (s *Session) unitEdge(pos int) bool {
+	if pos <= 0 || pos >= len(s.syls) {
+		return true
+	}
+	u, ok := s.keyUnitAt(pos)
+	return !ok || u.start == pos
 }
 
 // keyGroup 是重新拆成注音的一段：一個音節的按鍵，或照字面的一個字元（不是注音鍵、數字鍵盤的數字、前面沒有注音的聲調鍵），
@@ -173,6 +183,48 @@ func (s *Session) keyGroups(units []keyUnit) []keyGroup {
 	}
 	end()
 	return out
+}
+
+// syllableGroup 把一個音節的按鍵接成一個 keyGroup：照注音順序的（keyGroups 只有一段）或 reorderedGroup。
+func (s *Session) syllableGroup(keys string) (keyGroup, bool) {
+	if groups := s.groupsOf(keys); len(groups) == 1 && !groups[0].literal {
+		return groups[0], true
+	}
+	return s.reorderedGroup(keys)
+}
+
+// reorderedGroup：照注音順序切成好幾段的按鍵整段是一個音節，最後一鍵是聲調或空白、順序顛倒但官方組字器組得成的
+// （ps4 是 ㄋㄣˋ、u2␣ 是 ㄉㄧ），整合風格（mixed_overwrite）再加打錯又補對的（5jiy6）。
+func (s *Session) reorderedGroup(keys string) (keyGroup, bool) {
+	if n := len(keys); n >= 2 {
+		tone, ok := s.layout.Symbol(rune(keys[n-1]))
+		if c, composed := s.mixedComposer(keys[:n-1]); ok && composed && zhuyin.ClassOf(tone) == zhuyin.Tone {
+			if _, ok := s.mixedReading(keys[:n-1], tone); ok {
+				return keyGroup{keys: keys, comp: c, tone: tone}, true
+			}
+		}
+	}
+	if s.mixedOverwrite() {
+		if o, ok := s.overwriteReading(keys); ok {
+			return o.group, true
+		}
+	}
+	return keyGroup{}, false
+}
+
+// wholeSyllable：units 的按鍵照注音順序切成好幾段，整段卻是一個音節（reorderedGroup）。
+func (s *Session) wholeSyllable(units []keyUnit) (keyGroup, bool) {
+	var keys strings.Builder
+	for _, u := range units {
+		if u.fixed != "" || u.keypad {
+			return keyGroup{}, false
+		}
+		keys.WriteString(u.keys)
+	}
+	if len(s.groupsOf(keys.String())) == 1 {
+		return keyGroup{}, false
+	}
+	return s.reorderedGroup(keys.String())
 }
 
 // syllable 回傳音節的讀音：沒打聲調時由解碼決定（zhuyin.Untone）。不是國語音節時回傳 false。
@@ -303,6 +355,12 @@ func (s *Session) openKeySpan(pos, length int) bool {
 	return ok && s.openUnits(pos, length, units)
 }
 
+// zhuyinKeyList：pos 是單一個注音鍵（我2 的 2），↓ 照官方列注音文（#208：選 ㄉ 連後面的空白一起換掉），不開跨英數候選。
+func (s *Session) zhuyinKeyList(pos int) bool {
+	_, ok := s.lonePhoneticKeyAt(pos)
+	return ok
+}
+
 // openUnits 開 units（[pos, pos+length)）的跨英數候選，見 openKeySpan。
 func (s *Session) openUnits(pos, length int, units []keyUnit) bool {
 	s.refresh()
@@ -323,7 +381,7 @@ func (s *Session) openUnits(pos, length int, units []keyUnit) bool {
 			add(s.keyGroupsText(groups, words), func() { s.insertKeyGroups(groups, words) })
 		}
 	}
-	if g, ok := s.overwriteGroup(units); ok { // 整合風格（mixed_overwrite）：打錯又補對的按鍵先列蓋完的字
+	if g, ok := s.wholeSyllable(units); ok {
 		chinese([]keyGroup{g})
 	}
 	groups := s.keyGroups(units)
@@ -560,9 +618,9 @@ func (s *Session) tabFromMixed(d int) {
 	}
 }
 
-// keepResplitKeys 記下位置 at 的音節或原樣注音的原按鍵。
-func (s *Session) keepResplitKeys(at int, keys string) {
-	if keys == "" || !s.resplit() {
+// keepMixedKeys 記下位置 at 的音節或原樣注音的原按鍵。
+func (s *Session) keepMixedKeys(at int, keys string) {
+	if keys == "" || !s.keyRecords() {
 		return
 	}
 	if s.mixedKeys == nil {
@@ -574,7 +632,7 @@ func (s *Session) keepResplitKeys(at int, keys string) {
 // dropToneKey 去掉位置 at 的原按鍵最後的聲調鍵：原樣音節的聲調被刪掉時，按鍵跟著畫面。
 func (s *Session) dropToneKey(at int) {
 	keys := s.mixedKeys[at]
-	if keys == "" || !s.resplit() {
+	if keys == "" || !s.keyRecords() {
 		return
 	}
 	if sym, ok := s.layout.Symbol(rune(keys[len(keys)-1])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
@@ -584,7 +642,7 @@ func (s *Session) dropToneKey(at int) {
 
 // markKeyed 記下 at 到游標之間剛打的字的來源（mixedOrigin.keyed）。
 func (s *Session) markKeyed(at int, keypad bool) {
-	if !s.resplit() {
+	if !s.keyRecords() {
 		return
 	}
 	if s.mixedOrigins == nil {

@@ -82,7 +82,7 @@ func (s *Session) restorePendingLiteral() {
 		}
 		// 整合風格：混打留成注音的按鍵回到待定按鍵，接著打照混打判斷、↓ 有原按鍵。按鍵要組得出同一個注音：
 		// 刪掉聲調的原樣音節（我ㄉˋ）按鍵裡還有聲調，照舊回到注音。
-		if c, ok := s.mixedComposer(keys); s.resplit() && s.mixed.raw == "" && ok && c.String() == p.composer.String() {
+		if c, ok := s.mixedComposer(keys); s.keyRecords() && !s.english && s.mixed.raw == "" && ok && c.String() == p.composer.String() {
 			s.mixed = pendingKeys{raw: keys}
 			if s.mixedText() != c.String() {
 				s.mixed.choice = 2 // ↓ 選過注音解釋（2 → ㄉ）
@@ -229,7 +229,7 @@ func (s *Session) joinPrefixLiteral(done zhuyin.Syllable) bool {
 		s.eraseBeforeCursor()
 	}
 	s.insert(p.syllable())
-	s.keepResplitKeys(p.start, keys)
+	s.keepMixedKeys(p.start, keys)
 	s.insert(done)
 	if s.refresh(); len(s.path) > 0 {
 		return true

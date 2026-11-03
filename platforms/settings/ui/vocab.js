@@ -29,6 +29,7 @@ window.ZcVocab = function (ctx) {
     words: [], total: 0, offset: 0, query: '', listError: null, ranks: new Map(),
     learned: null, learnedError: null, phrases: null, phrasesError: null,
     learnedView: 'learned', learnedSel: new Set(), learnedBusy: false, forgotten: null, forgottenSel: new Set(), forgottenCount: 0,
+    mixed: null, mixedEnglish: null, mixedError: null, mixedSel: new Set(), mixedSeq: 0, mixedBusy: false, // 整合風格的「混打記憶」
     batches: null, showAllBatches: false, openBatch: null, batchDetail: new Map(),
     draft: null, paste: null, editing: null, staleList: false, flash: new Set(),
     undo: null, ai: { open: false, view: null, busy: false, tool: 'chat', shown: false, regenAsk: false, test: null, testing: false, port: '' },
@@ -154,7 +155,7 @@ window.ZcVocab = function (ctx) {
     el.count = h('span', { class: 'vcount muted' });
     el.tabs = {};
     const tabBar = h('div', { class: 'tabs', role: 'tablist', 'aria-label': '詞彙分類' },
-      [['words', '我加的詞'], ['learned', '靈犀學到的'], ['phrases', '我的片語']].map(([key, label]) => {
+      [['words', '我加的詞'], ['learned', '靈犀學到的'], ['phrases', '我的片語'], ['mixed', '混打記憶']].map(([key, label]) => {
         el.tabs[key] = h('button', {
           type: 'button', role: 'tab', class: 'tab', id: 'vtab-' + key, 'aria-controls': 'vpanel-' + key,
           onclick: () => setTab(key), onkeydown: tabKeys,
@@ -184,8 +185,10 @@ window.ZcVocab = function (ctx) {
         el.paste, el.list, el.pager),
       learned: h('div', { role: 'tabpanel', id: 'vpanel-learned', 'aria-labelledby': 'vtab-learned' }),
       phrases: h('div', { role: 'tabpanel', id: 'vpanel-phrases', 'aria-labelledby': 'vtab-phrases' }),
+      mixed: h('div', { role: 'tabpanel', id: 'vpanel-mixed', 'aria-labelledby': 'vtab-mixed' }),
     };
     el.learned = el.panels.learned;
+    el.mixed = el.panels.mixed;
     el.phraseInput = h('textarea', {
       class: 'vphrase', rows: '2', placeholder: '輸入一則片語，例如地址、簽名或常用句子', 'aria-label': '新增片語',
       onkeydown: (event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) { event.preventDefault(); addPhrase(); } },
@@ -204,7 +207,7 @@ window.ZcVocab = function (ctx) {
     el.root = h('div', { class: 'vocab' },
       h('h1', {}, '我的詞彙'),
       h('p', { class: 'lead' }, '加進來的人名、術語打得出來，也看得到靈犀自己學到了什麼。'),
-      tabBar, el.notices, el.panels.words, el.panels.learned, el.panels.phrases,
+      tabBar, el.notices, el.panels.words, el.panels.learned, el.panels.phrases, el.panels.mixed,
       h('h2', {}, '最近變更'), el.batches, el.ai, el.undo);
     section.append(el.root);
     drawTabs();
@@ -214,7 +217,7 @@ window.ZcVocab = function (ctx) {
   }
 
   function tabKeys(event) {
-    const keys = ['words', 'learned', 'phrases'];
+    const keys = ['words', 'learned', 'phrases', 'mixed'];
     const i = keys.indexOf(v.tab);
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
       event.preventDefault();
@@ -227,6 +230,7 @@ window.ZcVocab = function (ctx) {
     v.tab = key;
     drawTabs();
     if (key === 'learned') loadLearned();
+    if (key === 'mixed') loadMixed();
     if (key === 'phrases') loadPhrases();
   }
 
@@ -310,6 +314,7 @@ window.ZcVocab = function (ctx) {
     drawWords();
     drawBatches();
     if (v.tab === 'learned') loadLearned();
+    if (v.tab === 'mixed') loadMixed();
     if (v.tab === 'phrases') loadPhrases();
     loadRanks(seq);
     syncWatch();
@@ -681,15 +686,15 @@ window.ZcVocab = function (ctx) {
     loadLearned();
   }
 
-  // 勾選列：全選（部分勾選時顯示半勾）、已選幾個、批次按鈕。
-  function bulkBar(items, sel, actions, label) {
+  // 勾選列：全選（部分勾選時顯示半勾）、已選幾個、批次按鈕。act 處理按鈕，redraw 重畫勾選狀態（預設是學到的詞）。
+  function bulkBar(items, sel, actions, label, act = learnedAction, redraw = drawLearned) {
     const all = h('input', { type: 'checkbox', 'data-k': 'all:' + label, 'aria-label': '全選' + label });
     all.checked = items.length > 0 && items.every((w) => sel.has(w));
     all.indeterminate = !all.checked && items.some((w) => sel.has(w));
     all.disabled = !items.length;
     all.addEventListener('change', () => {
       if (all.checked) items.forEach((w) => sel.add(w)); else items.forEach((w) => sel.delete(w));
-      drawLearned();
+      redraw();
     });
     const n = items.filter((w) => sel.has(w)).length;
     return h('div', { class: 'vbulk' },
@@ -697,15 +702,15 @@ window.ZcVocab = function (ctx) {
       h('span', { class: 'muted small vselcount' }, n ? '已選 ' + num(n) + ' 個' : '勾選要一起處理的詞'),
       h('span', { class: 'vactions' }, actions.map(([op, text]) => h('button', {
         type: 'button', class: 'secondary small', 'data-k': 'bulk:' + op, disabled: !n,
-        onclick: () => learnedAction(op, items.filter((w) => sel.has(w))),
+        onclick: () => act(op, items.filter((w) => sel.has(w))),
       }, text))));
   }
 
-  function rowCheck(word, sel, disabled) {
-    const box = h('input', { type: 'checkbox', class: 'vsel', 'data-k': 'sel:' + word, 'aria-label': '選取「' + word + '」' });
+  function rowCheck(word, sel, disabled, redraw = drawLearned, name = word) {
+    const box = h('input', { type: 'checkbox', class: 'vsel', 'data-k': 'sel:' + word, 'aria-label': '選取「' + name + '」' });
     box.checked = sel.has(word);
     box.disabled = !!disabled;
-    box.addEventListener('change', () => { if (box.checked) sel.add(word); else sel.delete(word); drawLearned(); });
+    box.addEventListener('change', () => { if (box.checked) sel.add(word); else sel.delete(word); redraw(); });
     return box;
   }
 
@@ -813,13 +818,108 @@ window.ZcVocab = function (ctx) {
     if (hadFocus && lost && undo) undo.focus();
   }
 
-  async function undoLearned(id) {
+  async function undoLearned(id, reload = loadLearned) {
     hideUndo();
     let r;
     try { r = await req({ op: 'learned-undo', undo: id }); } catch (error) { r = { error: { message: String(error) } }; }
     if (!r.ok) { toast(errText(r), 'warn'); return; }
     toast('已復原。', 'ok');
-    loadLearned();
+    reload();
+  }
+
+  // ---- 混打記憶（整合風格）：中英混打用 ↓ 換過的解釋，與自動學會的英文字 ----
+  // 混打記憶存在學習資料，刪除沒有復原（再用 ↓ 換一次就記回來）；英文字的移除、不再學同「靈犀學到的」，可以復原。
+  const FORM = { english: '英數', chinese: '中文', zhuyin: '注音' };
+  const shownKeys = (keys) => keys.replace(/ /g, '␣');
+  const formText = (form) => (form || []).map((t) => FORM[t.kind] + ' ' + shownKeys(t.text)).join('＋');
+  async function loadMixed() {
+    const seq = ++v.mixedSeq;
+    let r;
+    try { r = await req({ op: 'mixed' }); } catch (error) { r = { error: { message: String(error) } }; }
+    if (seq !== v.mixedSeq) return; // 之後又讀過或刪過
+    if (r.ok) {
+      v.mixed = r.mixed || [];
+      v.mixedEnglish = r.english || [];
+      v.mixedError = null;
+      const ids = new Set(v.mixed.map((x) => x.id));
+      for (const id of [...v.mixedSel]) if (!ids.has(id)) v.mixedSel.delete(id);
+    } else { v.mixedError = r.error && r.error.code === 'engine' ? 'engine' : errText(r); }
+    drawMixed();
+    drawNotices();
+  }
+
+  function drawMixed() { keepFocus(el.mixed, drawMixedNow); }
+  function drawMixedNow() {
+    clear(el.mixed);
+    el.mixed.append(h('p', { class: 'muted vlead' }, '中英混打時用 ↓ 換過再送出的解釋：同樣的按鍵、前一個字與後一個音再出現時照著換。刪掉之後，再用 ↓ 換一次就會記回來。'));
+    if (v.mixedError) {
+      el.mixed.append(h('div', { class: 'card vempty' }, h('p', { class: 'muted' },
+        v.mixedError === 'engine' ? '輸入法引擎執行時才看得到混打記憶。' : '無法讀取：' + v.mixedError)));
+      return;
+    }
+    if (!v.mixed) { el.mixed.append(h('p', { class: 'muted' }, '讀取中…')); return; }
+    if (!v.mixed.length) {
+      el.mixed.append(h('div', { class: 'card vempty' }, h('p', { class: 'muted' }, '還沒有混打記憶。開著中英混打時，用 ↓ 換過再送出的會出現在這裡。')));
+    } else {
+      const sel = v.mixedSel;
+      const name = (x) => shownKeys(x.keys) + ' → ' + formText(x.form);
+      el.mixed.append(h('div', { class: 'card vrows' },
+        bulkBar(v.mixed.map((x) => x.id), sel, [['mixed-remove', '刪除']], '混打記憶', mixedRemove, drawMixed),
+        h('div', { class: 'vrow mixed vhdr muted small', 'aria-hidden': 'true' },
+          h('span', {}), h('span', {}, '按鍵'), h('span', {}, '前一個字'), h('span', {}, '後一個音'), h('span', {}, '換成'), h('span', {}, '確認次數'), h('span', {})),
+        v.mixed.map((x) => h('div', { class: 'vrow mixed' },
+          rowCheck(x.id, sel, false, drawMixed, name(x)),
+          h('div', { class: 'vword vkeys' }, shownKeys(x.keys)),
+          h('span', {}, x.left || '（句首）'),
+          h('span', {}, x.right || '—'),
+          h('span', {}, formText(x.form)),
+          h('span', { class: 'vmeta muted' }, num(x.confirmed) + ' 次'),
+          h('button', { type: 'button', class: 'link', 'data-k': 'mdel:' + x.id, 'aria-label': '刪除「' + name(x) + '」', onclick: () => mixedRemove('mixed-remove', [x.id]) }, '刪除')))));
+    }
+    el.mixed.append(h('h2', {}, '自動學會的英文字'),
+      h('p', { class: 'muted vlead' }, '打過幾次的英文字會自動學會，混打時直接留英文。移除之後照常打還會再學回來；不再學就不會。'));
+    if (!v.mixedEnglish.length) { el.mixed.append(h('div', { class: 'card vempty' }, h('p', { class: 'muted' }, '還沒有自動學會的英文字。'))); return; }
+    el.mixed.append(h('div', { class: 'card vrows' }, v.mixedEnglish.map((word) => h('div', { class: 'vrow forgotten' },
+      h('span', {}),
+      h('div', { class: 'vword' }, word),
+      h('span', { class: 'vactions' },
+        h('button', { type: 'button', class: 'link', 'aria-label': '移除「' + word + '」', onclick: () => mixedEnglish('unlearn', word) }, '移除'),
+        h('button', { type: 'button', class: 'link', 'aria-label': '不再學「' + word + '」', onclick: () => mixedEnglish('forget', word) }, '不再學'))))));
+  }
+
+  async function mixedRemove(op, ids) {
+    if (!ids.length || v.mixedBusy) return;
+    const hadFocus = el.mixed.contains(document.activeElement);
+    v.mixedBusy = true;
+    v.mixedSeq++; // 刪除前送出的讀取不再套用
+    let r;
+    try { r = await req({ op, texts: ids }); } catch (error) { r = { error: { message: String(error) } }; } finally { v.mixedBusy = false; }
+    if (!r.ok) { toast(errText(r), 'error'); loadMixed(); return; } // 上面作廢了進行中的讀取
+    ids.forEach((id) => v.mixedSel.delete(id));
+    v.mixed = r.mixed || [];
+    v.mixedEnglish = r.english || [];
+    drawMixed();
+    toast(r.changed ? (ids.length === 1 ? '已刪除這筆混打記憶。' : '已刪除選取的混打記憶。') : '這些紀錄已經不在了。', 'ok');
+    focusIfLost(hadFocus, el.mixed.querySelector('[data-k="all:混打記憶"]'));
+  }
+
+  async function mixedEnglish(op, word) {
+    const hadFocus = el.mixed.contains(document.activeElement);
+    let r;
+    try { r = await req({ op, texts: [word] }); } catch (error) { r = { error: { message: String(error) } }; }
+    if (!r.ok) { toast(errText(r), 'error'); return; }
+    v.mixedEnglish = v.mixedEnglish.filter((w) => w !== word);
+    drawMixed();
+    if (r.undo) showUndo(LEARNED_DONE[op]('「' + word + '」'), () => undoLearned(r.undo, loadMixed));
+    focusIfLost(hadFocus, !el.undo.hidden && el.undo.querySelector('button'));
+    loadMixed();
+  }
+
+  // 按下的按鈕隨著那一列消失（或變成停用）時，焦點交給 target，同 learnedAction。
+  function focusIfLost(hadFocus, target) {
+    const active = document.activeElement;
+    const lost = !active || active === document.body || !active.isConnected || active.disabled || (el.tabs && active === el.tabs[v.tab]);
+    if (hadFocus && lost && target) target.focus();
   }
 
   // ---- 我的片語 ----
@@ -1218,7 +1318,10 @@ window.ZcVocab = function (ctx) {
       syncWatch();
     },
     visibility() { syncWatch(); if (!document.hidden && v.active && v.loaded) reload(); },
-    focus() { if (v.active && v.tab === 'learned') loadLearned(); },
+    focus() {
+      if (v.active && v.tab === 'learned') loadLearned();
+      if (v.active && v.tab === 'mixed') loadMixed();
+    },
     onChanged,
     refreshOverview,
     overviewText,

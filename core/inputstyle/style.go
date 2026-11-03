@@ -23,28 +23,26 @@ type Rules struct {
 	CandidateEnter      string `json:"candidate_enter"`
 	ShiftLetter         string `json:"shift_letter"`
 	// 以下是整合風格加的欄位（fork:"blend"）；空值是靈犀原本的做法，沒有這些欄位的設定檔照舊讀得懂。
-	// 它們不在官方跟混打衝突的規則表上（settings.styleConflicts），也不算官方的非預設規則（settings.officialRulesDefault）。
+	// 風格只存 symbols（標點操作的「微軟半形參考」），其他由全域開關（Extras.Apply）在引擎啟動時填上。
 	EnglishRanking  string `json:"english_ranking,omitempty" fork:"blend"`  // frequency：英文補全與拼字修正依語料詞頻排序
 	EnglishLearning string `json:"english_learning,omitempty" fork:"blend"` // dictionary：英文字典裡的詞確認 3 次就學會、不限天數
 	// microsoft：中文模式的標點照按鍵出半形（全形時照微軟新注音的全形），` 不開符號選單；Ctrl＋標點多 [ ] Shift+;，英文模式也打全形標點
 	Symbols string `json:"symbols,omitempty" fork:"blend"`
-	// shift_space：Shift＋空白切換全半形；混打照常判斷，判成英數的段落轉全形
-	Width string `json:"width,omitempty" fork:"blend"`
 	// asus：Ctrl＋Alt＋, 開華碩注音的符號表（鍵盤形狀，一般／數學／特殊三頁）
 	SymbolBoard string `json:"symbol_board,omitempty" fork:"blend"`
-	// keys：Enter 之前的組字區都查得回原按鍵，↓／Tab 換詞長可以跨英數，整段換成英文、注音或中文
+	// keys：↓／Tab 換詞長可以跨英數，整段換成英文、注音或中文
 	MixedResplit string `json:"mixed_resplit,omitempty" fork:"blend"`
-	// rules：每次按鍵後與送出前照上下文重看混打的判斷：重複鍵、聲母衝突、反序的英文字、不是音節的注音、注音文、
-	// 數字鍵盤夾在字母中間的英數詞照規則改；要有 mixed_resplit 的按鍵紀錄
+	// 每次按鍵後與送出前照上下文重看混打的判斷，逗號列出開著的規則：initial 聲母衝突、
+	// repeats 重複鍵、reversed 反序的英文字、zhuyin 注音文、literal 不是音節的注音與數字鍵盤夾在字母中間的英數詞
 	MixedContext string `json:"mixed_context,omitempty" fork:"blend"`
 	// extended：組字中的標示多 Shift＋Home／End 標到頭尾、↓ 換整段、整段英文按 Enter 加成英文詞
 	VocabMark string `json:"vocab_mark,omitempty" fork:"blend"`
 	// shorter：候選開著時 Shift＋Tab 是 Tab 的反方向，換到較短的詞長，最短再按回到最長（candidate_tab 是 length 時）
 	CandidateBackTab string `json:"candidate_backtab,omitempty" fork:"blend"`
-	// context：記住 ↓ 換過的混打解釋（按鍵＋前一個字＋後一個音），下次照上下文決定要不要照記憶換；要有 mixed_resplit 的按鍵紀錄
+	// context：記住 ↓ 換過的混打解釋（按鍵＋前一個字＋後一個音），下次照上下文決定要不要照記憶換
 	MixedMemory string `json:"mixed_memory,omitempty" fork:"blend"`
 	// neural：打錯一個注音鍵又補上同一格的鍵時照微軟新注音後按的蓋掉先按的（5jiy6 是「昨」），由神經模型照前文決定換不換，
-	// ↓ 清單也列蓋完的字；要有 mixed_resplit 的按鍵紀錄
+	// ↓ 清單也列蓋完的字
 	MixedOverwrite string `json:"mixed_overwrite,omitempty" fork:"blend"`
 }
 
@@ -76,10 +74,8 @@ func (r Rules) Validate() error {
 		{"english_ranking", r.EnglishRanking, []string{"", "frequency"}},
 		{"english_learning", r.EnglishLearning, []string{"", "dictionary"}},
 		{"symbols", r.Symbols, []string{"", "microsoft"}},
-		{"width", r.Width, []string{"", "shift_space"}},
 		{"symbol_board", r.SymbolBoard, []string{"", "asus"}},
 		{"mixed_resplit", r.MixedResplit, []string{"", "keys"}},
-		{"mixed_context", r.MixedContext, []string{"", "rules"}},
 		{"vocab_mark", r.VocabMark, []string{"", "extended"}},
 		{"candidate_backtab", r.CandidateBackTab, []string{"", "shorter"}},
 		{"mixed_memory", r.MixedMemory, []string{"", "context"}},
@@ -92,6 +88,9 @@ func (r Rules) Validate() error {
 		if !ok {
 			return fmt.Errorf("invalid input style %s: %q", f.key, f.value)
 		}
+	}
+	if !validContext(r.MixedContext) {
+		return fmt.Errorf("invalid input style mixed_context: %q", r.MixedContext)
 	}
 	return nil
 }
@@ -141,22 +140,6 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 	switch id {
 	case "0c":
 		p.Name = "靈犀注音"
-	case "blend": // 不列進內建清單：用 0c-update profile copy blend 複製成自訂風格，不鎖設定。
-		p.Name = "整合風格"
-		p.Behavior.MixedInput = true
-		p.Behavior.EnglishAutocomplete = true
-		p.Behavior.EmojiShortcut = "off"
-		p.Rules.EnglishRanking = "frequency"
-		p.Rules.EnglishLearning = "dictionary"
-		p.Rules.Symbols = "microsoft"
-		p.Rules.Width = "shift_space"
-		p.Rules.SymbolBoard = "asus"
-		p.Rules.MixedResplit = "keys"
-		p.Rules.MixedContext = "rules"
-		p.Rules.VocabMark = "extended"
-		p.Rules.CandidateBackTab = "shorter"
-		p.Rules.MixedMemory = "context"
-		p.Rules.MixedOverwrite = "neural"
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

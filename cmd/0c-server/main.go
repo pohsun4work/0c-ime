@@ -149,7 +149,7 @@ func serve() string {
 	}
 	eng.DocumentContextOff = !config.DocumentContext
 	eng.Fuzzy = config.FuzzyConfig()
-	eng.InputStyle = config.ProfileRules()
+	eng.InputStyle = config.EngineRules() // 整合風格
 	datadir.ApplyEnglishStyle(eng)
 	eng.MixedInput = config.MixedInput
 	eng.Toneless = config.Toneless // #150：開啟時 session 停用混打的自動判斷；health 的 mixed_input 照設定檔回報
@@ -459,8 +459,10 @@ func serve() string {
 		// 整合風格（操作規則 symbols）的 Ctrl＋標點：多 Ctrl＋[ ]（也列在 ctrl_punctuation_keys），英文模式也打全形。
 		// 外殼只在這一項是 true 時送那兩個鍵與英文模式的 Ctrl＋標點。
 		"ctrl_punctuation_symbols": fmt.Sprint(eng.CtrlPunct && eng.InputStyle.Symbols != ""),
-		// 整合風格（操作規則 width）：Shift＋空白切換全半形；全形時外殼把可見字元、空白與數字鍵盤都交給引擎。
-		"input_style_width": eng.InputStyle.Width,
+		// 整合風格的全形（settings.BlendWidth）。
+		"input_style_width": config.BlendWidth(),
+		// 整合風格的全域開關；0c-update 拿它跟設定檔比較（settings.BlendRunning）。
+		"blend": config.BlendKey(),
 		// 整合風格（操作規則 symbol_board）：外殼只在這一項是 true、中文模式時攔 Ctrl＋Alt＋, 開符號表。
 		"symbol_board": fmt.Sprint(eng.InputStyle.SymbolBoard != ""),
 		// #173：引擎認得 caps_lock 請求而且設定「Caps Lock 開著時直接打英文」開著；外殼只在這一項是 true 時回報

@@ -74,7 +74,7 @@ func TestETenDisablesMixedAndEmojiItems(t *testing.T) {
 	disabled := func(s Settings) map[string]string {
 		out := map[string]string{}
 		for _, it := range s.Items() {
-			if it.Disabled {
+			if it.Disabled && !BlendSetting(it.Key) { // 整合風格的混打開關跟著中英混打停用（blend_test.go）
 				out[it.Key] = it.DisabledReason
 			}
 		}
@@ -114,7 +114,7 @@ func TestHsuDisablesOnlyMixedInput(t *testing.T) {
 	}
 	var disabled []string
 	for _, it := range s.Items() {
-		if it.Disabled {
+		if it.Disabled && !BlendSetting(it.Key) { // 整合風格的混打開關跟著中英混打停用（blend_test.go）
 			disabled = append(disabled, it.Key+"："+it.DisabledReason)
 		}
 		if it.Key == "mixed-input" && it.Value != "on" {

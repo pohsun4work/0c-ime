@@ -20,21 +20,22 @@
    Import-Certificate -FilePath ..\codesign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
    ```
 
-4. 安裝。hoshi 版的版本號比官方同版號「小」（semver 的預發行版本），從官方版換過來時必須加 `-allow-downgrade`：
+4. 完成正在輸入的文字，再安裝。hoshi 版的版本號比官方同版號「小」（semver 的預發行版本），從官方版換過來時必須加 `-allow-downgrade`：
 
    ```powershell
    .\0c-update.exe verify -bundle .
    .\0c-update.exe install -bundle . -channel public-beta -allow-downgrade
    ```
 
-5. 完成正在輸入的文字，**登出再登入**。
-6. 建立並選用「整合風格」。在 `%LOCALAPPDATA%\Zuin\versions\<目前版本>\` 執行：
+5. 不必登出，用 Win＋空白切換到「靈犀注音」。已經開著的應用程式要重新開啟，才會載入新版。
+6. 在設定程式開「中英混打（試用）」。混打的各個開關、英文補全排序與符號表在「中英切換」「鍵盤與符號」頁，是全域設定，選哪個風格都照它。
+   想要跟作者一樣的設定：在「選用風格」把「靈犀注音」複製成自訂風格，再設
+   - 「英文模式自動補字」開
+   - 「Emoji 選單」關
+   - 「標點操作」選「微軟半形參考」
+   - 「Shift＋空白」選「切換全半形」
 
-   ```powershell
-   .\0c-update.exe profile copy blend --name 整合風格 -apply
-   ```
-
-   整合風格是一份自訂風格，設定畫面上的設定都可以調整（英文的詞頻排序與學習規則不在設定畫面）。官方的操作規則（例如 Tab 輪換字詞）改成非預設值時，會照官方的做法停用中英混打。整合風格有新功能時，要重新建一份，見 `UPDATING.md`。
+   官方的操作規則（例如 Tab 調整斷詞）改成會衝突的值時，會照官方的做法停用中英混打。
 
 ## 之後的更新
 

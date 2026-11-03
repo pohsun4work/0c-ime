@@ -148,3 +148,61 @@ func TestMixedMemorySavesAndLoads(t *testing.T) {
 		t.Fatalf("存檔讀回不一樣：%+v", r)
 	}
 }
+
+// 照天數淘汰：一次確認約 4 個月沒用到就不照它換、下次學的時候拿掉；照記憶換到或留著的暫停衰減。
+func TestMixedMemoryAgesByDays(t *testing.T) {
+	m := mixedModel()
+	m.AdvanceTime(1000 * daySeconds)
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: mp3Of, Form: mp3Literal}}, nil)
+	m.AdvanceTime(m.Store.Time + 100*daySeconds)
+	if len(mixedRecords(m, "mp3")) != 1 || len(m.MixedMemoryRecords()) != 1 {
+		t.Fatal("100 天還在")
+	}
+	m.AdvanceTime(m.Store.Time + 30*daySeconds)
+	if len(mixedRecords(m, "mp3")) != 0 || len(m.MixedMemoryRecords()) != 0 {
+		t.Fatal("130 天沒用到不照它換、不列出")
+	}
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: MixedRef{"ps4", "", ""}, Form: mp3Chinese}}, nil)
+	if _, ok := m.Store.MixedMemory[mp3Of.key()]; ok || len(m.Store.MixedMemory) != 1 {
+		t.Fatalf("學的時候拿掉淘汰的：%v", m.Store.MixedMemory)
+	}
+
+	m = mixedModel()
+	m.AdvanceTime(1000 * daySeconds)
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: mp3Of, Form: mp3Literal}}, nil)
+	for range 10 {
+		m.AdvanceTime(m.Store.Time + 60*daySeconds)
+		m.LearnMixedMemory(nil, []MixedApplied{{MixedRef: mp3Of, Exact: true}})
+	}
+	if rs := mixedRecords(m, "mp3"); len(rs) != 1 || rs[0].Confirmed != 1 {
+		t.Fatalf("照常用著不淘汰、不算再確認：%+v", rs)
+	}
+
+	// 從別處套用時，按鍵與樣子相同、已經淘汰還沒清掉的紀錄不跟著救回來。
+	m = mixedModel()
+	m.AdvanceTime(1000 * daySeconds)
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: mp3Of, Form: mp3Literal}}, nil)
+	m.AdvanceTime(m.Store.Time + 130*daySeconds)
+	mine := MixedRef{"mp3", "我", ""}
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: mine, Form: mp3Literal}}, []MixedApplied{{MixedRef: MixedRef{"mp3", "柳", ""}, Form: mp3Literal}})
+	if _, ok := m.Store.MixedMemory[mp3Of.key()]; ok || len(mixedRecords(m, "mp3")) != 1 {
+		t.Fatalf("淘汰的被救回：%v", m.Store.MixedMemory)
+	}
+
+	// 舊版沒有 Evidence 的紀錄照常作用，下次學的時候從那天起算。
+	m = mixedModel()
+	m.AdvanceTime(1000 * daySeconds)
+	m.Store.MixedMemory = map[string]MixedRecord{mp3Of.key(): {MixedRef: mp3Of, Form: mp3Literal, Confirmed: 2, Serial: 1}}
+	if len(mixedRecords(m, "mp3")) != 1 || len(m.MixedMemoryRecords()) != 1 {
+		t.Fatal("舊版的紀錄")
+	}
+	m.LearnMixedMemory([]MixedChoice{{MixedRef: MixedRef{"ps4", "", ""}, Form: mp3Chinese}}, nil)
+	m.AdvanceTime(m.Store.Time + 100*daySeconds)
+	if len(mixedRecords(m, "mp3")) != 1 {
+		t.Fatal("舊版的紀錄從學的那天起算")
+	}
+	m.AdvanceTime(m.Store.Time + 30*daySeconds)
+	if len(mixedRecords(m, "mp3")) != 0 {
+		t.Fatal("舊版的紀錄照樣淘汰")
+	}
+}

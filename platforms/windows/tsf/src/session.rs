@@ -397,7 +397,7 @@ impl Session {
             || self.idle_info.as_ref().is_some_and(|v| v["input_style_width"] == "shift_space")
     }
 
-    /// 整合風格的全形（health 的 input_style_width，操作規則 width）：Shift＋空白切換；全形時可見字元、空白與數字鍵盤
+    /// 整合風格的全形（health 的 input_style_width：Shift＋空白切換全半形、中英混打作用時）；全形時可見字元、空白與數字鍵盤
     /// 都交給引擎（Snapshot::wide_wants_key），混打照常判斷，判成英數的段落再轉全形。
     pub fn style_wide(&mut self) -> bool {
         self.idle_info_is("input_style_width", "shift_space")

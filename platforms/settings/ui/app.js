@@ -435,7 +435,8 @@
   const INPUT_PAGES = {
     mode: {
       title: '中英切換', lead: '用哪個鍵切換注音和英文、換程式後回到哪個模式，以及在注音中直接打英文。',
-      keys: ['toggle-key', 'start-mode', 'mode-memory', 'mixed-input', 'english-autocomplete', 'caps-lock-english', 'style-shift-letter', 'style-caps-letter'],
+      // mixed-* 是整合風格的混打開關、english-ranking 是英文補全的排序，各畫在它們跟著的那一項下面。
+      keys: ['toggle-key', 'start-mode', 'mode-memory', 'mixed-input', 'mixed-resplit', 'mixed-repeats', 'mixed-reversed-english', 'mixed-zhuyin-text', 'mixed-literal', 'mixed-overwrite', 'english-autocomplete', 'english-ranking', 'caps-lock-english', 'style-shift-letter', 'style-caps-letter'],
     },
     candidates: {
       title: '選字', lead: '候選字怎麼排、怎麼選，以及要不要列出近音的字（模糊音）。',
@@ -444,7 +445,7 @@
     keyboard: {
       title: '鍵盤與符號', lead: '注音的鍵盤排列，以及標點符號和 Emoji 怎麼打。',
       // emoji-equals-first 是 Emoji 選單的子選項，畫在它下面。
-      keys: ['keyboard-layout', 'ctrl-punctuation', 'punctuation', 'emoji-shortcut', 'emoji-equals-first', 'style-punctuation', 'style-shift-space', 'style-shift-delete'],
+      keys: ['keyboard-layout', 'ctrl-punctuation', 'symbol-board', 'punctuation', 'emoji-shortcut', 'emoji-equals-first', 'style-punctuation', 'style-shift-space', 'style-shift-delete'],
     },
   };
   const OUTPUT_KEYS = ['output-simplified', 'simplified-hotkey'];

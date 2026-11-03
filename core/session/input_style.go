@@ -65,11 +65,11 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		return false, "", false
 	}
 	if k == proto.KeyShiftSpace {
-		if s.InputStyle.Width == "shift_space" {
-			return true, s.toggleWide(), true
-		}
 		switch s.InputStyle.ShiftSpace {
 		case "fullwidth":
+			if s.mixedInput() { // 整合風格：混打開著時照常判斷，判成英數的段落轉全形
+				return true, s.toggleWide(), true
+			}
 			s.fullWidth = !s.fullWidth
 			return true, "", true
 		case "space":
@@ -215,7 +215,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		if s.mixedKeepsPunctuation(k) {
 			return true, "", true
 		}
-		if s.fullWidth {
+		if s.fullWidth || s.wide {
 			if s.englishWord {
 				return true, s.commit() + s.fullWidthText(k), true
 			}

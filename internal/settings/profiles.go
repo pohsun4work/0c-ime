@@ -173,7 +173,7 @@ func (s *Settings) applyProfile(p Profile) error {
 }
 func (s Settings) profileAvailability(p Profile) (bool, string) {
 	// A preset never silently changes the separately selected physical layout.
-	if s.KeyboardLayout != LayoutStandard && !officialRulesDefault(p.Rules) {
+	if s.KeyboardLayout != LayoutStandard && p.Rules != inputstyleDefaultRules() {
 		return false, "此風格目前支援標準注音排列；請先在「鍵盤與符號」選擇標準排列"
 	}
 	return true, ""
@@ -213,9 +213,6 @@ func (s Settings) profileItem(p Profile) ProfileItem {
 		}
 	}
 	shift := map[string]string{"disabled": "Shift＋空白不切換字寬", "fullwidth": "Shift＋空白切換全半形（含英數）", "space": "Shift＋空白插入空白"}[p.Rules.ShiftSpace]
-	if p.Rules.Width == "shift_space" {
-		shift = "Shift＋空白切換全半形（混打照常）"
-	}
 	tab := map[string]string{"0c": "Tab 使用靈犀候選操作", "cycle": "Tab／Shift＋Tab 輪換字詞", "segment": "Tab 調整斷詞"}[p.Rules.Tab]
 	values := map[string]string{}
 	for k, v := range p.Values {
@@ -406,8 +403,6 @@ type styleConflict struct {
 
 func styleConflicts() []styleConflict {
 	return []styleConflict{
-		// 混打的英文照半形留在組字區，全形下打出「我Ｈello」這種半形全形夾雜。
-		{"style-shift-space", "mixed-input", "Shift＋空白切換全半形時關閉", func(r inputstyle.Rules) bool { return r.ShiftSpace == "fullwidth" }},
 		// Tab 要接受混打的英文補全；調整斷詞時 Tab 一律拿去改斷詞。
 		{"style-tab", "mixed-input", "Tab 調整斷詞時關閉", func(r inputstyle.Rules) bool { return r.Tab == "segment" }},
 		// 混打靠 Shift＋字母打大寫英文（DNS、iPhone）；送出組字會把字拆開（我ㄛPhone），打小寫則改掉大小寫。

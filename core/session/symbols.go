@@ -206,8 +206,12 @@ func (s *Session) insertPunctKey(k, p string) {
 	if s.insertPairedBracket(k) {
 		return
 	}
-	if s.InputStyle.Symbols != "" {
-		s.insertTyped(k) // 整合風格的標點照按鍵出字
+	if s.InputStyle.Symbols != "" { // 整合風格的標點照按鍵出字，官方的全形時出全形
+		if s.fullWidth {
+			s.insertLiteral(wideText(k))
+			return
+		}
+		s.insertTyped(k)
 		return
 	}
 	s.insertLiteral(p)

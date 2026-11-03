@@ -80,6 +80,9 @@ type VocabResponse struct {
 	// Undo 是 unlearn／forget／relearn 改了學習資料時的復原編號（learned-undo）；0 表示沒有改到。
 	Undo      uint64   `json:"undo,omitempty"`
 	Forgotten []string `json:"forgotten,omitempty"` // forgotten：不再學的詞
+	// 整合風格的「混打記憶」頁（mixed、mixed-remove）：混打記憶與自動學會的英文字。
+	Mixed   []MixedMemoryItem `json:"mixed,omitempty"`
+	English []string          `json:"english,omitempty"`
 	// ForgottenCount 是不再學的詞有幾個，學到的詞相關指令都附上：0 時頁面不顯示「不再學的詞」。
 	ForgottenCount int `json:"forgotten_count,omitempty"`
 }
@@ -212,6 +215,8 @@ func (e *Engine) vocabLocked(req VocabRequest) VocabResponse {
 		}
 	case VocabForget, VocabUnlearn, VocabRelearn, VocabLearnedUndo, VocabForgotten:
 		err = e.learnedOp(req, &resp)
+	case VocabMixed, VocabMixedRemove:
+		err = e.mixedMemoryOp(req, &resp)
 	case VocabPhrases:
 	case VocabPhraseAdd:
 		b, err = m.Vocab.AddPhrases(req.Texts, src, e.now())
