@@ -6,7 +6,6 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/english"
-	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -30,8 +29,7 @@ func resplitSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	p, _ := inputstyle.Get("blend")
-	s.InputStyle = p.Rules
+	s.InputStyle = blendRules()
 	s.MixedInput = true
 	s.English = english.New([]english.Word{{Text: "even", Weight: 3}})
 	return s

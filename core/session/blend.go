@@ -14,9 +14,9 @@ import (
 // （build tag blendall，見 blend_all_test.go）換成整合風格的規則。
 var defaultStyle inputstyle.Rules
 
-// wideKey 處理全形時混打不收的鍵。英文模式與數字鍵盤照微軟新注音：字母、數字、空白沒在組字時直接送出，
-// 其餘接在游標處。中文模式沒在組字時的空白直接送出全形空白；沒開混打時（其他鍵盤排列），
-// 不是注音也不是標點的鍵同官方的全形直接送出。其餘交給混打與一般注音。
+// wideKey 處理全形時混打不收的鍵（只有混打作用時 Shift＋空白才切到這個全形，見 styleKey）。英文模式與數字鍵盤
+// 照微軟新注音：字母、數字、空白沒在組字時直接送出，其餘接在游標處。中文模式沒在組字時的空白直接送出全形空白。
+// 其餘交給混打與一般注音。
 func (s *Session) wideKey(k string) (commit string, ok bool) {
 	if !s.wide {
 		return "", false
@@ -42,15 +42,8 @@ func (s *Session) wideKey(k string) (commit string, ok bool) {
 			s.markKeyed(at, true)
 		}
 		return "", true
-	case s.composing():
-	case k == " ":
+	case k == " " && !s.composing():
 		return wideText(k), true
-	case !s.mixedInput():
-		_, phonetic := s.layout.Symbol(r[0])
-		_, punct := s.layout.Punct(r[0])
-		if !phonetic && !punct && k != "`" {
-			return wideText(k), true
-		}
 	}
 	return "", false
 }

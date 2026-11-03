@@ -105,6 +105,11 @@ func listSettings(w io.Writer, r settings.Report, path string) {
 	for _, p := range fuzzy.Pairs() {
 		fmt.Fprintf(w, "fuzzy-%s=%s（%s 模糊音：off 關閉；select 開候選時合併近音；auto 另在語境明顯支持近音時自動改字，實驗）\n", p.ID(), fuzzyConfig.Mode(p), p.Symbols())
 	}
+	for _, it := range s.Items() {
+		if settings.BlendSetting(it.Key) { // 整合風格的全域開關
+			fmt.Fprintf(w, "%s=%s（%s）\n", it.Key, it.Value, it.Label)
+		}
+	}
 }
 
 func isJSONFlag(arg string) bool { return arg == "-json" || arg == "--json" }

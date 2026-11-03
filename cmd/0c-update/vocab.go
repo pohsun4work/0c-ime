@@ -37,6 +37,8 @@ const vocabUsage = `用法：0c-update vocab <指令> [參數] [-json] [-source 
   forget 詞 [詞 ...]             不再學：清掉學習紀錄，之後也不再學
   forgotten                      不再學的詞
   relearn 詞 [詞 ...]            恢復學習：從不再學的詞拿掉
+  mixed                          混打記憶（整合風格，↓ 換過的混打）與自動學會的英文字
+  mixed-remove 編號 [編號 ...]    刪掉混打記憶（mixed -json 的 id）
   phrases | phrase-add 文字 ... | phrase-remove 編號 ... | phrase-move 編號 位置
   watch [-since 版本]            版本改變時印出一行 JSON（給管理頁即時同步）
   request                        從標準輸入讀一個完整的指令（JSON），印出結果`
@@ -60,7 +62,7 @@ func vocabCommand(args []string) error {
 	req.Offset, _ = strconv.Atoi(opts["offset"])
 	req.Limit, _ = strconv.Atoi(opts["limit"])
 	switch op {
-	case engine.VocabStatus, engine.VocabList, engine.VocabLearned, engine.VocabPhrases, engine.VocabForgotten:
+	case engine.VocabStatus, engine.VocabList, engine.VocabLearned, engine.VocabPhrases, engine.VocabForgotten, engine.VocabMixed:
 		if len(params) > 0 {
 			return usageError(vocabUsage)
 		}
@@ -76,7 +78,7 @@ func vocabCommand(args []string) error {
 			return usageError(vocabUsage)
 		}
 	case engine.VocabRemove, engine.VocabKeep, engine.VocabForget, engine.VocabUnlearn, engine.VocabRelearn,
-		engine.VocabPhraseAdd, engine.VocabAnnotate:
+		engine.VocabPhraseAdd, engine.VocabAnnotate, engine.VocabMixedRemove:
 		if len(params) == 0 {
 			return usageError(vocabUsage)
 		}
@@ -309,6 +311,8 @@ func printVocab(w io.Writer, op string, r engine.VocabResponse) {
 			}
 			fmt.Fprintf(w, "%s\t%s\t%d 次%s\n", x.Text, x.Reading, x.Uses, mark)
 		}
+	case r.Mixed != nil || op == engine.VocabMixed || op == engine.VocabMixedRemove:
+		printMixedMemory(w, r)
 	case r.Forgotten != nil || op == engine.VocabForgotten:
 		for _, x := range r.Forgotten {
 			fmt.Fprintln(w, x)
@@ -329,6 +333,10 @@ func printVocab(w io.Writer, op string, r engine.VocabResponse) {
 	case r.Batch != nil:
 		fmt.Fprintf(w, "批次 %d（%s）：%d 筆變更\n", r.Batch.ID, r.Batch.Op, len(r.Batch.Changes))
 	}
+	if op == engine.VocabMixedRemove {
+		fmt.Fprintln(w, map[bool]string{true: "已刪除混打記憶", false: "沒有可刪的混打記憶"}[r.Changed])
+		return
+	}
 	if engine.LearningOp(op) { // 改的是學習資料，不是自訂詞
 		if r.Changed {
 			fmt.Fprintf(w, "已更新學到的詞；不再學的詞 %d 個\n", r.ForgottenCount)
@@ -343,4 +351,17 @@ func printVocab(w io.Writer, op string, r engine.VocabResponse) {
 	for _, n := range r.Notes {
 		fmt.Fprintln(w, "注意：", n)
 	}
+}
+
+// printMixedMemory 印出混打記憶（按鍵、前一個字、後一個音、換成、確認次數）與自動學會的英文字。
+func printMixedMemory(w io.Writer, r engine.VocabResponse) {
+	for _, x := range r.Mixed {
+		var form []string
+		for _, t := range x.Form {
+			form = append(form, t.Kind+":"+t.Text)
+		}
+		fmt.Fprintf(w, "%q\t%s\t%s\t%s\t%d 次\n", x.Keys, x.Left, x.Right, strings.Join(form, " "), x.Confirmed)
+	}
+	fmt.Fprintf(w, "共 %d 筆混打記憶\n", len(r.Mixed))
+	fmt.Fprintf(w, "自動學會的英文字：%s\n", strings.Join(r.English, "、"))
 }

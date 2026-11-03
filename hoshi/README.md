@@ -8,7 +8,7 @@
 - **程式碼簽章**：Windows 套件用 fork 的自簽憑證簽章（`hoshi/windows/codesign.cer`），發行者是「Hoshi 0c-ime fork」。打包腳本加了 `--sign-pfx` 和 `--publisher` 兩個選項。
 - **版本號**：官方版號加上 `-hoshi.N`。
 - **發布流程**：`.github/workflows/fork-release.yml` 自動合併官方新版、測試、打包、發布。開 PR 前先用 `hoshi/windows/local_preview.py` 在本機打未簽章的包，再用它產生的 `build/local-preview/install.ps1` 安裝實測（配方有新規則時會重建整合風格）。
-- **輸入行為**：新增「整合風格」的配方（`blend`，`core/inputstyle`），以靈犀注音為底，補上華碩注音與微軟新注音的長處。它不是內建風格，用 `0c-update profile copy blend --name 整合風格` 複製成自訂風格，設定畫面上的設定都能調，整合風格加的英文排序與學習規則不在設定畫面。原本的各個模式行為不變。
+- **輸入行為**：新增「整合風格」的配方（`blend`，`core/inputstyle`），以靈犀注音為底，補上華碩注音與微軟新注音的長處。它不是內建風格，用 `0c-update profile copy blend --name 整合風格` 複製成自訂風格，設定畫面上的設定都能調。配方本身只有官方設定的值（開中英混打與英文模式自動補字、關 = 開 Emoji 選單、標點操作「微軟半形參考」、Shift＋空白切換全半形）；混打的開關、英文補全排序、符號表是全域設定（`internal/settings/blend.go`，設定檔的 `blend`），選哪個風格都照它。原本的各個模式行為不變。
   - 已完成：
     - 英文補全與拼字修正依 wordfreq 語料詞頻排序（`internal/englishpack/wordfreq`）
     - 英文字典裡的詞確認 3 次就學會
@@ -22,7 +22,14 @@
     - 候選開著時 Shift＋Tab 是 Tab 的反方向（操作規則 candidate_backtab）：換到較短的詞長，最短再按回到最長；待定的按鍵同 Tab 先照畫面定案，不會換到切開注音的長度
     - 混打修正記憶（操作規則 mixed_memory，`core/session/mixed_memory.go`、`core/personal/mixed_memory.go`）：用 ↓ 把一段按鍵換成別的解釋（mp3 出「允」選回 mp3、「我ㄇ」選回 a、$20␣ 換成「$單」）再按 Enter，記住「按鍵＋前一個字＋後一個音 → 每段當英數、中文或注音」，存在 user.json 的 `MixedMemory`（最多 1024 筆，最久沒用到的先丟）。照記憶換之前看中文那一側合不合理（有神經模型時照前文評分，沒有時用語言模型；每個字平均 log10 機率以 -4 為界，每多確認一次、附近有英文都往不是中文那邊調）：前一個字、後一個音都對上的紀錄照它自己的確認次數（學過「我的i7」，「好的喔」不換），只有按鍵對上時每筆紀錄都要換成同樣子、確認次數加總；條件不再成立時換回（mp3 接著打出「允許」）。照記憶換的、這次用 ↓ 換過解釋的段落按 ↓ 直接開整段的候選（mp3／允／狁…），用 ↓ 改回會抵銷那筆記憶；候選窗反白畫面上的樣子時按 Shift＋Delete 刪掉記憶。中文選哪個字不記（官方的更正會記），私人欄位與暫停時照記憶換但不學
     - 打錯又補對的注音鍵（操作規則 mixed_overwrite，`core/session/mixed_overwrite.go`）：同一格（聲母、介音或韻母）按了兩次時照微軟新注音後按的蓋掉先按的（5jiy6 是「昨」、gjn␣ 是「蘇」），由神經模型照前文決定換不換：前面多一個聲母（gnj4、nh4）時看那個字母讓後面的字更合理還是更不合理（車子的g速 換成「速」、我講過n次 留著），其他看蓋完的中文字比畫面上照字面的樣子合理多少（ios7、json␣ 照字面很順，留著）；門檻偏嚴，寧可留著讓 ↓ 選也不把正常打的縮寫換成錯字（這個js要 不換成「尿」）。沒有神經模型、私人、暫停或沒有前文時照舊；英文字、我的詞彙、前面緊接英數的不換。↓ 清單不看神經模型也列蓋完的字，選了再送出就由混打修正記憶記住
+  - 設定畫面（Phase 5-2）：
+    - 「中英切換」頁在中英混打下面：↓／Tab 跨過英數換整段（mixed-resplit，開）、自動刪除冗餘注音（mixed-repeats，開）、反序打的英文字（mixed-reversed-english，開）、注音文（mixed-zhuyin-text，關）、組不成字的按鍵照字面（mixed-literal，開）、打錯又補對的注音鍵（mixed-overwrite，關）；英文模式自動補字下面是英文補全排序（english-ranking：常用詞優先／字母序）。「鍵盤與符號」頁的 Ctrl＋Alt＋, 開符號表（symbol-board，開）。混打的開關跟著中英混打停用（倚天、許氏、不打聲調時同中英混打的原因）。↓／Tab 跨過英數只管手動換，關掉時其他開關照樣作用（組字區照樣記原按鍵），只少了混打修正記憶
+    - 不給開關、一律開著：組字中的標示、候選窗的 Shift＋Tab、英文字典詞確認 3 次就學會、混打修正記憶（要 ↓／Tab 跨過英數）、聲母衝突（gck6 是 g合）
+    - 標點操作多第 5 個選項「微軟半形參考」（操作規則 symbols＝microsoft，punctuation 照靈犀）：沒有反引號前綴，標點照微軟出半形；「Ctrl＋標點打全形」選它時多 Ctrl＋[ ] 打「」，英文模式也適用。可以跟不打聲調並用，這時組字中的 \ 出半形 \（打成「西\你」），頓號改用 Ctrl＋'
+    - Shift＋空白併進官方的「切換全半形」：中英混打作用時用整合風格的全形（混打照常判斷，判成英數的段落轉全形），沒有時照官方。所以拿掉官方「Shift＋空白切換全半形時關閉中英混打」那條衝突，改了兩個官方測試（`profiles_test.go` 的 TestCustomRulesCannotBypassCompatibility 改用 Tab 調整斷詞、TestStyleRulesDisableOnlyConflictingFeatures 的 fullwidth 不再停用混打）；另外三個列出全部設定項的官方測試（TestItemsListEveryKeyWithCurrentValue、TestETenDisablesMixedAndEmojiItems、TestHsuDisablesOnlyMixedInput）把新加的項目算進去或略過
+    - 「我的詞彙」多一頁「混打記憶」：按鍵｜前一個字｜後一個音｜換成｜確認次數，可以勾選多筆刪除；下面列自動學會的英文字，可以移除或不再學（引擎指令 mixed、mixed-remove，`core/engine/mixed_memory.go`）
+    - 舊版整合風格把開關存在風格的規則裡：讀設定時沒有 `blend` 就從選用的（沒有就第一份）整合風格搬過來，風格只留 symbols，舊的 width 換成 Shift＋空白切換全半形
   - 整合風格跑官方測試：`go test -tags blendall ./core/session` 讓每個 session 都套用整合風格；預期不同的測試與原因列在 `core/session/testdata/blend_expected_diffs.txt`，`py -3.12 scripts/blend_official_diff.py` 核對其他官方測試都通過、列出的測試關掉對應的規則後也通過
-  - 跟混打的相容：官方的規則照官方逐條判斷（`internal/settings` 的 `styleConflicts`）；fork 新加的規則欄位是為混打設計的，在 `inputstyle.Rules` 標 `fork:"blend"`，不在官方的衝突表上。非標準排列的限制也不算這些欄位（`internal/settings/mixed_compat.go` 的 `officialRulesDefault`）。
+  - 跟混打的相容：官方的規則照官方逐條判斷（`internal/settings` 的 `styleConflicts`，拿掉了 Shift＋空白那條）；fork 加的規則欄位在 `inputstyle.Rules` 標 `fork:"blend"`，風格只存 symbols，其他由全域開關在引擎啟動時填上（`Settings.EngineRules`）。非標準排列的限制照官方：規則不是預設值的風格（含整合風格）只在標準排列可選。
 
 安裝與更新說明見 `hoshi/windows/`。

@@ -24,7 +24,7 @@ func TestProfileCLICopiesBlendRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p := s.ActiveProfile(); p.Builtin || p.Source != "blend" || !s.MixedInput || s.ProfileRules().EnglishRanking != "frequency" {
+	if p := s.ActiveProfile(); p.Builtin || p.Source != "blend" || !s.MixedInput || s.ProfileRules().Symbols != "microsoft" {
 		t.Fatalf("blend copy not applied: %+v", p)
 	}
 }

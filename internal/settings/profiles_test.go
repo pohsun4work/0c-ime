@@ -208,7 +208,7 @@ func TestCustomRulesCannotBypassCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := s
-	if err := s.Set("style-shift-space", "fullwidth"); err == nil || s != before {
+	if err := s.Set("style-tab", "segment"); err == nil || s != before { // 整合風格：Shift＋空白切換全半形跟混打可以並用
 		t.Fatal("reverse-order rule edit bypassed constraint")
 	}
 }
@@ -223,7 +223,7 @@ func TestStyleRulesDisableOnlyConflictingFeatures(t *testing.T) {
 		{"style-punctuation", "microsoft", want{"", "", "style-punctuation"}},
 		{"style-punctuation", "standard", want{"", "", "style-punctuation"}},
 		{"style-punctuation", "chewing", want{"", "", "style-punctuation"}},
-		{"style-shift-space", "fullwidth", want{"style-shift-space", "", ""}},
+		{"style-shift-space", "fullwidth", want{}}, // 整合風格：混打開著時照常判斷，判成英數的段落轉全形
 		{"style-shift-space", "space", want{}},
 		{"style-shift-space", "single", want{}},
 		{"style-tab", "segment", want{"style-tab", "", ""}},

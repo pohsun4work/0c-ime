@@ -15,9 +15,16 @@ import (
 func blendSession() *Session {
 	s := styleSession("blend")
 	p, _ := inputstyle.Get("blend")
+	s.InputStyle = blendRules()
 	s.MixedInput = p.Behavior.MixedInput
 	s.EnglishAutocomplete = p.Behavior.EnglishAutocomplete
 	return s
+}
+
+// blendRules 是整合風格的規則加上全部的全域開關（同 0c-cli 的 blend）。
+func blendRules() inputstyle.Rules {
+	p, _ := inputstyle.Get("blend")
+	return inputstyle.AllExtras().Apply(p.Rules)
 }
 
 type microsoftCase struct {
@@ -338,12 +345,22 @@ func TestBlendWideWordsAreLearnedHalfwidth(t *testing.T) {
 	}
 }
 
-// 沒開混打（其他鍵盤排列）時，不是注音也不是標點的鍵同官方的全形直接送出。
-func TestBlendWideWithoutMixedInput(t *testing.T) {
+// Shift＋空白切換全半形（官方的 fullwidth）：混打作用時用整合風格的全形（混打照常判斷），沒開混打時照官方的全形；
+// 官方的風格開了混打也一樣。
+func TestShiftSpaceWidthFollowsMixedInput(t *testing.T) {
 	s := blendSession()
+	if key(s, proto.KeyShiftSpace); !s.wide || s.fullWidth {
+		t.Fatalf("mixed: wide %v, official %v", s.wide, s.fullWidth)
+	}
+	s = blendSession()
 	s.MixedInput = false
-	if _, commit := pressKeys(s, proto.KeyShiftSpace, "A"); commit != "Ａ" {
-		t.Errorf("Shift+A: %q", commit)
+	if _, commit := pressKeys(s, proto.KeyShiftSpace, "A"); s.wide || !s.fullWidth || commit != "Ａ" {
+		t.Fatalf("no mixed: wide %v, official %v, Shift+A %q", s.wide, s.fullWidth, commit)
+	}
+	s = styleSession("microsoft")
+	s.MixedInput = true
+	if key(s, proto.KeyShiftSpace); !s.wide || s.fullWidth {
+		t.Fatalf("microsoft with mixed: wide %v, official %v", s.wide, s.fullWidth)
 	}
 }
 
@@ -351,8 +368,7 @@ func TestBlendWideWithoutMixedInput(t *testing.T) {
 // 混打的上下文判斷讀的是組字區裡的半形按鍵（緊接在數字後面的 . , 空白等），全形不能把它換掉。
 func TestBlendWideKeepsMixedDecisions(t *testing.T) {
 	asBlend := func(s *Session) *Session {
-		p, _ := inputstyle.Get("blend")
-		s.InputStyle, s.MixedInput = p.Rules, true
+		s.InputStyle, s.MixedInput = blendRules(), true
 		return s
 	}
 	for _, newSession := range []func() *Session{deferredNumberSession, punctKeySession} {
@@ -386,5 +402,19 @@ func TestBlendClosingBracketFollowsOpening(t *testing.T) {
 	// 全形打的開括號、切回半形之後的閉括號照樣跟著開括號。
 	if snap := keys(blendSession(), proto.KeyShiftSpace, "(", proto.KeyShiftSpace, "1", ")"); snap.Text() != "（1）" {
 		t.Errorf("width toggled between brackets: %q", snap.Text())
+	}
+}
+
+// 全形時標點照微軟出全形：沒開混打用官方的全形，標點操作微軟（反引號前綴）開了混打用整合風格的全形。
+func TestShiftSpaceWidthCoversPunctuation(t *testing.T) {
+	s := blendSession()
+	s.MixedInput = false
+	if snap, _ := pressKeys(s, proto.KeyShiftSpace, "<"); snap.Text() != "＜" {
+		t.Errorf("blend without mixed: %q", snap.Text())
+	}
+	s = styleSession("microsoft")
+	s.MixedInput = true
+	if snap, _ := pressKeys(s, proto.KeyShiftSpace, "?"); !snap.Handled || snap.Text() != "？" {
+		t.Errorf("microsoft with mixed: handled %v %q", snap.Handled, snap.Text())
 	}
 }

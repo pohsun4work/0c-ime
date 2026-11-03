@@ -101,6 +101,9 @@ func main() {
 			check(fmt.Errorf("未知風格 %q", *inputStyle))
 		}
 		eng.InputStyle = p.Rules
+		if p.ID == "blend" { // 整合風格開全部的全域開關
+			eng.InputStyle = inputstyle.AllExtras().Apply(p.Rules)
+		}
 		datadir.ApplyEnglishStyle(eng)
 	}
 	for _, id := range strings.FieldsFunc(*fuzzyPairs, func(r rune) bool { return r == ',' }) {

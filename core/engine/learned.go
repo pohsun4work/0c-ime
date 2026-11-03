@@ -28,7 +28,7 @@ type learnedUndo struct {
 // 而不是存 vocab.json。
 func LearningOp(op string) bool {
 	switch op {
-	case VocabForget, VocabUnlearn, VocabRelearn, VocabLearnedUndo:
+	case VocabForget, VocabUnlearn, VocabRelearn, VocabLearnedUndo, VocabMixedRemove:
 		return true
 	}
 	return false

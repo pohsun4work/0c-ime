@@ -46,7 +46,7 @@ TestToneMarkDownOffersOriginalKeySecond symbols：聲調鍵 ↓ 清單照微軟
 # mixed_resplit（Phase 3）：每個字 ↓ 列出所有解釋，Tab 照按鍵重切
 TestCandidateAfterCursorAtTailLiteralBoundaries mixed_resplit：Tab 照按鍵重切，跨過英數
 TestMixedCandidatesRetainRawAndTabDoesNotAccept mixed_resplit：混打清單按 Tab 照按鍵重切
-TestMixedLiteralPhoneticKeyDownOffersSymbol mixed_resplit：2026 的 2 按 ↓ 也列 ㄉ
+TestMixedLiteralPhoneticKeyDownOffersSymbol mixed_context,mixed_resplit：注音文把 我2␣ 的 2 換成 ㄉ，2026 的 2 按 ↓ 也列 ㄉ
 
 # mixed_context（Phase 4）：混打照上下文重看
 TestMixedLoneInitialSpaceKeepsZhuyin mixed_context：注音文，緊接在中文後面的 2␣ 是 ㄉ

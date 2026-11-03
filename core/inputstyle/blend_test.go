@@ -11,6 +11,9 @@ func TestBlendRulesRejectUnknownValues(t *testing.T) {
 		func(r *Rules) { r.SymbolBoard = "microsoft" },
 		func(r *Rules) { r.MixedResplit = "on" },
 		func(r *Rules) { r.MixedContext = "on" },
+		func(r *Rules) { r.MixedContext = "repeats,initial" },
+		func(r *Rules) { r.MixedContext = "initial,initial" },
+		func(r *Rules) { r.MixedContext = "initial," },
 		func(r *Rules) { r.VocabMark = "on" },
 		func(r *Rules) { r.CandidateBackTab = "on" },
 		func(r *Rules) { r.MixedMemory = "on" },
@@ -20,6 +23,29 @@ func TestBlendRulesRejectUnknownValues(t *testing.T) {
 		edit(&r)
 		if r.Validate() == nil {
 			t.Fatalf("invalid accepted: %+v", r)
+		}
+	}
+}
+
+// 全域開關換成的規則都過得了驗證；舊的 rules 是每一條都開。
+func TestExtrasApply(t *testing.T) {
+	p, _ := Get("0c")
+	for _, x := range []Extras{{}, DefaultExtras(), AllExtras()} {
+		if err := x.Apply(p.Rules).Validate(); err != nil {
+			t.Fatalf("%+v: %v", x, err)
+		}
+	}
+	r := DefaultExtras().Apply(p.Rules)
+	if r.MixedContext != "initial,repeats,reversed,literal" || r.MixedOverwrite != "" || r.MixedResplit != "keys" {
+		t.Fatalf("default extras: %+v", r)
+	}
+	if off := (Extras{}).Apply(p.Rules); off.MixedContext != "initial" || off.EnglishRanking != "" || off.SymbolBoard != "" {
+		t.Fatalf("extras off: %+v", off)
+	}
+	legacy := Rules{MixedContext: "rules"}
+	for _, c := range contextRules {
+		if !legacy.ContextRule(c) || r.ContextRule(c) != (c != ContextZhuyin) {
+			t.Fatalf("context rule %s", c)
 		}
 	}
 }

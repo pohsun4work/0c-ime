@@ -139,6 +139,7 @@ pub fn update_action_args(action: &str, version: &str, checksum: &str) -> Result
 pub const VOCAB_OPS: &[&str] = &[
     "status", "list", "add", "remove", "readings", "undo", "batches", "rank", "annotate", "learned", "keep", "forget",
     "unlearn", "forgotten", "relearn", "learned-undo", "phrases", "phrase-add", "phrase-remove", "phrase-move",
+    "mixed", "mixed-remove", // 整合風格的「混打記憶」
 ];
 
 /// 一個詞彙指令最多這麼大（500 個詞或片語的上限遠低於此）。

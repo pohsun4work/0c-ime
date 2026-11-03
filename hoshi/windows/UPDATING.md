@@ -21,7 +21,7 @@ fork 的 GitHub Actions（`.github/workflows/fork-release.yml`）每 12 小時�
 
 ## 整合風格有新功能時
 
-整合風格是一份自訂風格，建好之後內容就固定了，之後版本加的新功能不會自動套進去。release 說明寫到整合風格有新功能時，每台電腦重新建一份，再刪掉舊的：
+新功能多半是全域開關，更新後直接出現在設定程式，不用重建風格。整合風格本身是一份自訂風格，建好之後內容就固定了；release 說明寫到整合風格的配方有變時，每台電腦重新建一份，再刪掉舊的：
 
 ```powershell
 .\0c-update.exe profile copy blend --name 整合風格 -apply

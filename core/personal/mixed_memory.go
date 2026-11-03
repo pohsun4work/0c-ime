@@ -170,3 +170,28 @@ func (m *Model) mixedSerial() uint64 {
 	}
 	return serial
 }
+
+// ID 是這筆記憶在 Store.MixedMemory 的鍵，「混打記憶」頁用它指出要刪哪幾筆。
+func (r MixedRef) ID() string { return r.key() }
+
+// MixedMemoryRecords 是全部的混打記憶，最近學到或用到的在前。
+func (m *Model) MixedMemoryRecords() []MixedRecord {
+	out := slices.Collect(maps.Values(m.Store.MixedMemory))
+	slices.SortFunc(out, func(a, b MixedRecord) int { return cmp.Compare(b.Serial, a.Serial) })
+	return out
+}
+
+// RemoveMixedMemory 刪掉「混打記憶」頁選的紀錄（MixedRef.ID），回傳刪了幾筆。
+func (m *Model) RemoveMixedMemory(ids []string) int {
+	n := 0
+	for _, id := range ids {
+		if _, ok := m.Store.MixedMemory[id]; ok {
+			delete(m.Store.MixedMemory, id)
+			n++
+		}
+	}
+	if n > 0 {
+		m.changedMixed()
+	}
+	return n
+}

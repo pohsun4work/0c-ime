@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/english"
-	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -27,8 +26,7 @@ func overwriteSession(table map[string]float64, extra ...word) *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	p, _ := inputstyle.Get("blend")
-	s.InputStyle = p.Rules
+	s.InputStyle = blendRules()
 	s.MixedInput, s.CtrlPunct = true, true
 	var words []english.Word
 	for _, w := range []string{"a", "is", "hello", "shining", "ok", "web", "pi"} {
@@ -103,10 +101,13 @@ func TestMixedOverwriteNeural(t *testing.T) {
 		{"他姓", []string{"gjn "}, map[string]float64{"他姓蘇": -3.94}, "蘇"},
 		{"回傳", []string{"json "}, map[string]float64{"回傳雖": -4.93, "回傳j": -3, "回傳js": -2, "回傳jso": -2.5, "回傳json": -2.27}, "json "},
 	} {
-		s := overwriteSession(tc.table)
-		s.documentEnabled, s.neuralLeft = true, tc.left
-		if snap := typeContext(s, tc.keys...); snap.Text() != tc.want {
-			t.Errorf("%s＋%q：%q，要 %q", tc.left, tc.keys, snap.Text(), tc.want)
+		for _, resplit := range []string{"keys", ""} { // 自動換不需要 ↓／Tab 跨過英數
+			s := overwriteSession(tc.table)
+			s.documentEnabled, s.neuralLeft = true, tc.left
+			s.InputStyle.MixedResplit = resplit
+			if snap := typeContext(s, tc.keys...); snap.Text() != tc.want {
+				t.Errorf("%s＋%q resplit=%q：%q，要 %q", tc.left, tc.keys, resplit, snap.Text(), tc.want)
+			}
 		}
 	}
 }

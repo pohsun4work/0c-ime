@@ -7,17 +7,26 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/input"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
-// resplit：整合風格（操作規則 mixed_resplit），組字區查得回原按鍵，↓／Tab 換詞長可以跨過英數，整段換成英文、注音或中文。
+// resplit：整合風格（操作規則 mixed_resplit），↓／Tab 換詞長可以跨過英數，整段換成英文、注音或中文。
 func (s *Session) resplit() bool { return s.InputStyle.MixedResplit != "" && s.mixedInput() }
 
-// resplitKeepsLiteral：整合風格只有接著打的字、↓ 與 Esc 把游標前的原樣注音收回待定按鍵。方向鍵、Enter 這類鍵收回後
+// keyRecords：整合風格要查回按鍵的規則開著時，組字區記得原按鍵（keepMixedKeys、markKeyed）。聲母衝突只看待定的按鍵，
+// 只開它時照官方。
+func (s *Session) keyRecords() bool {
+	r := s.InputStyle
+	context := r.MixedContext != "" && r.MixedContext != inputstyle.ContextInitial
+	return (r.MixedResplit != "" || context || r.MixedOverwrite != "") && s.mixedInput()
+}
+
+// keepsLiteral：整合風格只有接著打的字、↓ 與 Esc 把游標前的原樣注音收回待定按鍵。方向鍵、Enter 這類鍵收回後
 // 同一鍵又定案，定案沿用收回前的路徑，神經選字時會多出一個字（ㄍ2ㄍ 按 ← 變 ㄍㄍ2ㄍ）。
-func (s *Session) resplitKeepsLiteral(k string) bool {
-	return s.resplit() && len([]rune(k)) != 1 && k != proto.KeyDown && k != proto.KeyEscape
+func (s *Session) keepsLiteral(k string) bool {
+	return s.keyRecords() && len([]rune(k)) != 1 && k != proto.KeyDown && k != proto.KeyEscape
 }
 
 // keyUnit 是組字區裡一段查得回原按鍵的位置：中文音節、英數與符號各一格，原樣注音連同聲調整個算一段。
@@ -560,9 +569,9 @@ func (s *Session) tabFromMixed(d int) {
 	}
 }
 
-// keepResplitKeys 記下位置 at 的音節或原樣注音的原按鍵。
-func (s *Session) keepResplitKeys(at int, keys string) {
-	if keys == "" || !s.resplit() {
+// keepMixedKeys 記下位置 at 的音節或原樣注音的原按鍵。
+func (s *Session) keepMixedKeys(at int, keys string) {
+	if keys == "" || !s.keyRecords() {
 		return
 	}
 	if s.mixedKeys == nil {
@@ -574,7 +583,7 @@ func (s *Session) keepResplitKeys(at int, keys string) {
 // dropToneKey 去掉位置 at 的原按鍵最後的聲調鍵：原樣音節的聲調被刪掉時，按鍵跟著畫面。
 func (s *Session) dropToneKey(at int) {
 	keys := s.mixedKeys[at]
-	if keys == "" || !s.resplit() {
+	if keys == "" || !s.keyRecords() {
 		return
 	}
 	if sym, ok := s.layout.Symbol(rune(keys[len(keys)-1])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
@@ -584,7 +593,7 @@ func (s *Session) dropToneKey(at int) {
 
 // markKeyed 記下 at 到游標之間剛打的字的來源（mixedOrigin.keyed）。
 func (s *Session) markKeyed(at int, keypad bool) {
-	if !s.resplit() {
+	if !s.keyRecords() {
 		return
 	}
 	if s.mixedOrigins == nil {

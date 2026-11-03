@@ -14,7 +14,7 @@ import (
 )
 
 // mixedMemory：整合風格（操作規則 mixed_memory），記住 ↓ 換過的混打解釋（personal.LearnMixedMemory），
-// 下次同樣的按鍵照上下文決定要不要照記憶換；要有 mixed_resplit 的按鍵紀錄。
+// 下次同樣的按鍵照上下文決定要不要照記憶換；要開著 mixed_resplit（記的是它 ↓ 換過的）。
 func (s *Session) mixedMemory() bool { return s.InputStyle.MixedMemory != "" && s.resplit() }
 
 // 只有按鍵對上（前一個字或後一個音不同）的記憶看中文那一側的合理度：每個字平均的 log10 機率。記憶把中文換掉時，

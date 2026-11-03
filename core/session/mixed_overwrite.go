@@ -23,8 +23,8 @@ const (
 	overwriteSpaceMargin = 6.0
 )
 
-// mixedOverwrite：整合風格（操作規則 mixed_overwrite），要有 mixed_resplit 的按鍵紀錄。
-func (s *Session) mixedOverwrite() bool { return s.InputStyle.MixedOverwrite != "" && s.resplit() }
+// mixedOverwrite：整合風格（操作規則 mixed_overwrite）。
+func (s *Session) mixedOverwrite() bool { return s.InputStyle.MixedOverwrite != "" && s.mixedInput() }
 
 // overwrite 是一段按鍵照微軟新注音「同一格後按的蓋掉先按的」組成的音節（group 的 keys 是全部的按鍵）。
 // lead：被蓋掉的是第一個鍵、緊接著另一個聲母（gnj4 的 g、nh4 的 n），那個鍵也可能是要打的字母（n次）。

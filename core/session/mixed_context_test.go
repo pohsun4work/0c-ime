@@ -7,7 +7,6 @@ import (
 	"unicode"
 
 	"github.com/0c-biggo/0c-ime/core/english"
-	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -29,8 +28,7 @@ func contextSession(rules bool) *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	p, _ := inputstyle.Get("blend")
-	s.InputStyle = p.Rules
+	s.InputStyle = blendRules()
 	if !rules {
 		s.InputStyle.MixedContext = ""
 	}

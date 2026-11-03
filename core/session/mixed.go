@@ -125,7 +125,7 @@ func (s *Session) insertMixedTyped(syl zhuyin.Syllable, keys string) {
 		at := s.cursor
 		s.insertSyllableLiteral(comp, syl)
 		s.pendingLiterals[len(s.pendingLiterals)-1].prefix = true
-		s.keepResplitKeys(at, keys)
+		s.keepMixedKeys(at, keys)
 	}
 }
 
@@ -172,7 +172,7 @@ func (s *Session) flushMixed() {
 	if phonetic {
 		s.comp = c
 		s.insertPendingLiteral()
-		s.keepResplitKeys(at, raw) // 數字鍵盤打斷的 e 留成 ㄍ，↓ 有 e
+		s.keepMixedKeys(at, raw) // 數字鍵盤打斷的 e 留成 ㄍ，↓ 有 e
 	} else {
 		s.insertMixedLiteral(text, assisted, explicit)
 		for pos := at; pos < at+min(assistedPrefix, len([]rune(text))); pos++ {
@@ -1310,7 +1310,7 @@ func (s *Session) mixedKey(k string) bool {
 	if !s.mixedInput() || s.english {
 		return false
 	}
-	if s.mixed.raw == "" && !s.resplitKeepsLiteral(k) {
+	if s.mixed.raw == "" && !s.keepsLiteral(k) {
 		s.restorePendingLiteral()
 	}
 	if !s.comp.Empty() {
@@ -1435,7 +1435,7 @@ func (s *Session) englishCorrections(text string, limit int) []english.Candidate
 type mixedOrigin struct {
 	assisted, explicit bool
 	zhuyinKey          zhuyinKeyOrigin
-	// 整合風格（mixed_resplit）：keyed 是只為了查回按鍵而記的位置（打的符號、數字鍵盤），不算混打的英數，不學。
+	// 整合風格：keyed 是只為了查回按鍵而記的位置（打的符號、數字鍵盤），不算混打的英數，不學。
 	keyed, keypad bool
 }
 
