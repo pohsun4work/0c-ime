@@ -163,7 +163,7 @@ jobs:
         id: state
         run: |
           $state = Get-Content hoshi/fork-state.json -Raw | ConvertFrom-Json
-          # 外殼（TSF DLL、候選窗）有變才發 shell 更新：shell 要系統管理員確認並重新登入，core 在背景完成。
+          # 外殼（TSF DLL、候選窗）有變才發 shell 更新：shell 要系統管理員確認、已開著的應用程式重新開啟才換新，core 在背景完成。
           $kind = "core"
           if (-not $state.shell_commit) { $kind = "shell" }
           else {

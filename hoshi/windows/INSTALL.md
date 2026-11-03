@@ -20,14 +20,14 @@
    Import-Certificate -FilePath ..\codesign.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
    ```
 
-4. 安裝。hoshi 版的版本號比官方同版號「小」（semver 的預發行版本），從官方版換過來時必須加 `-allow-downgrade`：
+4. 完成正在輸入的文字，再安裝。hoshi 版的版本號比官方同版號「小」（semver 的預發行版本），從官方版換過來時必須加 `-allow-downgrade`：
 
    ```powershell
    .\0c-update.exe verify -bundle .
    .\0c-update.exe install -bundle . -channel public-beta -allow-downgrade
    ```
 
-5. 完成正在輸入的文字，**登出再登入**。
+5. 不必登出，用 Win＋空白切換到「靈犀注音」。已經開著的應用程式要重新開啟，才會載入新版。
 6. 在設定程式開「中英混打（試用）」。混打的各個開關、英文補全排序與符號表在「中英切換」「鍵盤與符號」頁，是全域設定，選哪個風格都照它。
    想要跟作者一樣的設定：在「選用風格」把「靈犀注音」複製成自訂風格，再設
    - 「英文模式自動補字」開
