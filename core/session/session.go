@@ -1438,7 +1438,7 @@ func (s *Session) moveHighlight(d int) {
 		if l == 1 && c.split > 0 {
 			continue
 		}
-		if s.openTabLength(anchor, l, c.before) {
+		if s.openAnchored(anchor, l, c.before) {
 			if d < 0 {
 				s.cand.cursor = len(s.cand.items) - 1
 				if s.cand.split > 0 {

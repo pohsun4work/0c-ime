@@ -331,6 +331,14 @@ func TestResplitTabReachesWholeComposition(t *testing.T) {
 	if longest != vocab.MaxWordRunes || s.cand.length != 1 {
 		t.Fatalf("最長換到 %d、現在 %d", longest, s.cand.length)
 	}
+
+	// ↑／↓ 走過清單頭尾照官方只換到有詞的長度：你 ↑ 回到同一份清單的最後一項，不跳到 ␣你。
+	s = resplitSession()
+	keys(s, "j", "i", "3", "h", "e", "l", "l", "o", " ", "s", "u", "3", proto.KeyDown)
+	key(s, proto.KeyUp)
+	if c := s.cand; c == nil || c.length != 1 || c.cursor != len(c.items)-1 {
+		t.Fatalf("↑ 走過開頭：%+v", c)
+	}
 }
 
 // 多字的中文候選同跨英數候選的順序：畫面上的字不是詞時排第一個（選了不換），原始按鍵後面接整段注音，再接單字（#161）。
