@@ -51,11 +51,12 @@ type memoryChoice struct {
 }
 
 // memoryApplied 是照記憶換成 Form 的一段，official 是換之前的樣子，條件不再成立時換回。兩者一樣時是照記憶留著
-// （hold），只擋住 mixed_context 的規則改它。
+// （hold），只擋住 mixed_context 的規則改它。cuts 是 official 裡英數接中文換過的段落（位置從 start 起算），換回時記回去。
 type memoryApplied struct {
 	memorySpan
 	personal.MixedApplied
 	official []personal.MixedToken
+	cuts     []alnumCut
 }
 
 func (a memoryApplied) hold() bool { return slices.Equal(a.Form, a.official) }
@@ -69,6 +70,7 @@ type memoryState struct {
 	choices []memoryChoice
 	applied []memoryApplied
 	blocked []memorySpan           // Shift＋Delete 忘掉的段落：這次組字不再照記憶換
+	cuts    []alnumCut             // 英數接中文換過的段落（mixed_alnum）
 	chars   map[string]float64     // 神經模型評過的字：前文＋字 → log10 機率
 	scores  map[string]memoryScore // 算過的合理度（chineseScore）
 }
@@ -78,6 +80,7 @@ func (m *memoryState) shift(at, delta int) {
 	m.choices = shiftSpans(m.choices, func(c *memoryChoice) *memorySpan { return &c.memorySpan }, at, delta)
 	m.applied = shiftSpans(m.applied, func(a *memoryApplied) *memorySpan { return &a.memorySpan }, at, delta)
 	m.blocked = shiftSpans(m.blocked, func(p *memorySpan) *memorySpan { return p }, at, delta)
+	m.cuts = shiftSpans(m.cuts, func(c *alnumCut) *memorySpan { return &c.memorySpan }, at, delta)
 }
 
 func shiftSpans[T any](items []T, span func(*T) *memorySpan, at, delta int) []T {
@@ -95,15 +98,35 @@ func shiftSpans[T any](items []T, span func(*T) *memorySpan, at, delta int) []T 
 // guards：pos 在照記憶換過或留著的段落裡，mixed_context 的規則不改。
 func (m *memoryState) guards(pos int) bool { return m.appliedAt(memorySpan{pos, pos + 1}, true) >= 0 }
 
+// cutAt：p 碰到英數接中文換過的段落。
+func (m *memoryState) cutAt(p memorySpan) bool {
+	return slices.ContainsFunc(m.cuts, func(c alnumCut) bool { return c.overlaps(p) })
+}
+
+// cutsWithin 是 p 包住的英數接中文換過的段落，位置從 p.start 起算。
+func (m *memoryState) cutsWithin(p memorySpan) []alnumCut {
+	var out []alnumCut
+	for _, c := range m.cuts {
+		if p.start <= c.start && c.end <= p.end {
+			out = append(out, alnumCut{memorySpan{c.start - p.start, c.end - p.start}, c.form})
+		}
+	}
+	return out
+}
+
 // appliedAt 是跟 p 重疊的照記憶換過的段落；hold 為 false 時不算照記憶留著的。沒有時回傳 -1。
 func (m *memoryState) appliedAt(p memorySpan, hold bool) int {
 	return slices.IndexFunc(m.applied, func(a memoryApplied) bool { return a.overlaps(p) && (hold || !a.hold()) })
 }
 
-// taken：p 碰到照記憶換過的、這次 ↓ 換過的或忘掉的段落。
+// changed：p 碰到照記憶換過（或留著）、這次 ↓ 換過的段落。
+func (m *memoryState) changed(p memorySpan) bool {
+	return m.appliedAt(p, true) >= 0 || slices.ContainsFunc(m.choices, func(c memoryChoice) bool { return c.overlaps(p) })
+}
+
+// taken：p 碰到 changed 或忘掉的段落。
 func (m *memoryState) taken(p memorySpan) bool {
-	return m.appliedAt(p, true) >= 0 || slices.ContainsFunc(m.choices, func(c memoryChoice) bool { return c.overlaps(p) }) ||
-		slices.ContainsFunc(m.blocked, p.overlaps)
+	return m.changed(p) || slices.ContainsFunc(m.blocked, p.overlaps)
 }
 
 // memoryToken 是組字區裡查得回按鍵的一段：中文、原樣注音各一個音節，照字面的英數一個字（mixedForm 再併成一串）。
@@ -251,7 +274,7 @@ func (s *Session) rejudgeMemory(index map[string][]personal.MixedRecord, longest
 		current := s.memoryFormIs(a.memorySpan, a.Form) // 被編輯過的照畫面
 		if current {
 			fresh()
-			if d, ok := s.memoryDecide(index[a.Keys], a.memorySpan, a.official); ok && slices.Equal(d.Form, a.Form) {
+			if d, ok := s.memoryDecide(index[a.Keys], a.memorySpan, a.official, a.cuts); ok && slices.Equal(d.Form, a.Form) {
 				s.memory.applied[i] = d
 				i++
 				continue
@@ -259,7 +282,7 @@ func (s *Session) rejudgeMemory(index map[string][]personal.MixedRecord, longest
 		}
 		s.memory.applied = slices.Delete(s.memory.applied, i, i+1)
 		if current && !a.hold() {
-			if _, ok := s.replaceMemory(a.memorySpan, a.official); ok {
+			if _, ok := s.unapplyMemory(a); ok {
 				return true
 			}
 			s.memory.applied = slices.Insert(s.memory.applied, i, a) // 選過字（鎖定）的照畫面留著
@@ -303,7 +326,8 @@ func (s *Session) matchMemory(index map[string][]personal.MixedRecord, longest i
 			continue // 換了之後換不回來
 		}
 		fresh()
-		a, ok := s.memoryDecide(records, memorySpan{run[0].start, run[n-1].end}, official)
+		p := memorySpan{run[0].start, run[n-1].end}
+		a, ok := s.memoryDecide(records, p, official, s.memory.cutsWithin(p))
 		if !ok {
 			continue
 		}
@@ -319,11 +343,22 @@ func (s *Session) matchMemory(index map[string][]personal.MixedRecord, longest i
 	return 1, false
 }
 
-// replaceMemory 把 p 換成 form，回傳換上之後的尾端。有鎖定、明確選的或照記憶換過的段落時不換（replaceSpan），
-// 換回時先把那段從 memoryState.applied 拿掉。
+// unapplyMemory 把照記憶換過的 a 換回原本的樣子，回傳換回之後的尾端；裡面英數接中文換過的段落也記回去。
+func (s *Session) unapplyMemory(a memoryApplied) (int, bool) {
+	end, ok := s.replaceMemory(a.memorySpan, a.official)
+	if ok {
+		for _, c := range a.cuts {
+			s.memory.cuts = append(s.memory.cuts, alnumCut{memorySpan{a.start + c.start, a.start + c.end}, c.form})
+		}
+	}
+	return end, ok
+}
+
+// replaceMemory 把 p 換成 form，回傳換上之後的尾端。有鎖定、明確選的或照記憶換過的段落時不換（replaceOver），
+// 換回時先把那段從 memoryState.applied 拿掉；英數接中文換過的段落照換（記憶比它優先）。
 func (s *Session) replaceMemory(p memorySpan, form []personal.MixedToken) (int, bool) {
 	n := len(s.syls)
-	ok := s.replaceSpan(p.start, p.end, func() { s.insertMemoryForm(form) })
+	ok := s.replaceOver(p.start, p.end, func() { s.insertMemoryForm(form) })
 	return p.end + len(s.syls) - n, ok
 }
 
@@ -383,9 +418,10 @@ func (s *Session) chineseSyllable(keys string) (zhuyin.Syllable, bool) {
 
 // memoryDecide 決定 p（現在是 official 的樣子）要不要照 records 換，換成別的樣子時都看合理度：前一個字與後一個音都對上的
 // 紀錄照它自己的確認次數（跟官方一樣時直接留著）；只有按鍵對上時，每筆紀錄都換成同樣子才換，不一致時照官方。
+// p 包住英數接中文換過的段落（cuts）時不看合理度：那是使用者改掉過的換法，換成的中文本來就合理。
 // 單一個注音鍵接空白同官方選過的注音文（#208）只看前一個字、不從別處套用，換成注音的交給官方：注音文開關的選回原按鍵
 // （zhuyinDeclines）就是在這裡照字面留著，規則不再改成注音。
-func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, official []personal.MixedToken) (memoryApplied, bool) {
+func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, official []personal.MixedToken, cuts []alnumCut) (memoryApplied, bool) {
 	if len(records) == 0 {
 		return memoryApplied{}, false
 	}
@@ -393,11 +429,11 @@ func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, off
 	if !ok {
 		return memoryApplied{}, false
 	}
-	lone := s.loneKeySpace(here.Keys)
+	lone, cut := s.loneKeySpace(here.Keys), len(cuts) > 0
 	for _, r := range records {
 		if r.MixedRef == here && !(lone && hasKind(r.Form, personal.MixedZhuyin)) {
-			a := memoryApplied{p, personal.MixedApplied{MixedRef: here, Exact: true, Form: r.Form}, official}
-			return a, s.memoryInsertable(r.Form) && (a.hold() || s.memoryPlausible(p, official, r.Form, r.Confirmed))
+			a := memoryApplied{p, personal.MixedApplied{MixedRef: here, Exact: true, Form: r.Form}, official, cuts}
+			return a, s.memoryInsertable(r.Form) && (a.hold() || cut || s.memoryPlausible(p, official, r.Form, r.Confirmed))
 		}
 	}
 	if lone {
@@ -409,8 +445,8 @@ func (s *Session) memoryDecide(records []personal.MixedRecord, p memorySpan, off
 			return memoryApplied{}, false
 		}
 	}
-	a := memoryApplied{p, personal.MixedApplied{MixedRef: here, Form: form}, official}
-	return a, s.memoryInsertable(form) && s.memoryPlausible(p, official, form, 1)
+	a := memoryApplied{p, personal.MixedApplied{MixedRef: here, Form: form}, official, cuts}
+	return a, s.memoryInsertable(form) && (cut || s.memoryPlausible(p, official, form, 1))
 }
 
 // memoryPlausible：把 official 換成 form 時中文那一側合不合理。兩邊都沒有中文（a␣ ↔ ㄇ）時直接換，但附近有英文時不換成注音。
@@ -766,7 +802,7 @@ func (s *Session) openMemorySpan(pos int, before bool) bool {
 	return true
 }
 
-// changedSpan 是 pos 所在、照記憶換過或這次用 ↓ 換過解釋（現在還是那個樣子）的段落。
+// changedSpan 是 pos 所在、照記憶換過、英數接中文換過或這次用 ↓ 換過解釋（現在還是那個樣子）的段落。
 func (s *Session) changedSpan(pos int) (memorySpan, bool) {
 	p := memorySpan{pos, pos + 1}
 	if i := s.memory.appliedAt(p, false); i >= 0 {
@@ -775,6 +811,11 @@ func (s *Session) changedSpan(pos int) (memorySpan, bool) {
 	for _, c := range slices.Backward(s.memory.choices) {
 		if c.overlaps(p) && s.memoryFormIs(c.memorySpan, c.form) {
 			return c.memorySpan, true
+		}
+	}
+	for _, c := range s.memory.cuts {
+		if q := s.alnumCutSpan(c); q.overlaps(p) && s.memoryFormIs(c.memorySpan, c.form) {
+			return q, true
 		}
 	}
 	return memorySpan{}, false
@@ -797,7 +838,7 @@ func (s *Session) forgetMemoryCandidate() bool {
 	s.forgot = true
 	s.cand = nil
 	s.memory.applied = slices.Delete(s.memory.applied, i, i+1)
-	end, _ := s.replaceMemory(a.memorySpan, a.official)
+	end, _ := s.unapplyMemory(a)
 	s.memory.blocked = append(s.memory.blocked, memorySpan{a.start, end})
 	s.notices = append(s.notices, "不再自動換："+a.Keys)
 	return true
@@ -836,7 +877,7 @@ func (s *Session) rejudgeMemoryPending(index map[string][]personal.MixedRecord) 
 		return
 	}
 	s.refresh()
-	a, ok := s.memoryDecide(records, memorySpan{s.cursor, s.cursor}, literalForm(p.raw))
+	a, ok := s.memoryDecide(records, memorySpan{s.cursor, s.cursor}, literalForm(p.raw), nil)
 	if !ok || a.hold() {
 		return
 	}
