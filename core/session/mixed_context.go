@@ -22,7 +22,8 @@ func (s *Session) contextRule(name string) bool {
 
 // rejudge：混打照官方判斷，每個按鍵處理完與送出前再照上下文重看：先看待定的按鍵（rejudgePending），查得回按鍵的部分
 // 再照記憶（mixed_memory，rejudgeMemory）、照規則（mixed_context：rejudgeUnits、rejudgeZhuyinText）、英數接中文
-// （mixed_alnum，rejudgeAlnum），最後看打錯又補對的鍵（mixed_overwrite），改成的樣子官方也打得出來。
+// （mixed_alnum，rejudgeAlnum）與中文換回英數（mixed_alnum_word），最後看打錯又補對的鍵（mixed_overwrite），
+// 改成的樣子官方也打得出來。
 // 待定按鍵還沒定案時只看游標前，後面的字等它定案再看；
 // 官方照字面留著、打完聲調鍵的待定按鍵（ps4）也照記憶換（rejudgeMemoryPending）。
 // 鎖定（選過的字）、從 ↓ 明確選的不改；候選窗開著、注音或英文打到一半、標示中不看。
@@ -42,7 +43,8 @@ func (s *Session) rejudge() {
 		if s.mixed.raw != "" {
 			end = s.cursor
 		}
-		if s.rejudgeMemory(index, longest, end) || s.rejudgeUnits(end) || zhuyinText && s.rejudgeZhuyinText(end) || s.rejudgeAlnum(index) {
+		if s.rejudgeMemory(index, longest, end) || s.rejudgeUnits(end) || zhuyinText && s.rejudgeZhuyinText(end) || s.rejudgeAlnum(index) ||
+			s.rejudgeAlnumWord(end) {
 			continue
 		}
 		if !s.mixedOverwrite() || !s.rejudgeOverwrite(end) {
@@ -277,9 +279,11 @@ func (s *Session) markChosen(chosen bool, at int) {
 	}
 }
 
-// replaceSpan 是 mixed_context 的規則用的 replaceOver：英數接中文換過的段落（mixed_alnum）也不換（4g＋手機 的 g 不併進「手」）。
+// replaceSpan 是 mixed_context 的規則用的 replaceOver：英數接中文換過的段落（mixed_alnum）、換回英數的字（mixed_alnum_word）
+// 也不換（4g＋手機 的 g 不併進「手」）。
 func (s *Session) replaceSpan(start, end int, insert func()) bool {
-	return !s.memory.cutAt(memorySpan{start, end}) && s.replaceOver(start, end, insert)
+	p := memorySpan{start, end}
+	return !s.memory.cutAt(p) && !s.memory.wordAt(p) && s.replaceOver(start, end, insert)
 }
 
 // replaceOver 把 [start, end) 換成 insert 插入的內容，游標在後面時跟著平移、在中間時移到換上的內容後面。

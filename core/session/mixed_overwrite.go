@@ -1,7 +1,6 @@
 package session
 
 import (
-	"math"
 	"slices"
 	"strings"
 
@@ -166,38 +165,24 @@ func (s *Session) overwriteWanted(c overwriteCase) bool {
 	if !s.neuralText() || left == "" {
 		return false
 	}
-	score := func(before string, r rune) (float64, bool) { return s.neuralChar(s.neuralWindow(before), r, c.syl) }
-	var char rune
-	chinese := math.Inf(-1)
-	for _, r := range s.overwriteChars(c.start, c.syl) {
-		if v, ok := score(left, r); ok && v > chinese {
-			char, chinese = r, v
-		}
-	}
-	if char == 0 {
+	char, chinese, ok := s.neuralBest(s.neuralWindow(left), s.overwriteChars(c.start, c.syl), c.syl)
+	if !ok {
 		return false
 	}
 	if c.lead {
-		with, ok := score(left+string(c.shown[0]), char)
+		with, ok := s.neuralChar(s.neuralWindow(left+string(c.shown[0])), char, c.syl)
 		return ok && with-chinese < overwriteLetterEffect
-	}
-	var literal float64
-	for i, r := range c.shown {
-		v, ok := score(left+string(c.shown[:i]), r)
-		if !ok {
-			return false
-		}
-		literal += v
 	}
 	margin := overwriteToneMargin
 	if c.space {
 		margin = overwriteSpaceMargin
 	}
-	return chinese-literal >= margin
+	literal, ok := s.neuralSum(left, c.shown, c.syl, chinese-margin)
+	return ok && chinese-literal >= margin
 }
 
-// commonCharLimit：除了解碼最好的字，再給神經模型挑的常用單字數（蓋完的音節、英數接中文只有一個音節的中文）。
-const commonCharLimit = 3
+// commonCharLimit：給神經模型挑的字數，解碼最好的字加上常用單字（蓋完的音節、英數接中文只有一個音節的中文）。
+const commonCharLimit = 4
 
 // overwriteChars 是 syl 蓋完可能出的字：接在 start 前面的中文後面解碼最好的字，加上這個讀音最常用的幾個單字。
 // 換了之後那個音節併進前面的中文一起由神經模型重排（車子的＋ㄙㄨˋ 是「速」，統計解碼是「塑」），所以讓神經模型挑。
@@ -212,14 +197,14 @@ func (s *Session) overwriteChars(start int, syl zhuyin.Syllable) []rune {
 		w := []rune(words[len(words)-1].word)
 		chars = append(chars, w[len(w)-1])
 	}
-	return s.commonChars(chars, syl)
+	return s.commonChars(chars, syl, commonCharLimit)
 }
 
-// commonChars 把 syl 最常用的單字照順序接在 chars 後面（不重複），直到超過 commonCharLimit 個。
-func (s *Session) commonChars(chars []rune, syl zhuyin.Syllable) []rune {
+// commonChars 把 syl 最常用的單字照順序接在 chars 後面（不重複），最多到 limit 個。
+func (s *Session) commonChars(chars []rune, syl zhuyin.Syllable, limit int) []rune {
 	single := &decode.Decoder{Lex: s.model.Source(), Score: s.model}
 	for _, c := range single.Candidates(input.Exact{}.Expand([]zhuyin.Syllable{syl}), 0, 1, single.InitialLeft(), nil) {
-		if len(chars) > commonCharLimit {
+		if len(chars) >= limit {
 			break
 		}
 		if r := []rune(c.Entry.Surface); len(r) == 1 && !slices.Contains(chars, r[0]) {

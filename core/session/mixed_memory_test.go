@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
@@ -328,21 +329,26 @@ func TestMixedMemoryLeftFromConfirmedContext(t *testing.T) {
 	}
 }
 
-// memoryScorer 是假的神經模型：文字評分時第一個候選照 table（log10，前文＋字）給分，沒列的給 -10。
+// memoryScorer 是假的神經模型：逐字評分（scoreChars，候選沒有統計分數）時每個候選照 table（log10，前文＋字）給分，
+// 沒列的給 -10；一般的單音節重排全給 0、不算次數。
 func memoryScorer(table map[string]float64, calls *int) rerank.Scorer {
 	return rankFunc(func(r rerank.Request) ([]float64, error) {
-		if r.Mode != rerank.ModeText || len(r.Candidates) != 2 {
+		if r.Mode != rerank.ModeText || slices.ContainsFunc(r.Candidates, func(h decode.Hypothesis) bool { return h.LogScore != 0 }) {
 			return make([]float64, len(r.Candidates)), nil
 		}
 		*calls++
-		v, ok := table[r.Context+r.Candidates[0].Text]
-		if !ok {
-			v = -10
+		out := make([]float64, len(r.Candidates))
+		for i, c := range r.Candidates {
+			v, ok := table[r.Context+c.Text]
+			if !ok {
+				v = -10
+			}
+			if math.IsNaN(v) {
+				return nil, errors.New("worker 不能用")
+			}
+			out[i] = v * math.Ln10
 		}
-		if math.IsNaN(v) {
-			return nil, errors.New("worker 不能用")
-		}
-		return []float64{v * math.Ln10, 0}, nil
+		return out, nil
 	})
 }
 

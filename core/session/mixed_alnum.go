@@ -93,21 +93,21 @@ func (s *Session) rejudgeAlnum(index map[string][]personal.MixedRecord) bool {
 // 兩邊照同樣的方法評，換上之後再評一次還是同樣的分數，不會換來換去。
 func (s *Session) alnumBest(st alnumStretch, forms [][]personal.MixedToken, cut bool) ([]personal.MixedToken, bool) {
 	before := s.neuralContext() + strings.Join(s.shownChars(st.start), "")
-	best, top := []personal.MixedToken(nil), math.Inf(-1)
-	for _, f := range forms {
-		if v, ok := s.alnumFormScore(before, f); ok && v > top {
-			best, top = f, v
-		}
-	}
-	if best == nil {
+	current, ok := s.alnumFormScore(before, st.current, math.Inf(-1))
+	if !ok {
 		return nil, false
 	}
-	current, ok := s.alnumFormScore(before, st.current)
 	margin := alnumMargin
 	if cut {
 		margin = alnumRecut
 	}
-	return best, ok && top >= current+margin
+	best, need := []personal.MixedToken(nil), current+margin
+	for _, f := range forms {
+		if v, ok := s.alnumFormScore(before, f, need); ok && (v > need || best == nil && v == need) {
+			best, need = f, v
+		}
+	}
+	return best, best != nil
 }
 
 // alnumCutSpan 是 c 連同後面接著打的中文（同一串最多 alnumTail 個音節）：4k螢 接著打出 4k螢幕，↓ 開整段。
@@ -171,10 +171,10 @@ func (s *Session) alnumStretchFrom(start, end int) (alnumStretch, bool) {
 	return alnumStretch{memorySpan{start, end}, joinKeys(current), current, pending}, true
 }
 
-// alnumTokenAt：pos 是一串裡 kind 的一格：查得回按鍵、不是空白，沒被鎖定、明確選過、照記憶或 ↓ 換過（忘掉記憶的段落照看）。
+// alnumTokenAt：pos 是一串裡 kind 的一格：查得回按鍵、不是空白，沒被鎖定、明確選過、照記憶或 ↓ 換過、換回英數（忘掉記憶的段落照看）。
 func (s *Session) alnumTokenAt(pos int, kind string) bool {
 	t, ok := s.memoryTokenAt(pos)
-	if !ok || t.Kind != kind || s.memory.changed(t.memorySpan) || s.pinnedAt(pos) {
+	if !ok || t.Kind != kind || s.memory.changed(t.memorySpan) || s.memory.wordAt(t.memorySpan) || s.pinnedAt(pos) {
 		return false
 	}
 	return kind != personal.MixedLiteral || t.Keys != " " && t.Keys[0] <= '~'
@@ -233,7 +233,8 @@ type alnumChar struct {
 
 // alnumFormScore 是 form 的字（alnumFormChars）接在 before（已確認的前文＋組字區這一串前面的字）後面，神經模型逐字加總的
 // log10 機率。每個切法的第一個字都是同一個英數，只當前文、不評分（句首沒有前文時神經模型評不了第一個字）。
-func (s *Session) alnumFormScore(before string, form []personal.MixedToken) (float64, bool) {
+// 加到一半就低於 floor 時直接回傳：後面的字只會再扣分。
+func (s *Session) alnumFormScore(before string, form []personal.MixedToken, floor float64) (float64, bool) {
 	chars, ok := s.alnumFormChars(form)
 	if !ok || len(chars) == 0 {
 		return 0, false
@@ -241,17 +242,13 @@ func (s *Session) alnumFormScore(before string, form []personal.MixedToken) (flo
 	before += string(chars[0].choices[0])
 	var sum float64
 	for _, c := range chars[1:] {
-		best, top := rune(0), math.Inf(-1)
-		context := s.neuralWindow(before)
-		for _, r := range c.choices {
-			if v, ok := s.neuralChar(context, r, c.syl); ok && v > top {
-				best, top = r, v
-			}
-		}
-		if best == 0 {
+		best, top, ok := s.neuralBest(s.neuralWindow(before), c.choices, c.syl)
+		if !ok {
 			return 0, false
 		}
-		sum += top
+		if sum += top; sum < floor {
+			return sum, true
+		}
 		before += string(best)
 	}
 	return sum, true
@@ -289,7 +286,7 @@ func (s *Session) alnumFormChars(form []personal.MixedToken) ([]alnumChar, bool)
 		}
 		if len(syls) == 1 {
 			c := &out[len(out)-1]
-			c.choices = s.commonChars(c.choices, syls[0])
+			c.choices = s.commonChars(c.choices, syls[0], commonCharLimit)
 		}
 	}
 	return out, true
