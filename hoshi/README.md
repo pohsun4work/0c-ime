@@ -5,9 +5,9 @@
 ## 跟官方的差異
 
 - **更新來源**：更新器信任的是 fork 自己的發行金鑰（`internal/update/trust_keys.go`），索引改從 fork 的 GitHub Releases 下載（`cmd/0c-update/auto.go` 的 `DefaultFeed`）。
-- **程式碼簽章**：Windows 套件用 fork 的自簽憑證簽章（`hoshi/windows/codesign.cer`），發行者是「Hoshi 0c-ime fork」。打包腳本加了 `--sign-pfx` 和 `--publisher` 兩個選項。
+- **程式碼簽章**：Windows 套件不做 Authenticode 簽章，更新的安全只靠索引的 ed25519 簽名；版本資訊的公司名是「Hoshi 0c-ime fork」。打包腳本加了 `--unsigned` 和 `--publisher` 兩個選項。
 - **版本號**：官方版號加上 `-hoshi.N`。
-- **發布流程**：`.github/workflows/fork-release.yml` 自動合併官方新版、測試、打包、發布。開 PR 前先用 `hoshi/windows/local_preview.py` 在本機打未簽章的包，再用它產生的 `build/local-preview/install.ps1` 安裝實測。
+- **發布流程**：`.github/workflows/fork-release.yml` 自動合併官方新版、測試、打包、發布，狀態記在 `hoshi/fork-state.json`。開 PR 前先用 `hoshi/windows/local_preview.py` 在本機打未簽章的包，再用它產生的 `build/local-preview/install.ps1` 安裝實測。
 - **輸入行為**：新增「整合風格」，以靈犀注音為底，補上華碩注音與微軟新注音的長處。它不是一份風格：混打的開關、英文補全排序、符號表是全域設定（`internal/settings/blend.go`，設定檔的 `blend`），選哪個風格都照它；另外在官方的設定項加了選項（標點操作「微軟半形參考」、Shift＋空白的「切換全半形」用整合風格的全形）。作者的設定是把靈犀注音複製成自訂風格，開中英混打與英文模式自動補字、關 Emoji 選單、標點操作選微軟半形參考、Shift＋空白切換全半形（`hoshi/windows/INSTALL.md`）。原本的各個模式行為不變。
   - 已完成：
     - 英文補全與拼字修正依 wordfreq 語料詞頻排序（`internal/englishpack/wordfreq`）
