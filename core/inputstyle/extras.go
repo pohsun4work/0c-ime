@@ -35,12 +35,13 @@ const (
 	ContextReversed = "reversed"
 	ContextZhuyin   = "zhuyin"
 	ContextLiteral  = "literal"
+	ContextAlnum    = "alnum"
 )
 
-var contextRules = []string{ContextInitial, ContextRepeats, ContextReversed, ContextZhuyin, ContextLiteral}
+var contextRules = []string{ContextInitial, ContextRepeats, ContextReversed, ContextZhuyin, ContextLiteral, ContextAlnum}
 
 // Apply 把開關換成 r 的 fork 欄位；標點（symbols）跟著風格，不動。不給開關的（標示、候選窗 Shift＋Tab、
-// 字典詞學習、混打記憶、聲母衝突）一律開著。
+// 字典詞學習、混打記憶、聲母衝突、英數後面直接接中文）一律開著。
 func (x Extras) Apply(r Rules) Rules {
 	on := func(b bool, v string) string {
 		if b {
@@ -61,7 +62,7 @@ func (x Extras) Apply(r Rules) Rules {
 			context = append(context, c.name)
 		}
 	}
-	r.MixedContext = strings.Join(context, ",")
+	r.MixedContext = strings.Join(append(context, ContextAlnum), ",")
 	r.VocabMark = "extended"
 	r.CandidateBackTab = "shorter"
 	r.MixedMemory = "context"

@@ -35,10 +35,10 @@ func TestExtrasApply(t *testing.T) {
 		}
 	}
 	r := DefaultExtras().Apply(p.Rules)
-	if r.MixedContext != "initial,repeats,reversed,literal" || r.MixedOverwrite != "" || r.MixedResplit != "keys" {
+	if r.MixedContext != "initial,repeats,reversed,literal,alnum" || r.MixedOverwrite != "" || r.MixedResplit != "keys" {
 		t.Fatalf("default extras: %+v", r)
 	}
-	if off := (Extras{}).Apply(p.Rules); off.MixedContext != "initial" || off.EnglishRanking != "" || off.SymbolBoard != "" {
+	if off := (Extras{}).Apply(p.Rules); off.MixedContext != "initial,alnum" || off.EnglishRanking != "" || off.SymbolBoard != "" {
 		t.Fatalf("extras off: %+v", off)
 	}
 	for _, c := range contextRules {
