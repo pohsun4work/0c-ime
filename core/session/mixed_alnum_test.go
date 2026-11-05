@@ -11,16 +11,17 @@ import (
 	"github.com/0c-biggo/0c-ime/core/rerank"
 )
 
-// alnumSession 是整合風格的混打 session，詞庫多了英數後面常接的詞，英文字典是 arm、i、url；table 同 overwriteSession（沒列的字 -10）。
-func alnumSession(table map[string]float64) *Session {
-	s := overwriteSession(table,
+// alnumSession 是整合風格的混打 session，詞庫多了英數後面常接的詞（另加 extra），英文字典是 arm、i、url；table 同
+// overwriteSession（沒列的字 -10）。
+func alnumSession(table map[string]float64, extra ...word) *Session {
+	s := overwriteSession(table, append(extra,
 		word{"製", "ㄓˋ", 1e-3}, word{"程", "ㄔㄥˊ", 1e-3}, word{"製程", "ㄓˋ ㄔㄥˊ", 1e-3},
 		word{"螢", "ㄧㄥˊ", 1e-4}, word{"幕", "ㄇㄨˋ", 1e-4}, word{"木", "ㄇㄨˋ", 1e-3}, word{"螢幕", "ㄧㄥˊ ㄇㄨˋ", 1e-3},
 		word{"名", "ㄇㄧㄥˊ", 1e-3}, word{"目", "ㄇㄨˋ", 1e-3}, word{"局", "ㄐㄩˊ", 1e-3},
 		word{"手", "ㄕㄡˇ", 1e-3}, word{"機", "ㄐㄧ", 1e-3}, word{"手機", "ㄕㄡˇ ㄐㄧ", 1e-3},
 		word{"網", "ㄨㄤˇ", 1e-3}, word{"路", "ㄌㄨˋ", 1e-3}, word{"網路", "ㄨㄤˇ ㄌㄨˋ", 1e-3}, word{"爽", "ㄕㄨㄤˇ", 1e-3},
 		word{"高", "ㄍㄠ", 1e-3}, word{"滿", "ㄇㄢˇ", 1e-3}, word{"之", "ㄓ", 1e-3}, word{"顯", "ㄒㄧㄢˇ", 1e-3}, word{"交", "ㄐㄧㄠ", 1e-3},
-	)
+	)...)
 	s.English = english.New([]english.Word{{Text: "arm", Weight: 3}, {Text: "i", Weight: 3}, {Text: "url", Weight: 3}})
 	return s
 }
@@ -121,30 +122,39 @@ func TestMixedAlnumNextStretch(t *testing.T) {
 	}
 }
 
-// 沒有神經模型、私人、暫停時照官方。
+// 英數接中文、中文換回英數，沒有神經模型、私人、暫停、關掉規則時照官方。
 func TestMixedAlnumNeedsNeural(t *testing.T) {
-	table := map[string]float64{"3n": -1, "3nm": -1, "3nm製": -2.5, "3nm製程": -0.5}
-	for _, tc := range []struct {
-		name string
-		edit func(s *Session)
+	for _, c := range []struct {
+		session    func() *Session
+		keys, want string
 	}{
-		{"沒有神經模型", func(s *Session) { s.Rerank = rerank.Options{} }},
-		{"暫停", func(s *Session) { s.paused = true }},
-		{"關掉規則", withoutAlnum},
+		{func() *Session {
+			return alnumSession(map[string]float64{"3n": -1, "3nm": -1, "3nm製": -2.5, "3nm製程": -0.5})
+		}, "3nm54t/6", "3nm54t/6"},
+		{func() *Session { return alnumWordSession(wordTable) }, "ji3mp32;3", "我允檔"},
 	} {
-		s := alnumSession(table)
-		tc.edit(s)
-		if snap := typeContext(s, "3nm54t/6"); snap.Text() != "3nm54t/6" {
-			t.Errorf("%s：%q", tc.name, snap.Text())
+		for _, tc := range []struct {
+			name string
+			edit func(s *Session)
+		}{
+			{"沒有神經模型", func(s *Session) { s.Rerank = rerank.Options{} }},
+			{"暫停", func(s *Session) { s.paused = true }},
+			{"關掉規則", withoutAlnum},
+		} {
+			s := c.session()
+			tc.edit(s)
+			if snap := typeContext(s, c.keys); snap.Text() != c.want {
+				t.Errorf("%s %s：%q", c.keys, tc.name, snap.Text())
+			}
 		}
-	}
-	s := alnumSession(table)
-	var snap proto.Snapshot
-	for _, k := range "3nm54t/6" {
-		snap = s.Handle(proto.Request{Type: proto.Key, Key: string(k), Private: true})
-	}
-	if snap.Text() != "3nm54t/6" {
-		t.Errorf("私人：%q", snap.Text())
+		s := c.session()
+		var snap proto.Snapshot
+		for _, k := range c.keys {
+			snap = s.Handle(proto.Request{Type: proto.Key, Key: string(k), Private: true})
+		}
+		if snap.Text() != c.want {
+			t.Errorf("%s 私人：%q", c.keys, snap.Text())
+		}
 	}
 }
 

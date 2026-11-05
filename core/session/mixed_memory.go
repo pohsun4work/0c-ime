@@ -71,6 +71,7 @@ type memoryState struct {
 	applied []memoryApplied
 	blocked []memorySpan           // Shift＋Delete 忘掉的段落：這次組字不再照記憶換
 	cuts    []alnumCut             // 英數接中文換過的段落（mixed_alnum）
+	words   []alnumWord            // 換回英數的中文字（mixed_alnum_word）
 	chars   map[string]float64     // 神經模型評過的字：前文＋字 → log10 機率
 	scores  map[string]memoryScore // 算過的合理度（chineseScore）
 }
@@ -81,6 +82,7 @@ func (m *memoryState) shift(at, delta int) {
 	m.applied = shiftSpans(m.applied, func(a *memoryApplied) *memorySpan { return &a.memorySpan }, at, delta)
 	m.blocked = shiftSpans(m.blocked, func(p *memorySpan) *memorySpan { return p }, at, delta)
 	m.cuts = shiftSpans(m.cuts, func(c *alnumCut) *memorySpan { return &c.memorySpan }, at, delta)
+	m.words = shiftSpans(m.words, func(w *alnumWord) *memorySpan { return &w.memorySpan }, at, delta)
 }
 
 func shiftSpans[T any](items []T, span func(*T) *memorySpan, at, delta int) []T {
@@ -101,6 +103,11 @@ func (m *memoryState) guards(pos int) bool { return m.appliedAt(memorySpan{pos, 
 // cutAt：p 碰到英數接中文換過的段落。
 func (m *memoryState) cutAt(p memorySpan) bool {
 	return slices.ContainsFunc(m.cuts, func(c alnumCut) bool { return c.overlaps(p) })
+}
+
+// wordAt：p 碰到換回英數的中文字。
+func (m *memoryState) wordAt(p memorySpan) bool {
+	return slices.ContainsFunc(m.words, func(w alnumWord) bool { return w.overlaps(p) })
 }
 
 // cutsWithin 是 p 包住的英數接中文換過的段落，位置從 p.start 起算。
@@ -682,35 +689,88 @@ func (s *Session) neuralScore(segs []memorySeg) (float64, bool) {
 	return sum / float64(chars), true
 }
 
-// neuralChar 是 context 後面接 r 的 log10 機率。文字評分要兩個以上的候選，另一個只是陪評（的，r 是「的」時用「一」）。
+// neuralChar 是 context 後面接 r 的 log10 機率。
 func (s *Session) neuralChar(context string, r rune, syl zhuyin.Syllable) (float64, bool) {
-	key := context + "\x00" + string(r)
-	if v, ok := s.memory.chars[key]; ok {
-		return v, true
+	_, v, ok := s.neuralBest(context, []rune{r}, syl)
+	return v, ok
+}
+
+// neuralSum 是 text 逐字接在 before 後面的 log10 機率加總。加到一半就低於 floor 時直接回傳：後面的字只會再扣分。
+func (s *Session) neuralSum(before string, text []rune, syl zhuyin.Syllable, floor float64) (float64, bool) {
+	var sum float64
+	for i, r := range text {
+		v, ok := s.neuralChar(s.neuralWindow(before+string(text[:i])), r, syl)
+		if !ok {
+			return 0, false
+		}
+		if sum += v; sum < floor {
+			break
+		}
 	}
-	other := "的"
-	if r == '的' {
-		other = "一"
+	return sum, true
+}
+
+// neuralBest 是 choices 裡接在 context 後面 log10 機率最高的字（評不了的字跳過）。文字評分給的是絕對機率（跟同一次送的
+// 其他字無關），沒評過的一次送；有一個字神經模型不認得時整批評不了，改成一個一個評。
+func (s *Session) neuralBest(context string, choices []rune, syl zhuyin.Syllable) (rune, float64, bool) {
+	var todo []rune
+	for _, r := range choices {
+		if _, ok := s.memory.chars[charKey(context, r)]; !ok {
+			todo = append(todo, r)
+		}
 	}
-	row := func(t string) decode.Hypothesis {
-		return decode.Hypothesis{Text: t, Segments: []decode.Seg{{Word: t, Start: 0, End: 1}}}
+	if len(todo) > 0 && !s.scoreChars(context, todo, syl) && len(todo) > 1 {
+		for _, r := range todo {
+			s.scoreChars(context, []rune{r}, syl)
+		}
+	}
+	best, top := rune(0), math.Inf(-1)
+	for _, r := range choices {
+		if v, ok := s.memory.chars[charKey(context, r)]; ok && v > top {
+			best, top = r, v
+		}
+	}
+	return best, top, best != 0
+}
+
+// scoreChars 把 chars 一次送給神經模型評分、記進 memory.chars。文字評分要兩個以上的候選，只有一個字時另加陪評的字
+// （的，是「的」時用「一」）。
+func (s *Session) scoreChars(context string, chars []rune, syl zhuyin.Syllable) bool {
+	row := func(r rune) decode.Hypothesis {
+		return decode.Hypothesis{Text: string(r), Segments: []decode.Seg{{Word: string(r), Start: 0, End: 1}}}
+	}
+	var rows []decode.Hypothesis
+	for _, r := range chars {
+		rows = append(rows, row(r))
+	}
+	if len(rows) == 1 {
+		other := '的'
+		if chars[0] == other {
+			other = '一'
+		}
+		rows = append(rows, row(other))
 	}
 	req := rerank.Request{AllowPartial: s.Rerank.AllowPartial, Mode: rerank.ModeText, Revision: s.rev + 1, Context: context,
-		Reading: []zhuyin.Syllable{syl}, Candidates: []decode.Hypothesis{row(string(r)), row(other)}}
+		Reading: []zhuyin.Syllable{syl}, Candidates: rows}
 	if !rerank.Supported(req) {
-		return 0, false
+		return false
 	}
 	scores, err := s.Rerank.Scorer.Score(req)
-	if err != nil || len(scores) != 2 || !finite(scores[0]) {
-		return 0, false
+	if err != nil || len(scores) != len(rows) {
+		return false
 	}
-	v := scores[0] / math.Ln10
 	if s.memory.chars == nil {
 		s.memory.chars = map[string]float64{}
 	}
-	s.memory.chars[key] = v
-	return v, true
+	for i, r := range chars {
+		if finite(scores[i]) {
+			s.memory.chars[charKey(context, r)] = scores[i] / math.Ln10
+		}
+	}
+	return true
 }
+
+func charKey(context string, r rune) string { return context + "\x00" + string(r) }
 
 // noteMemoryChoice 在選候選前記下那段的按鍵與樣子，回傳選完後呼叫的函式：按鍵相同、解釋換了（英數、中文、注音）時，
 // 把換了的部分記成這次的選擇，送出時學（learnMixedMemory）。
@@ -802,7 +862,7 @@ func (s *Session) openMemorySpan(pos int, before bool) bool {
 	return true
 }
 
-// changedSpan 是 pos 所在、照記憶換過、英數接中文換過或這次用 ↓ 換過解釋（現在還是那個樣子）的段落。
+// changedSpan 是 pos 所在、照記憶換過、英數接中文換過、中文換回英數或這次用 ↓ 換過解釋（現在還是那個樣子）的段落。
 func (s *Session) changedSpan(pos int) (memorySpan, bool) {
 	p := memorySpan{pos, pos + 1}
 	if i := s.memory.appliedAt(p, false); i >= 0 {
@@ -816,6 +876,11 @@ func (s *Session) changedSpan(pos int) (memorySpan, bool) {
 	for _, c := range s.memory.cuts {
 		if q := s.alnumCutSpan(c); q.overlaps(p) && s.memoryFormIs(c.memorySpan, c.form) {
 			return q, true
+		}
+	}
+	for _, w := range s.memory.words {
+		if w.overlaps(p) && s.memoryFormIs(w.memorySpan, literalForm(w.keys)) {
+			return w.memorySpan, true
 		}
 	}
 	return memorySpan{}, false
