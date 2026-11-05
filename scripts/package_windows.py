@@ -145,7 +145,6 @@ def stamp_version(path, version, publisher=PUBLISHER):
 
 
 TIMESTAMP_URL = "http://timestamp.acs.microsoft.com"
-PFX_TIMESTAMP_URL = "http://timestamp.digicert.com"  # PFX 簽章用的公開 RFC 3161 時間戳伺服器
 PE_SUFFIXES = (".exe", ".dll", ".pyd")
 NEURAL_CRT = ("msvcp140.dll", "msvcp140_1.dll")  # scripts/prepare_neural.py 放在 python.exe 旁
 
@@ -172,20 +171,14 @@ def leaf_signer(output):
 
 
 def authenticode_sign(paths, args):
-    """以 Artifact Signing（signtool＋dlib）或 PFX（fork 的自簽憑證，密碼在 SIGN_PFX_PASSWORD）簽章並加時間戳，
-    簽完逐檔核對發行者。"""
+    """以 Artifact Signing（signtool＋dlib）簽章並加時間戳，簽完逐檔核對發行者。"""
     if not paths:
         return
-    pfx = getattr(args, "sign_pfx", None)
-    if pfx:
-        how = ["/f", str(pfx), "/p", os.environ["SIGN_PFX_PASSWORD"], "/tr", PFX_TIMESTAMP_URL]
-    else:
-        how = ["/tr", TIMESTAMP_URL, "/dlib", str(args.sign_dlib), "/dmdf", str(args.sign_metadata)]
-    subprocess.run([str(args.signtool), "sign", "/fd", "SHA256", "/td", "SHA256", *how, *map(str, paths)], check=True)
-    publisher = getattr(args, "publisher", PUBLISHER)
+    subprocess.run([str(args.signtool), "sign", "/fd", "SHA256", "/tr", TIMESTAMP_URL, "/td", "SHA256",
+                    "/dlib", str(args.sign_dlib), "/dmdf", str(args.sign_metadata), *map(str, paths)], check=True)
     for path in paths:
-        if signer(path, args) != publisher:
-            raise ValueError(f"簽章後核對失敗（發行者不是 {publisher}）：{path}")
+        if signer(path, args) != PUBLISHER:
+            raise ValueError(f"簽章後核對失敗（發行者不是 {PUBLISHER}）：{path}")
 
 
 def unsigned_pe(root, args):
@@ -337,23 +330,16 @@ def main():
     parser.add_argument("--signtool", type=Path, help="Windows SDK x64 signtool.exe")
     parser.add_argument("--sign-dlib", type=Path, help="Artifact Signing 用戶端的 Azure.CodeSigning.Dlib.dll")
     parser.add_argument("--sign-metadata", type=Path, help="Artifact Signing metadata.json（端點、帳戶、憑證設定檔）")
-    parser.add_argument("--sign-pfx", type=Path, help="改用 PFX 簽章（fork 的自簽憑證）；密碼放在環境變數 SIGN_PFX_PASSWORD，須搭配 --signtool")
-    parser.add_argument("--publisher", default=PUBLISHER, help="寫進版本資訊的公司名，也是簽章後核對的簽署者")
+    parser.add_argument("--publisher", default=PUBLISHER, help="寫進版本資訊的公司名")
+    parser.add_argument("--unsigned", action="store_true", help="公開包不做 Authenticode 簽章（fork：更新只靠索引的 ed25519 簽名）")
     try:
         args = parser.parse_args()
-        if args.sign_pfx:
-            if not args.signtool or args.sign_dlib or args.sign_metadata:
-                parser.error("PFX 簽章需要 --signtool，且不可同時指定 Artifact Signing 的 --sign-dlib、--sign-metadata")
-            if not os.environ.get("SIGN_PFX_PASSWORD"):
-                parser.error("PFX 簽章需要環境變數 SIGN_PFX_PASSWORD")
-            args.sign = True
-        else:
-            sign = (args.signtool, args.sign_dlib, args.sign_metadata)
-            if any(sign) and not all(sign):
-                parser.error("簽章需要同時指定 --signtool、--sign-dlib、--sign-metadata")
-            args.sign = all(sign)
-        if not args.preview and not args.sign:
-            parser.error("公開包必須簽章：請指定 --signtool、--sign-dlib、--sign-metadata，或 --signtool、--sign-pfx")
+        sign = (args.signtool, args.sign_dlib, args.sign_metadata)
+        if any(sign) and not all(sign):
+            parser.error("簽章需要同時指定 --signtool、--sign-dlib、--sign-metadata")
+        args.sign = all(sign)
+        if not args.preview and not args.sign and not args.unsigned:
+            parser.error("公開包必須簽章：請指定 --signtool、--sign-dlib、--sign-metadata，或明確指定 --unsigned")
         if args.e2etest and not args.preview:
             parser.error("--e2etest 只能用於 --preview 套件")
         if args.e2e_fault and not args.e2etest:

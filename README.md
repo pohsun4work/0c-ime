@@ -1,6 +1,7 @@
-> [!NOTE]
-> 這是 [0c-biggo/0c-ime](https://github.com/0c-biggo/0c-ime) 的修改版（fork），輸入行為與更新來源都跟官方不同，差異見 [hoshi/README.md](hoshi/README.md)。
-> 要安裝這個版本請到本 repo 的 [Releases](https://github.com/pohsun4work/0c-ime/releases/latest)（安裝方式見 [INSTALL.md](hoshi/windows/INSTALL.md)）；下方的官網、下載、回報問題連結都是官方版。
+> [!WARNING]
+> **這不是官方版本。** 這是 pohsun4work 維護的靈犀注音非官方修改版（fork），官方是 [0c-biggo/0c-ime](https://github.com/0c-biggo/0c-ime)。
+> 輸入行為與更新來源都跟官方不同，差異見 [hoshi/README.md](hoshi/README.md)；只發布 Windows 版，安裝請到本 repo 的 [Releases](https://github.com/pohsun4work/0c-ime/releases/latest)（安裝方式見 [INSTALL.md](hoshi/windows/INSTALL.md)）。
+> 下方是官方 README 原文，官網、下載、回報問題等連結都是官方版；fork 的問題請到本 repo 的 [Issues](https://github.com/pohsun4work/0c-ime/issues)。
 
 <p align="center">
   <img src=".github/assets/logo.svg" width="96" height="96" alt="靈犀注音 0C">

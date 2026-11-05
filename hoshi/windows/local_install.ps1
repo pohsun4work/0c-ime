@@ -21,6 +21,7 @@ if ($Rollback) {
     Invoke-Updater rollback
     return
 }
-Invoke-Updater apply -archive $config.archive -sha256 $config.sha256 -channel internal-preview
+$downgrade = @(if ($config.allow_downgrade) { '-allow-downgrade' })
+Invoke-Updater apply -archive $config.archive -sha256 $config.sha256 -channel internal-preview @downgrade
 if ($config.shell_changed) { Write-Host '這版改到 TSF DLL 或候選窗，已經開著的應用程式要重新開啟才會用到。' }
 else { Write-Host '這版只改引擎，已經開著的應用程式也直接用新版（引擎沒換成新版時，上面 0c-update 會說明）。' }

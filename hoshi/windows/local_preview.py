@@ -6,7 +6,7 @@
 字典取官方同版本的原始碼 tarball；neural/ 沿用已安裝版本的那份（prepare_neural 要在 Linux 編 bytecode）。
 
 打包完在 build\\local-preview\\ 留下 install.ps1（local_install.ps1 的複本），會跳 UAC 安裝；-Rollback 退回上一版。
---install 打包完直接執行它。
+--install 打包完直接執行它；--allow-downgrade 讓版號沒有比已安裝的新時照樣裝。
 
   py -3.12 hoshi\\windows\\local_preview.py             # 在要測的 checkout 根目錄執行
   powershell -ExecutionPolicy Bypass -File build\\local-preview\\install.ps1 [-Rollback]
@@ -105,7 +105,8 @@ def semver(version):
 
 def shell_changed(receipt, fallback):
     """TSF DLL、候選窗（同 fork-release 判斷 shell 更新的路徑）跟已安裝那版的 commit 比有沒有變，算上還沒提交的改動。
-    已安裝的是有未提交改動的本機包時比不出來，當成有變；那個 commit 不在本機時改跟上次的 shell 發布比。"""
+    已安裝的是有未提交改動的本機包時比不出來，當成有變；那個 commit 不在本機時改跟上次的 shell 發布比，
+    還沒發過 shell 更新時也當成有變。"""
     since = fallback
     if receipt:
         release = json.loads((ZUIN / receipt["directory"] / "release.json").read_text(encoding="utf-8"))
@@ -114,19 +115,21 @@ def shell_changed(receipt, fallback):
         if subprocess.run(["git", "cat-file", "-e", release["revision"] + "^{commit}"], cwd=ROOT,
                           capture_output=True).returncode == 0:
             since = release["revision"]
+    if not since:
+        return True
     return bool(git(ROOT, "diff", "--name-only", since, "--", *SHELL_PATHS)
                 or git(ROOT, "ls-files", "--others", "--exclude-standard", "--", *SHELL_PATHS))
 
 
-def stage_install(archive, shell):
+def stage_install(archive, shell, allow_downgrade):
     """安裝腳本與它讀的 install.json 放在 build\\local-preview\\；用新版的 0c-update 安裝，先從套件取出來。"""
     updater = OUT / "updater/0c-update.exe"
     updater.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(archive) as z, z.open(f"{archive.stem}/0c-update.exe") as source, updater.open("wb") as target:
         shutil.copyfileobj(source, target)
     sha256 = archive.with_suffix(".zip.sha256").read_text(encoding="utf-8").split()[0]
-    (OUT / "install.json").write_text(json.dumps({"archive": str(archive), "sha256": sha256, "shell_changed": shell}),
-                                      encoding="utf-8")
+    (OUT / "install.json").write_text(json.dumps({"archive": str(archive), "sha256": sha256, "shell_changed": shell,
+                                                  "allow_downgrade": allow_downgrade}), encoding="utf-8")
     script = OUT / "install.ps1"
     shutil.copyfile(Path(__file__).parent / "local_install.ps1", script)
     return script
@@ -136,6 +139,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", help="指定版本號（預設自動遞增）")
     parser.add_argument("--install", action="store_true", help="打包完直接執行安裝腳本（會跳 UAC）")
+    parser.add_argument("--allow-downgrade", action="store_true", help="版號沒有比已安裝的新時照樣裝")
     args = parser.parse_args()
     os.environ["PYTHONUTF8"] = "1"  # 打包腳本讀寫的中文檔案都是 UTF-8
     state = json.loads((ROOT / "hoshi/fork-state.json").read_text(encoding="utf-8"))
@@ -147,8 +151,9 @@ def main():
     version = args.version or next_version(base, installed)
     started = time.monotonic()
     try:
-        if installed and semver(version) <= semver(installed):
-            raise ValueError(f"{version} 沒有比已安裝的 {installed} 新，裝不上去；先 rebase 到最新的 main，或用 --version 指定")
+        if installed and semver(version) <= semver(installed) and not args.allow_downgrade:
+            raise ValueError(f"{version} 沒有比已安裝的 {installed} 新，裝不上去；先 rebase 到最新的 main，"
+                             "或用 --version 指定、--allow-downgrade 照樣裝")
         data = ensure_data(tag)
         neural = ensure_neural(tag, receipt, data)
         settings = OUT / "settings"
@@ -165,7 +170,7 @@ def main():
             if not old.name.startswith(archive.name):
                 old.unlink()
         shell = shell_changed(receipt, state["shell_commit"])
-        script = stage_install(archive, shell)
+        script = stage_install(archive, shell, args.allow_downgrade)
         print(f"已打包 {version}（{time.monotonic() - started:.0f} 秒）：{archive}", flush=True)
         print("這版改到 TSF DLL 或候選窗，裝完已經開著的應用程式要重新開啟。" if shell else "這版只改引擎，裝完直接生效。", flush=True)
         if args.install:

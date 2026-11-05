@@ -1,6 +1,6 @@
 name: Fork release
 
-# 每 12 小時查一次官方（0c-biggo/0c-ime）的最新 release：有新版就合併、測試、打包、簽章並發布
+# 每 12 小時查一次官方（0c-biggo/0c-ime）的最新 release：有新版就合併、測試、打包並發布
 # <官方版號>-hoshi.1；沒有新版時只續簽更新索引（剩不到 7 天才簽）。手動執行可勾選 release，
 # 用目前的官方版號發布 fork 自己的修改（hoshi.N 加一）。狀態記在 hoshi/fork-state.json。
 on:
@@ -99,7 +99,7 @@ jobs:
     needs: [plan, neural]
     runs-on: windows-2025
     timeout-minutes: 150
-    # 簽章 secret 只在這個 environment；它只允許 main 分支取用。
+    # 索引簽章的 secret 只在這個 environment；它只允許 main 分支取用。
     environment: release
     permissions:
       contents: write
@@ -181,24 +181,14 @@ jobs:
           name: data
           path: assets/data
 
+      # 不做 Authenticode 簽章：更新器只認索引的 ed25519 簽名，TSF 載入 DLL 也不看 Authenticode。
       - name: Build package
-        env:
-          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
-          SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
         run: |
           python scripts/build_settings_windows.py --version $env:VERSION --out build/settings
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
-          # signtool verify /pa 要能建出信任鏈，自簽憑證先放進這台 runner 的根憑證。
-          Import-Certificate -FilePath hoshi/windows/codesign.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-          $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1).FullName
           python scripts/package_windows.py --data assets/data --neural build/neural-windows-amd64 --settings build/settings/windows-amd64 `
-            --release-docs hoshi/windows --version $env:VERSION --out build/release `
-            --signtool $signtool --sign-pfx $pfx --publisher $env:PUBLISHER
-          $code = $LASTEXITCODE
-          Remove-Item $pfx
-          if ($code -ne 0) { exit 1 }
+            --release-docs hoshi/windows --version $env:VERSION --out build/release --unsigned --publisher $env:PUBLISHER
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Sign feed and publish
         env:
@@ -222,7 +212,7 @@ jobs:
           git push $remote HEAD:main
           if ($LASTEXITCODE -ne 0) { exit 1 }
           # 合併模式加了 upstream remote，不指定 --repo 的話 gh 會選到官方的 repo。
-          gh release create $env:TAG $zip "$zip.sha256" build/release/public-beta.json build/release/public-beta.json.sig hoshi/windows/codesign.cer `
+          gh release create $env:TAG $zip "$zip.sha256" build/release/public-beta.json build/release/public-beta.json.sig `
             --repo $env:GITHUB_REPOSITORY --target (git rev-parse HEAD) --latest --title "靈犀注音 hoshi $env:VERSION" `
             --notes "官方 $env:BASE 的 hoshi 版（$env:KIND 更新）。第一次安裝請看 hoshi/windows/INSTALL.md。"
           if ($LASTEXITCODE -ne 0) { exit 1 }
