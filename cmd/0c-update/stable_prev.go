@@ -19,9 +19,10 @@ var keepsPreviousUpdater = runtime.GOOS == "windows"
 // previousUpdater 是上一版更新器的位置，跟穩定副本同一個目錄。
 func previousUpdater(base string) string { return filepath.Join(base, "bin", updatew.PreviousName) }
 
-// replaceStableUpdater 把排程用的穩定副本換成 src。Windows 上換下來的那一份改名為 0c-update.prev.exe（只留一份），
+// replaceStableCopy 把排程用的穩定副本換成 src。Windows 上換下來的那一份改名為 0c-update.prev.exe（只留一份），
 // 讓啟動器在新版有問題時有東西可以退回；換下來的是啟動器已判定異常的那一份時不保留，留著原本可用的上一版。
-func replaceStableUpdater(src, base string) error {
+// fork 由 replaceStableUpdater（fork_updates.go）包一層。
+func replaceStableCopy(src, base string) error {
 	dst := stableUpdater(base)
 	if !keepsPreviousUpdater {
 		return replaceUpdater(src, dst)

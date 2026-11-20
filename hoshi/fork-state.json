@@ -1,0 +1,11 @@
+{
+  "upstream": "v0.2.13",
+  "publisher": "Hoshi 0c-ime fork",
+  "shell_paths": [
+    "platforms/windows/tsf",
+    "platforms/windows/ui",
+    "platforms/windows/common",
+    "platforms/windows/Cargo.toml",
+    "platforms/windows/Cargo.lock"
+  ]
+}

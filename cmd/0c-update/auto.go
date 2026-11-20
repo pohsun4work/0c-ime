@@ -21,8 +21,8 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
 
-// DefaultFeed 是正式發布的已簽章索引（S3 bucket 0c-releases，公開路徑 https://s3.biggo.com/0c-releases/<key>）。
-const DefaultFeed = "https://s3.biggo.com/0c-releases/feeds/public-beta.json"
+// DefaultFeed 是 fork 的已簽章索引，掛在最新 release 的資產上（.github/workflows/hoshi-release.yml）。
+const DefaultFeed = "https://github.com/pohsun4work/0c-ime/releases/latest/download/public-beta.json"
 
 // pointerSince 是第一個認得引擎指標的完整安裝版本；更舊的外殼只能以完整安裝更新。
 const pointerSince = "0.1.0-dev.18"
@@ -730,14 +730,16 @@ func setFeed(base, feed string) error {
 	} else if !strings.HasPrefix(feed, "https://") {
 		return fmt.Errorf("更新索引必須是 HTTPS 網址")
 	}
-	return editState(base, func(s *autoupdate.State) {
-		if s.Feed != feed {
-			// 不同的索引有各自的序號；前一個索引的失敗與退避不延後新索引的查詢。
-			s.Feed, s.FeedSerial = feed, 0
-			s.NextCheck, s.CheckFailures, s.LastError = time.Time{}, 0, ""
-			s.LastCheck = time.Time{}
-		}
-	})
+	return editState(base, func(s *autoupdate.State) { pointFeed(s, feed) })
+}
+
+// pointFeed 改用 feed（"" 是內建索引）。不同的索引有各自的序號；前一個索引的失敗與退避不延後新索引的查詢。
+func pointFeed(s *autoupdate.State, feed string) {
+	if s.Feed != feed {
+		s.Feed, s.FeedSerial = feed, 0
+		s.NextCheck, s.CheckFailures, s.LastError = time.Time{}, 0, ""
+		s.LastCheck = time.Time{}
+	}
 }
 
 // directAfterInstall 是 after-install 指令要做的事（測試換掉：go test 不動這台機器的 systemd 排程）。
