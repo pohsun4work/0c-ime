@@ -1,0 +1,1038 @@
+# 華碩參考：want 是華碩注音實測（2026-11-05～06，record/ime-probe/asus-ime/asus-typo.tsv）打完按 Esc 前的畫面，「捰」改成「我」。
+# 不是規格的目標：華碩選字跟靈犀不同，規格也有刻意不照華碩的部分。報告的正確率是「跟華碩一樣的比例」，只供參考。
+# profile: user
+# match: asus
+id	keys	want	note
+typo-0001	qqwu//6	停	redundant-4
+typo-0002	qwu//6	停	redundant-4
+typo-0003	qqwu/6	停	redundant-4
+typo-0004	qqqwu/6	停	redundant-4
+typo-0005	ggck6	gg合	redundant-4
+typo-0006	gcck6	g合	redundant-4
+typo-0007	xxwu/6	xx停	redundant-4
+typo-0008	sswu/6	停	redundant-4
+typo-0009	gkgk6	gkg額	redundant-4
+typo-0010	gkgk4	gkg惡	redundant-4
+typo-0011	gkgk3	gkg噁	redundant-4
+typo-0012	hellogkgk6	hellogkg額	redundant-4
+typo-0013	hkg6	什	adj-1
+typo-0014	fkg6	什	adj-1
+typo-0015	tkg6	什	adj-1
+typo-0016	ykg6	什	adj-1
+typo-0017	bkg6	什	adj-1
+typo-0018	vkg6	什	adj-1
+typo-0019	ckg6	c什	adj-1
+typo-0020	dkg6	d什	adj-1
+typo-0021	xkg6	x什	adj-1
+typo-0022	akg6	a什	adj-1
+typo-0023	wkg6	w什	adj-1
+typo-0024	ekg6	e什	adj-1
+typo-0025	nkg6	什	adj-1
+typo-0026	zkg6	z什	adj-1
+typo-0027	hgk6	什	adj-1
+typo-0028	fgk6	什	adj-1
+typo-0029	cgk6	c什	adj-1
+typo-0030	dgk6	d什	adj-1
+typo-0031	hkg4	設	adj-1
+typo-0032	gkh4	測	adj-1
+typo-0033	gkc4	g賀	adj-1
+typo-0034	dke4	各	adj-1
+typo-0035	s8a4	罵	adj-1
+typo-0036	a8s4	那	adj-1
+typo-0037	a8z4	法	adj-1
+typo-0038	x8a4	罵	adj-1
+typo-0039	gkl6	韶	adj-1
+typo-0040	gk84	廈	adj-1
+typo-0041	ji3hkg6	我什	adj-1
+typo-0042	hkg6su3	什你	adj-1
+typo-0043	hellohkg6	helloh什	adj-1
+typo-0044	dog6	dog6	adj-1
+typo-0045	fog6	fog6	adj-1
+typo-0046	hog6	誰	adj-1
+typo-0047	hkg␣	奢	adj-1
+typo-0048	hkgk6	hkg額	adj-1
+typo-0049	rkg6	什	adj-2
+typo-0050	xwu/6	x停	adj-2
+typo-0051	ewu/6	停	adj-2
+typo-0052	dwu/6	停	adj-2
+typo-0053	cwu/6	c停	adj-2
+typo-0054	awu/6	停	adj-2
+typo-0055	zwu/6	z停	adj-2
+typo-0056	rwu/6	r停	adj-2
+typo-0057	fwu/6	f停	adj-2
+typo-0058	vwu/6	v停	adj-2
+typo-0059	1wu/6	停	adj-2
+typo-0060	2wu/6	停	adj-2
+typo-0061	5wu/6	5停	adj-2
+typo-0062	gk04	善	adj-2
+typo-0063	gk94	曬	adj-2
+typo-0064	gk;4	上	adj-2
+typo-0065	gk/4	剩	adj-2
+typo-0066	gkp4	甚	adj-2
+typo-0067	su3xwu/6	你x停	adj-2
+typo-0068	xwu/	xwu/	adj-2
+typo-0069	hkg	hkg	adj-2
+typo-0070	ewuu/6	停	adj-2
+typo-0071	cuj4	護	adj-2
+typo-0072	c8z4	c法	adj-2
+typo-0073	z8c4	z8c4	adj-2
+typo-0074	su4	逆	word
+typo-0075	sj4	怒	word
+typo-0076	sm3	女	word
+typo-0077	ru4	計	word
+typo-0078	rm4	句	word
+typo-0079	suj4	怒	word
+typo-0080	sum3	sum3	word
+typo-0081	sjm3	女	word
+typo-0082	smu3	你	word
+typo-0083	rmu4	計	word
+typo-0084	rum4	句	word
+typo-0085	wuq/6	平	word
+typo-0086	wux/6	w零	word
+typo-0087	tygk4	設	word
+typo-0088	hhkg6	什	word
+typo-0089	hkkg6	什	word
+typo-0090	5tk␣	5車	word
+typo-0091	gk6ak7	什麼	word
+typo-0092	hkg6ak7	什麼	word
+typo-0093	ckg6ak7	c什麼	word
+typo-0094	gk6sak7	什麼	word
+typo-0095	gk6hak7	什h麼	word
+typo-0096	ggk6aak7	什麼	word
+typo-0097	g6ru0␣	時間	word
+typo-0098	g6fru0␣	時間	word
+typo-0099	g6cru0␣	實c兼	word
+typo-0100	hg6ru0␣	時間	word
+typo-0101	2u04sl3	電腦	word
+typo-0102	2u04asl3	電as襖	word
+typo-0103	2u04gsl3	電g腦	word
+typo-0104	2u;04sl3	電腦	word
+typo-0105	2ju04sl3	電腦	word
+typo-0106	2mu04sl3	電腦	word
+typo-0107	2uu004ssl3	電腦	word
+typo-0108	ji3ap7	我們	word
+typo-0109	ji3sap7	我sap7	word
+typo-0110	ji3hap7	我ha嗯	word
+typo-0111	vm,6g/␣	學生	word
+typo-0112	vm,6tg/␣	學生	word
+typo-0113	vm,6cg/␣	學c生	word
+typo-0114	cvm,6g/␣	學生	word
+typo-0115	xvm,6g/␣	x學生	word
+typo-0116	vu3cj0␣	喜歡	word
+typo-0117	vu3dcj0␣	喜歡	word
+typo-0118	vu3wcj0␣	洗w歡	word
+typo-0119	wu/6tk␣	停車	word
+typo-0120	qwu/6tk␣	停車	word
+typo-0121	xwu/6tk␣	x停車	word
+typo-0122	wu/6rtk␣	停車	word
+typo-0123	wu/6atk␣	停at痾	word
+typo-0124	g.3ru␣	手機	word
+typo-0125	hg.3ru␣	手機	word
+typo-0126	cg.3ru␣	c手機	word
+typo-0127	wu0␣fu4	天氣	word
+typo-0128	wu0␣rfu4	天氣	word
+typo-0129	wu0␣xfu4	天x器	word
+typo-0130	ji3rup␣wu0␣cp3d9␣vup␣	我今天很開心	sentence
+typo-0131	ji3rup␣qwu0␣cp3d9␣vup␣	我今天很開心	sentence
+typo-0132	ji3rup␣xwu0␣cp3d9␣vup␣	我金x天很開心	sentence
+typo-0133	ji3rup␣wu0␣cop3d9␣vup␣	我今天cop3開心	sentence
+typo-0134	ji3ruupp␣wu00␣cp3d99␣vup␣	我今天很開心	sentence
+typo-0135	ji3erup␣qwu0␣xcp3sd9␣cvup␣	我er陰天很開心	sentence
+typo-0136	ji3arup␣xwu0␣gcp3ad9␣zvup␣	我a金x天g很ad唉z新	sentence
+typo-0137	su3ul41j4ul4u4fu3fm4t␣z04	你要不要一起去吃飯	sentence
+typo-0138	asu3ul41j4ul4u4fu3gfm4rt␣az04	as以要不要一起去吃飯	sentence
+typo-0139	gsu3ul41j4ul4u4fu3wfm4bt␣hz04	g你要不要一起w去b吃h飯	sentence
+typo-0140	ji3m/4googlen.␣vmp6	我用google搜尋	sentence
+typo-0141	ji3m/4googlebn.␣vmp6	我用google搜尋	sentence
+typo-0142	ji3m/4google␣n.␣vmp6	我用google␣搜尋	sentence
+typo-0143	hello␣hkg6ak7	hello␣什麼	sentence
+typo-0144	hellohkg6ak7	helloh什麼	sentence
+typo-0145	ji3hkg6ak7	我什麼	sentence
+typo-0146	cip3	很	pair-1
+typo-0147	cop3	cop3	pair-1
+typo-0148	2u04zsl3	電腦	pair-1
+typo-0149	ji3qap7	我們	pair-1
+typo-0150	ji3vap7	我v們	pair-1
+typo-0151	wu/6ytk␣	停車	pair-1
+typo-0152	wu/6ztk␣	停z車	pair-1
+typo-0153	zsu3	你	pair-1
+typo-0154	ji3trup␣	我金	pair-1
+typo-0155	erup␣	er音	pair-1
+typo-0156	trup␣	金	pair-1
+typo-0157	2wu0␣	2天	pair-1
+typo-0158	1qu0␣	1偏	pair-1
+typo-0159	2qu0␣	2偏	pair-1
+typo-0160	5tk4	撤	pair-1
+typo-0161	5t.4	臭	pair-1
+typo-0162	1qu/6	1平	pair-1
+typo-0163	2wu/␣	2聽	pair-1
+typo-0164	aqu04	片	pair-1
+typo-0165	q103	版	pair-1
+typo-0166	tvm4	t續	pair-1
+typo-0167	hellobn.␣	hello搜	pair-1
+typo-0168	googlehkg6	google什	pair-1
+typo-0169	hellohg.3	helloh手	pair-1
+typo-0170	googlecg.3	googlec手	pair-1
+typo-0171	hellockg6	helloc什	pair-1
+typo-0172	hellogk6	hello什	pair-1
+typo-0173	hellosu3	hello你	pair-1
+typo-0174	2wl3	討	pair-2
+typo-0175	2wl4	2套	pair-2
+typo-0176	5t;6	長	pair-2
+typo-0177	5t;4	唱	pair-2
+typo-0178	1qu04	1片	pair-2
+typo-0179	1qj6	葡	pair-2
+typo-0180	2wk4	特	pair-2
+typo-0181	ohkg6	oh什	pair-2
+typo-0182	uhkg6	u什	pair-2
+typo-0183	ihkg6	什	pair-2
+typo-0184	testhkg6	test什	pair-2
+typo-0185	cathkg6	cat什	pair-2
+typo-0186	hellotkg6	hello什	pair-2
+typo-0187	hellohhkg6	helloh什	pair-2
+typo-0188	1l4	爆	init-1 ctl 1
+typo-0189	q;6	旁	init-1 ctl q
+typo-0190	a;6	忙	init-1 ctl a
+typo-0191	z;6	房	init-1 ctl z
+typo-0192	2l4	到	init-1 ctl 2
+typo-0193	w;6	堂	init-1 ctl w
+typo-0194	s06	難	init-1 ctl s
+typo-0195	x06	欄	init-1 ctl x
+typo-0196	e93	改	init-1 ctl e
+typo-0197	d04	看	init-1 ctl d
+typo-0198	c96	還	init-1 ctl c
+typo-0199	ru04	建	init-1 ctl r
+typo-0200	fu06	前	init-1 ctl f
+typo-0201	vu04	現	init-1 ctl v
+typo-0202	5/4	正	init-1 ctl 5
+typo-0203	t;6	長	init-1 ctl t
+typo-0204	g;4	上	init-1 ctl g
+typo-0205	b;4	讓	init-1 ctl b
+typo-0206	y94	在	init-1 ctl y
+typo-0207	h96	才	init-1 ctl h
+typo-0208	n04	散	init-1 ctl n
+typo-0209	1q;6	旁	init-1 1 q
+typo-0210	1a;6	1忙	init-1 1 a
+typo-0211	1z;6	1房	init-1 1 z
+typo-0212	12l4	1到	init-1 1 2
+typo-0213	1w;6	1堂	init-1 1 w
+typo-0214	1s06	1難	init-1 1 s
+typo-0215	1x06	1欄	init-1 1 x
+typo-0216	1e93	1改	init-1 1 e
+typo-0217	1d04	1看	init-1 1 d
+typo-0218	1c96	1還	init-1 1 c
+typo-0219	1ru04	1建	init-1 1 r
+typo-0220	1fu06	1前	init-1 1 f
+typo-0221	1vu04	1現	init-1 1 v
+typo-0222	15/4	15/4	init-1 1 5
+typo-0223	1t;6	1長	init-1 1 t
+typo-0224	1g;4	1上	init-1 1 g
+typo-0225	1b;4	1讓	init-1 1 b
+typo-0226	1y94	1在	init-1 1 y
+typo-0227	1h96	1才	init-1 1 h
+typo-0228	1n04	1散	init-1 1 n
+typo-0229	q1l4	爆	init-1 q 1
+typo-0230	qa;6	忙	init-1 q a
+typo-0231	qz;6	q房	init-1 q z
+typo-0232	q2l4	到	init-1 q 2
+typo-0233	qw;6	堂	init-1 q w
+typo-0234	qs06	難	init-1 q s
+typo-0235	qx06	q欄	init-1 q x
+typo-0236	qe93	q改	init-1 q e
+typo-0237	qd04	q看	init-1 q d
+typo-0238	qc96	q還	init-1 q c
+typo-0239	qru04	q建	init-1 q r
+typo-0240	qfu06	q前	init-1 q f
+typo-0241	qvu04	q現	init-1 q v
+typo-0242	q5/4	q5/4	init-1 q 5
+typo-0243	qt;6	q長	init-1 q t
+typo-0244	qg;4	q上	init-1 q g
+typo-0245	qb;4	q讓	init-1 q b
+typo-0246	qy94	q在	init-1 q y
+typo-0247	qh96	q才	init-1 q h
+typo-0248	qn04	q散	init-1 q n
+typo-0249	a1l4	a爆	init-1 a 1
+typo-0250	aq;6	旁	init-1 a q
+typo-0251	az;6	房	init-1 a z
+typo-0252	a2l4	a到	init-1 a 2
+typo-0253	aw;6	堂	init-1 a w
+typo-0254	as06	as06	init-1 a s
+typo-0255	ax06	欄	init-1 a x
+typo-0256	ae93	a改	init-1 a e
+typo-0257	ad04	ad04	init-1 a d
+typo-0258	ac96	a還	init-1 a c
+typo-0259	aru04	a建	init-1 a r
+typo-0260	afu06	a前	init-1 a f
+typo-0261	avu04	a現	init-1 a v
+typo-0262	a5/4	a5/4	init-1 a 5
+typo-0263	at;6	at昂	init-1 a t
+typo-0264	ag;4	a上	init-1 a g
+typo-0265	ab;4	a讓	init-1 a b
+typo-0266	ay94	a在	init-1 a y
+typo-0267	ah96	ah96	init-1 a h
+typo-0268	an04	an04	init-1 a n
+typo-0269	z1l4	z爆	init-1 z 1
+typo-0270	zq;6	z旁	init-1 z q
+typo-0271	za;6	忙	init-1 z a
+typo-0272	z2l4	z到	init-1 z 2
+typo-0273	zw;6	z堂	init-1 z w
+typo-0274	zs06	難	init-1 z s
+typo-0275	zx06	欄	init-1 z x
+typo-0276	ze93	z改	init-1 z e
+typo-0277	zd04	z看	init-1 z d
+typo-0278	zc96	z還	init-1 z c
+typo-0279	zru04	z建	init-1 z r
+typo-0280	zfu06	z前	init-1 z f
+typo-0281	zvu04	z現	init-1 z v
+typo-0282	z5/4	z5/4	init-1 z 5
+typo-0283	zt;6	z長	init-1 z t
+typo-0284	zg;4	z上	init-1 z g
+typo-0285	zb;4	z讓	init-1 z b
+typo-0286	zy94	z在	init-1 z y
+typo-0287	zh96	z才	init-1 z h
+typo-0288	zn04	z散	init-1 z n
+typo-0289	21l4	21奧	init-1 2 1
+typo-0290	2q;6	旁	init-1 2 q
+typo-0291	2a;6	2忙	init-1 2 a
+typo-0292	2z;6	2房	init-1 2 z
+typo-0293	2w;6	2堂	init-1 2 w
+typo-0294	2s06	2難	init-1 2 s
+typo-0295	2x06	2欄	init-1 2 x
+typo-0296	2e93	改	init-1 2 e
+typo-0297	2d04	2看	init-1 2 d
+typo-0298	2c96	2還	init-1 2 c
+typo-0299	2ru04	2建	init-1 2 r
+typo-0300	2fu06	2前	init-1 2 f
+typo-0301	2vu04	2現	init-1 2 v
+typo-0302	25/4	25/4	init-1 2 5
+typo-0303	2t;6	2長	init-1 2 t
+typo-0304	2g;4	2上	init-1 2 g
+typo-0305	2b;4	2讓	init-1 2 b
+typo-0306	2y94	2在	init-1 2 y
+typo-0307	2h96	2才	init-1 2 h
+typo-0308	2n04	2散	init-1 2 n
+typo-0309	w1l4	爆	init-2 w 1
+typo-0310	wq;6	旁	init-2 w q
+typo-0311	wa;6	忙	init-2 w a
+typo-0312	wz;6	w房	init-2 w z
+typo-0313	w2l4	到	init-2 w 2
+typo-0314	ws06	難	init-2 w s
+typo-0315	wx06	w欄	init-2 w x
+typo-0316	we93	we93	init-2 w e
+typo-0317	wd04	看	init-2 w d
+typo-0318	wc96	w還	init-2 w c
+typo-0319	wru/4	w競	init-2 w r
+typo-0320	wfu06	w前	init-2 w f
+typo-0321	wvu04	w現	init-2 w v
+typo-0322	w5k4	w這	init-2 w 5
+typo-0323	wt;6	w長	init-2 w t
+typo-0324	wg;4	w上	init-2 w g
+typo-0325	wb;4	w讓	init-2 w b
+typo-0326	wy94	w在	init-2 w y
+typo-0327	wh96	w才	init-2 w h
+typo-0328	wn04	w散	init-2 w n
+typo-0329	s1l4	s爆	init-2 s 1
+typo-0330	sq;6	旁	init-2 s q
+typo-0331	sa;6	忙	init-2 s a
+typo-0332	sz;6	房	init-2 s z
+typo-0333	s2l4	s到	init-2 s 2
+typo-0334	sw;6	堂	init-2 s w
+typo-0335	sx06	欄	init-2 s x
+typo-0336	se93	改	init-2 s e
+typo-0337	sd04	看	init-2 s d
+typo-0338	sc96	還	init-2 s c
+typo-0339	sru/4	s競	init-2 s r
+typo-0340	sfu06	s前	init-2 s f
+typo-0341	svu04	s現	init-2 s v
+typo-0342	s5k4	s這	init-2 s 5
+typo-0343	st;6	s長	init-2 s t
+typo-0344	sg;4	s上	init-2 s g
+typo-0345	sb;4	s讓	init-2 s b
+typo-0346	sy94	s在	init-2 s y
+typo-0347	sh96	s才	init-2 s h
+typo-0348	sn04	s散	init-2 s n
+typo-0349	x1l4	x爆	init-2 x 1
+typo-0350	xq;6	x旁	init-2 x q
+typo-0351	xa;6	忙	init-2 x a
+typo-0352	xz;6	房	init-2 x z
+typo-0353	x2l4	x到	init-2 x 2
+typo-0354	xw;6	x堂	init-2 x w
+typo-0355	xs06	難	init-2 x s
+typo-0356	xe93	x改	init-2 x e
+typo-0357	xd04	看	init-2 x d
+typo-0358	xc96	還	init-2 x c
+typo-0359	xru/4	x競	init-2 x r
+typo-0360	xfu06	x前	init-2 x f
+typo-0361	xvu04	x現	init-2 x v
+typo-0362	x5k4	x這	init-2 x 5
+typo-0363	xt;6	x長	init-2 x t
+typo-0364	xg;4	x上	init-2 x g
+typo-0365	xb;4	x讓	init-2 x b
+typo-0366	xy94	x在	init-2 x y
+typo-0367	xh96	x才	init-2 x h
+typo-0368	xn04	x散	init-2 x n
+typo-0369	e1l4	e爆	init-2 e 1
+typo-0370	eq;6	e旁	init-2 e q
+typo-0371	ea;6	e忙	init-2 e a
+typo-0372	ez;6	e房	init-2 e z
+typo-0373	e2l4	到	init-2 e 2
+typo-0374	ew;6	堂	init-2 e w
+typo-0375	es06	難	init-2 e s
+typo-0376	ex06	ex06	init-2 e x
+typo-0377	ed04	ed04	init-2 e d
+typo-0378	ec96	e還	init-2 e c
+typo-0379	eru/4	er硬	init-2 e r
+typo-0380	efu06	前	init-2 e f
+typo-0381	evu04	e現	init-2 e v
+typo-0382	e5k4	e這	init-2 e 5
+typo-0383	et;6	e長	init-2 e t
+typo-0384	eg;4	e上	init-2 e g
+typo-0385	eb;4	e讓	init-2 e b
+typo-0386	ey94	e在	init-2 e y
+typo-0387	eh96	eh96	init-2 e h
+typo-0388	en04	en04	init-2 e n
+typo-0389	d1l4	d爆	init-2 d 1
+typo-0390	dq;6	d旁	init-2 d q
+typo-0391	da;6	d忙	init-2 d a
+typo-0392	dz;6	d房	init-2 d z
+typo-0393	d2l4	d到	init-2 d 2
+typo-0394	dw;6	堂	init-2 d w
+typo-0395	ds06	難	init-2 d s
+typo-0396	dx06	欄	init-2 d x
+typo-0397	de93	de93	init-2 d e
+typo-0398	dc96	還	init-2 d c
+typo-0399	dru/4	競	init-2 d r
+typo-0400	dfu06	前	init-2 d f
+typo-0401	dvu04	現	init-2 d v
+typo-0402	d5k4	d這	init-2 d 5
+typo-0403	dt;6	d長	init-2 d t
+typo-0404	dg;4	d上	init-2 d g
+typo-0405	db;4	d讓	init-2 d b
+typo-0406	dy94	d在	init-2 d y
+typo-0407	dh96	d才	init-2 d h
+typo-0408	dn04	d散	init-2 d n
+typo-0409	c1l4	c爆	init-3 c 1
+typo-0410	cq;6	c旁	init-3 c q
+typo-0411	ca;6	c忙	init-3 c a
+typo-0412	cz;6	c房	init-3 c z
+typo-0413	c2l4	c到	init-3 c 2
+typo-0414	cw;6	c堂	init-3 c w
+typo-0415	cs06	難	init-3 c s
+typo-0416	cx06	欄	init-3 c x
+typo-0417	ce93	c改	init-3 c e
+typo-0418	cd04	看	init-3 c d
+typo-0419	cru/4	c競	init-3 c r
+typo-0420	cfu06	前	init-3 c f
+typo-0421	cvu04	現	init-3 c v
+typo-0422	c5k4	c這	init-3 c 5
+typo-0423	ct;6	c長	init-3 c t
+typo-0424	cg;4	c上	init-3 c g
+typo-0425	cb;4	c讓	init-3 c b
+typo-0426	cy94	c在	init-3 c y
+typo-0427	ch96	c才	init-3 c h
+typo-0428	cn04	c散	init-3 c n
+typo-0429	r1l4	r爆	init-3 r 1
+typo-0430	rq;6	r旁	init-3 r q
+typo-0431	ra;6	r忙	init-3 r a
+typo-0432	rz;6	r房	init-3 r z
+typo-0433	r2l4	r到	init-3 r 2
+typo-0434	rw;6	r堂	init-3 r w
+typo-0435	rs06	r難	init-3 r s
+typo-0436	rx06	r欄	init-3 r x
+typo-0437	re93	re93	init-3 r e
+typo-0438	rd04	看	init-3 r d
+typo-0439	rc96	r還	init-3 r c
+typo-0440	rfu06	前	init-3 r f
+typo-0441	rvu04	r現	init-3 r v
+typo-0442	r5k4	這	init-3 r 5
+typo-0443	rt;6	長	init-3 r t
+typo-0444	rg;4	上	init-3 r g
+typo-0445	rb;4	r讓	init-3 r b
+typo-0446	ry94	r在	init-3 r y
+typo-0447	rh96	r才	init-3 r h
+typo-0448	rn04	r散	init-3 r n
+typo-0449	f1l4	f爆	init-3 f 1
+typo-0450	fq;6	f旁	init-3 f q
+typo-0451	fa;6	f忙	init-3 f a
+typo-0452	fz;6	f房	init-3 f z
+typo-0453	f2l4	f到	init-3 f 2
+typo-0454	fw;6	f堂	init-3 f w
+typo-0455	fs06	f難	init-3 f s
+typo-0456	fx06	f欄	init-3 f x
+typo-0457	fe93	改	init-3 f e
+typo-0458	fd04	看	init-3 f d
+typo-0459	fc96	還	init-3 f c
+typo-0460	fru/4	競	init-3 f r
+typo-0461	fvu04	現	init-3 f v
+typo-0462	f5k4	f這	init-3 f 5
+typo-0463	ft;6	長	init-3 f t
+typo-0464	fg;4	上	init-3 f g
+typo-0465	fb;4	讓	init-3 f b
+typo-0466	fy94	f在	init-3 f y
+typo-0467	fh96	f才	init-3 f h
+typo-0468	fn04	f散	init-3 f n
+typo-0469	v1l4	v爆	init-3 v 1
+typo-0470	vq;6	v旁	init-3 v q
+typo-0471	va;6	v忙	init-3 v a
+typo-0472	vz;6	v房	init-3 v z
+typo-0473	v2l4	v到	init-3 v 2
+typo-0474	vw;6	v堂	init-3 v w
+typo-0475	vs06	v難	init-3 v s
+typo-0476	vx06	v欄	init-3 v x
+typo-0477	ve93	v改	init-3 v e
+typo-0478	vd04	看	init-3 v d
+typo-0479	vc96	還	init-3 v c
+typo-0480	vru/4	v競	init-3 v r
+typo-0481	vfu06	前	init-3 v f
+typo-0482	v5k4	v這	init-3 v 5
+typo-0483	vt;6	v長	init-3 v t
+typo-0484	vg;4	上	init-3 v g
+typo-0485	vb;4	讓	init-3 v b
+typo-0486	vy94	v在	init-3 v y
+typo-0487	vh96	v才	init-3 v h
+typo-0488	vn04	v散	init-3 v n
+typo-0489	51l4	5爆	init-3 5 1
+typo-0490	5q;6	5旁	init-3 5 q
+typo-0491	5a;6	5忙	init-3 5 a
+typo-0492	5z;6	5房	init-3 5 z
+typo-0493	52l4	5到	init-3 5 2
+typo-0494	5w;6	5堂	init-3 5 w
+typo-0495	5s06	5難	init-3 5 s
+typo-0496	5x06	5欄	init-3 5 x
+typo-0497	5e93	5改	init-3 5 e
+typo-0498	5d04	5看	init-3 5 d
+typo-0499	5c96	5還	init-3 5 c
+typo-0500	5ru/4	競	init-3 5 r
+typo-0501	5fu06	5前	init-3 5 f
+typo-0502	5vu04	5現	init-3 5 v
+typo-0503	5t;6	長	init-3 5 t
+typo-0504	5g;4	5上	init-3 5 g
+typo-0505	5b;4	5讓	init-3 5 b
+typo-0506	5y94	在	init-3 5 y
+typo-0507	5h96	5才	init-3 5 h
+typo-0508	5n04	5散	init-3 5 n
+typo-0509	t1l4	t爆	init-4 t 1
+typo-0510	tq;6	t旁	init-4 t q
+typo-0511	ta;6	ta昂	init-4 t a
+typo-0512	tz;6	t房	init-4 t z
+typo-0513	t2l4	t到	init-4 t 2
+typo-0514	tw;6	t堂	init-4 t w
+typo-0515	ts06	t難	init-4 t s
+typo-0516	tx06	t欄	init-4 t x
+typo-0517	te93	t改	init-4 t e
+typo-0518	td04	t看	init-4 t d
+typo-0519	tc96	t還	init-4 t c
+typo-0520	tru/4	競	init-4 t r
+typo-0521	tfu06	前	init-4 t f
+typo-0522	tvu04	t現	init-4 t v
+typo-0523	t5k4	這	init-4 t 5
+typo-0524	tg;4	上	init-4 t g
+typo-0525	tb;4	t讓	init-4 t b
+typo-0526	ty94	在	init-4 t y
+typo-0527	th96	才	init-4 t h
+typo-0528	tn04	t散	init-4 t n
+typo-0529	g1l4	g爆	init-4 g 1
+typo-0530	gq;6	g旁	init-4 g q
+typo-0531	ga;6	g忙	init-4 g a
+typo-0532	gz;6	g房	init-4 g z
+typo-0533	g2l4	g到	init-4 g 2
+typo-0534	gw;6	g堂	init-4 g w
+typo-0535	gs06	g難	init-4 g s
+typo-0536	gx06	g欄	init-4 g x
+typo-0537	ge93	g改	init-4 g e
+typo-0538	gd04	g看	init-4 g d
+typo-0539	gc96	g還	init-4 g c
+typo-0540	gru/4	競	init-4 g r
+typo-0541	gfu06	前	init-4 g f
+typo-0542	gvu04	現	init-4 g v
+typo-0543	g5k4	g這	init-4 g 5
+typo-0544	gt;6	長	init-4 g t
+typo-0545	gb;4	讓	init-4 g b
+typo-0546	gy94	在	init-4 g y
+typo-0547	gh96	才	init-4 g h
+typo-0548	gn04	散	init-4 g n
+typo-0549	b1l4	b爆	init-4 b 1
+typo-0550	bq;6	b旁	init-4 b q
+typo-0551	ba;6	b忙	init-4 b a
+typo-0552	bz;6	b房	init-4 b z
+typo-0553	b2l4	b到	init-4 b 2
+typo-0554	bw;6	b堂	init-4 b w
+typo-0555	bs06	b難	init-4 b s
+typo-0556	bx06	b欄	init-4 b x
+typo-0557	be93	be93	init-4 b e
+typo-0558	bd04	b看	init-4 b d
+typo-0559	bc96	b還	init-4 b c
+typo-0560	bru/4	b競	init-4 b r
+typo-0561	bfu06	前	init-4 b f
+typo-0562	bvu04	現	init-4 b v
+typo-0563	b5k4	b這	init-4 b 5
+typo-0564	bt;6	b長	init-4 b t
+typo-0565	bg;4	上	init-4 b g
+typo-0566	by94	by94	init-4 b y
+typo-0567	bh96	才	init-4 b h
+typo-0568	bn04	散	init-4 b n
+typo-0569	y1l4	y爆	init-4 y 1
+typo-0570	yq;6	y旁	init-4 y q
+typo-0571	ya;6	y忙	init-4 y a
+typo-0572	yz;6	y房	init-4 y z
+typo-0573	y2l4	y到	init-4 y 2
+typo-0574	yw;6	y堂	init-4 y w
+typo-0575	ys06	y難	init-4 y s
+typo-0576	yx06	y欄	init-4 y x
+typo-0577	ye93	ye93	init-4 y e
+typo-0578	yd04	y看	init-4 y d
+typo-0579	yc96	y還	init-4 y c
+typo-0580	yru/4	y競	init-4 y r
+typo-0581	yfu06	y前	init-4 y f
+typo-0582	yvu04	y現	init-4 y v
+typo-0583	y5k4	這	init-4 y 5
+typo-0584	yt;6	長	init-4 y t
+typo-0585	yg;4	上	init-4 y g
+typo-0586	yb;4	y讓	init-4 y b
+typo-0587	yh96	才	init-4 y h
+typo-0588	yn04	y散	init-4 y n
+typo-0589	h1l4	h爆	init-4 h 1
+typo-0590	hq;6	h旁	init-4 h q
+typo-0591	ha;6	ha昂	init-4 h a
+typo-0592	hz;6	h房	init-4 h z
+typo-0593	h2l4	h到	init-4 h 2
+typo-0594	hw;6	h堂	init-4 h w
+typo-0595	hs06	h難	init-4 h s
+typo-0596	hx06	h欄	init-4 h x
+typo-0597	he93	he93	init-4 h e
+typo-0598	hd04	h看	init-4 h d
+typo-0599	hc96	h還	init-4 h c
+typo-0600	hru/4	hr硬	init-4 h r
+typo-0601	hfu06	h前	init-4 h f
+typo-0602	hvu04	h現	init-4 h v
+typo-0603	h5k4	h這	init-4 h 5
+typo-0604	ht;6	長	init-4 h t
+typo-0605	hg;4	上	init-4 h g
+typo-0606	hb;4	讓	init-4 h b
+typo-0607	hy94	在	init-4 h y
+typo-0608	hn04	散	init-4 h n
+typo-0609	n1l4	n爆	init-4 n 1
+typo-0610	nq;6	n旁	init-4 n q
+typo-0611	na;6	n忙	init-4 n a
+typo-0612	nz;6	n房	init-4 n z
+typo-0613	n2l4	n到	init-4 n 2
+typo-0614	nw;6	n堂	init-4 n w
+typo-0615	ns06	n難	init-4 n s
+typo-0616	nx06	n欄	init-4 n x
+typo-0617	ne93	n改	init-4 n e
+typo-0618	nd04	n看	init-4 n d
+typo-0619	nc96	n還	init-4 n c
+typo-0620	nru/4	n競	init-4 n r
+typo-0621	nfu06	n前	init-4 n f
+typo-0622	nvu04	n現	init-4 n v
+typo-0623	n5k4	n這	init-4 n 5
+typo-0624	nt;6	nt昂	init-4 n t
+typo-0625	ng;4	上	init-4 n g
+typo-0626	nb;4	讓	init-4 n b
+typo-0627	ny94	n在	init-4 n y
+typo-0628	nh96	才	init-4 n h
+typo-0629	a0s6	難	fix-medial-order afbt a s
+typo-0630	a0d4	a看	fix-medial-order afbt a d
+typo-0631	a;t6	a長	fix-medial-order afbt a t
+typo-0632	a9h6	a才	fix-medial-order afbt a h
+typo-0633	a0n4	a散	fix-medial-order afbt a n
+typo-0634	w9e3	改	fix-medial-order afbt w e
+typo-0635	e0x6	e欄	fix-medial-order afbt e x
+typo-0636	e0d4	看	fix-medial-order afbt e d
+typo-0637	eu/r4	競	fix-medial-order afbt e r
+typo-0638	e9h6	e才	fix-medial-order afbt e h
+typo-0639	e0n4	e散	fix-medial-order afbt e n
+typo-0640	d9e3	改	fix-medial-order afbt d e
+typo-0641	r9e3	改	fix-medial-order afbt r e
+typo-0642	t;a6	t忙	fix-medial-order afbt t a
+typo-0643	b9e3	b改	fix-medial-order afbt b e
+typo-0644	b9y4	b在	fix-medial-order afbt b y
+typo-0645	y9e3	y改	fix-medial-order afbt y e
+typo-0646	h;a6	h忙	fix-medial-order afbt h a
+typo-0647	h9e3	h改	fix-medial-order afbt h e
+typo-0648	hu/r4	h競	fix-medial-order afbt h r
+typo-0649	n;t6	n長	fix-medial-order afbt n t
+typo-0650	15k4	1這	fix-medial-order init 1 5
+typo-0651	q5k4	q這	fix-medial-order init q 5
+typo-0652	a5k4	a這	fix-medial-order init a 5
+typo-0653	z5k4	z這	fix-medial-order init z 5
+typo-0654	25k4	2這	fix-medial-order init 2 5
+typo-0655	5k4	這	fix-medial-order ctl 5
+typo-0656	1w;3	躺	fix-medial-order digit 1 w
+typo-0657	2w;3	躺	fix-medial-order digit 2 w
+typo-0658	12l3	12襖	fix-medial-order digit 1 2
+typo-0659	w;3	躺	fix-medial-order ctl w;3
+typo-0660	2l3	導	fix-medial-order ctl 2l3
+typo-0661	sju3	你	fix-medial-order medial j u
+typo-0662	xju4	力	fix-medial-order medial j u
+typo-0663	smu3	你	fix-medial-order medial m u
+typo-0664	xmu4	力	fix-medial-order medial m u
+typo-0665	suj4	怒	fix-medial-order medial u j
+typo-0666	cuj4	護	fix-medial-order medial u j
+typo-0667	smj4	怒	fix-medial-order medial m j
+typo-0668	cmj4	cm物	fix-medial-order medial m j
+typo-0669	sum3	sum3	fix-medial-order medial u m
+typo-0670	xum4	率	fix-medial-order medial u m
+typo-0671	sjm3	女	fix-medial-order medial j m
+typo-0672	xjm4	率	fix-medial-order medial j m
+typo-0673	su3	你	fix-medial-order ctl su3
+typo-0674	xu4	力	fix-medial-order ctl xu4
+typo-0675	sj4	怒	fix-medial-order ctl sj4
+typo-0676	cj4	護	fix-medial-order ctl cj4
+typo-0677	sm3	女	fix-medial-order ctl sm3
+typo-0678	xm4	率	fix-medial-order ctl xm4
+typo-0679	kg6	什	fix-medial-order order kg6
+typo-0680	0w4	探	fix-medial-order order 0w4
+typo-0681	8a4	罵	fix-medial-order order 8a4
+typo-0682	lg3	少	fix-medial-order order lg3
+typo-0683	.g3	手	fix-medial-order order .g3
+typo-0684	;g4	上	fix-medial-order order ;g4
+typo-0685	/g4	剩	fix-medial-order order /g4
+typo-0686	uw/6	停	fix-medial-order order uw/6
+typo-0687	/uw6	停	fix-medial-order order /uw6
+typo-0688	u/w6	停	fix-medial-order order u/w6
+typo-0689	w/u6	停	fix-medial-order order w/u6
+typo-0690	jc4	護	fix-medial-order order jc4
+typo-0691	mx4	率	fix-medial-order order mx4
+typo-0692	ji3kg6	我什	fix-medial-order order ji3kg6
+typo-0693	kg6ak7	什麼	fix-medial-order order kg6ak7
+typo-0694	ka7	麼	fix-medial-order order ka7
+typo-0695	ur0␣	兼	fix-medial-order order ur0␣
+typo-0696	ju3	以	fix-medial-order order ju3
+typo-0697	g83	傻	final ctl 8
+typo-0698	qi4	破	final ctl i
+typo-0699	gk4	設	final ctl k
+typo-0700	vu,4	謝	final ctl ,
+typo-0701	g94	曬	final ctl 9
+typo-0702	go6	誰	final ctl o
+typo-0703	gl3	少	final ctl l
+typo-0704	g.3	手	final ctl .
+typo-0705	g04	善	final ctl 0
+typo-0706	gp6	神	final ctl p
+typo-0707	g;4	上	final ctl ;
+typo-0708	g/4	剩	final ctl /
+typo-0709	-4	二	final ctl -
+typo-0710	gi83	傻	final final i 8
+typo-0711	gk83	傻	final final k 8
+typo-0712	g,83	傻	final final , 8
+typo-0713	g983	傻	final final 9 8
+typo-0714	go83	go83	final final o 8
+typo-0715	gl83	傻	final final l 8
+typo-0716	g.83	傻	final final . 8
+typo-0717	g083	傻	final final 0 8
+typo-0718	gp83	傻	final final p 8
+typo-0719	g;83	傻	final final ; 8
+typo-0720	g/83	傻	final final / 8
+typo-0721	g-83	傻	final final - 8
+typo-0722	q8i4	破	final final 8 i
+typo-0723	qki4	破	final final k i
+typo-0724	q,i4	破	final final , i
+typo-0725	q9i4	破	final final 9 i
+typo-0726	qoi4	破	final final o i
+typo-0727	qli4	破	final final l i
+typo-0728	q.i4	破	final final . i
+typo-0729	q0i4	破	final final 0 i
+typo-0730	qpi4	破	final final p i
+typo-0731	q;i4	破	final final ; i
+typo-0732	q/i4	破	final final / i
+typo-0733	q-i4	破	final final - i
+typo-0734	g8k4	設	final final 8 k
+typo-0735	gik4	設	final final i k
+typo-0736	g,k4	設	final final , k
+typo-0737	g9k4	設	final final 9 k
+typo-0738	gok4	go惡	final final o k
+typo-0739	glk4	設	final final l k
+typo-0740	g.k4	設	final final . k
+typo-0741	g0k4	設	final final 0 k
+typo-0742	gpk4	設	final final p k
+typo-0743	g;k4	設	final final ; k
+typo-0744	g/k4	設	final final / k
+typo-0745	g-k4	設	final final - k
+typo-0746	vu8,4	謝	final final 8 ,
+typo-0747	vui,4	謝	final final i ,
+typo-0748	vuk,4	謝	final final k ,
+typo-0749	vu9,4	謝	final final 9 ,
+typo-0750	vuo,4	謝	final final o ,
+typo-0751	vul,4	謝	final final l ,
+typo-0752	vu.,4	謝	final final . ,
+typo-0753	vu0,4	謝	final final 0 ,
+typo-0754	vup,4	謝	final final p ,
+typo-0755	vu;,4	謝	final final ; ,
+typo-0756	vu/,4	謝	final final / ,
+typo-0757	vu-,4	謝	final final - ,
+typo-0758	g894	曬	final final 8 9
+typo-0759	gi94	曬	final final i 9
+typo-0760	gk94	曬	final final k 9
+typo-0761	g,94	曬	final final , 9
+typo-0762	go94	go94	final final o 9
+typo-0763	gl94	曬	final final l 9
+typo-0764	g.94	曬	final final . 9
+typo-0765	g094	曬	final final 0 9
+typo-0766	gp94	曬	final final p 9
+typo-0767	g;94	曬	final final ; 9
+typo-0768	g/94	曬	final final / 9
+typo-0769	g-94	曬	final final - 9
+typo-0770	g8o6	誰	final final 8 o
+typo-0771	gio6	誰	final final i o
+typo-0772	gko6	誰	final final k o
+typo-0773	g,o6	誰	final final , o
+typo-0774	g9o6	誰	final final 9 o
+typo-0775	glo6	誰	final final l o
+typo-0776	g.o6	誰	final final . o
+typo-0777	g0o6	誰	final final 0 o
+typo-0778	gpo6	誰	final final p o
+typo-0779	g;o6	誰	final final ; o
+typo-0780	g/o6	誰	final final / o
+typo-0781	g-o6	誰	final final - o
+typo-0782	g8l3	少	final final 8 l
+typo-0783	gil3	少	final final i l
+typo-0784	gkl3	少	final final k l
+typo-0785	g,l3	少	final final , l
+typo-0786	g9l3	少	final final 9 l
+typo-0787	gol3	go襖	final final o l
+typo-0788	g.l3	少	final final . l
+typo-0789	g0l3	少	final final 0 l
+typo-0790	gpl3	少	final final p l
+typo-0791	g;l3	少	final final ; l
+typo-0792	g/l3	少	final final / l
+typo-0793	g-l3	少	final final - l
+typo-0794	g8.3	手	final final 8 .
+typo-0795	gi.3	手	final final i .
+typo-0796	gk.3	手	final final k .
+typo-0797	g,.3	手	final final , .
+typo-0798	g9.3	手	final final 9 .
+typo-0799	go.3	go嘔	final final o .
+typo-0800	gl.3	手	final final l .
+typo-0801	g0.3	手	final final 0 .
+typo-0802	gp.3	手	final final p .
+typo-0803	g;.3	手	final final ; .
+typo-0804	g/.3	手	final final / .
+typo-0805	g-.3	手	final final - .
+typo-0806	g804	善	final final 8 0
+typo-0807	gi04	善	final final i 0
+typo-0808	gk04	善	final final k 0
+typo-0809	g,04	善	final final , 0
+typo-0810	g904	善	final final 9 0
+typo-0811	go04	go04	final final o 0
+typo-0812	gl04	善	final final l 0
+typo-0813	g.04	善	final final . 0
+typo-0814	gp04	善	final final p 0
+typo-0815	g;04	善	final final ; 0
+typo-0816	g/04	善	final final / 0
+typo-0817	g-04	善	final final - 0
+typo-0818	g8p6	神	final final 8 p
+typo-0819	gip6	神	final final i p
+typo-0820	gkp6	神	final final k p
+typo-0821	g,p6	神	final final , p
+typo-0822	g9p6	神	final final 9 p
+typo-0823	gop6	神	final final o p
+typo-0824	glp6	神	final final l p
+typo-0825	g.p6	神	final final . p
+typo-0826	g0p6	神	final final 0 p
+typo-0827	g;p6	神	final final ; p
+typo-0828	g/p6	神	final final / p
+typo-0829	g-p6	神	final final - p
+typo-0830	g8;4	上	final final 8 ;
+typo-0831	gi;4	上	final final i ;
+typo-0832	gk;4	上	final final k ;
+typo-0833	g,;4	上	final final , ;
+typo-0834	g9;4	上	final final 9 ;
+typo-0835	go;4	go盎	final final o ;
+typo-0836	gl;4	上	final final l ;
+typo-0837	g.;4	上	final final . ;
+typo-0838	g0;4	上	final final 0 ;
+typo-0839	gp;4	上	final final p ;
+typo-0840	g/;4	上	final final / ;
+typo-0841	g-;4	上	final final - ;
+typo-0842	g8/4	剩	final final 8 /
+typo-0843	gi/4	剩	final final i /
+typo-0844	gk/4	剩	final final k /
+typo-0845	g,/4	剩	final final , /
+typo-0846	g9/4	剩	final final 9 /
+typo-0847	go/4	剩	final final o /
+typo-0848	gl/4	剩	final final l /
+typo-0849	g./4	剩	final final . /
+typo-0850	g0/4	剩	final final 0 /
+typo-0851	gp/4	剩	final final p /
+typo-0852	g;/4	剩	final final ; /
+typo-0853	g-/4	剩	final final - /
+typo-0854	8-4	8-4	final final 8 -
+typo-0855	i-4	i-4	final final i -
+typo-0856	k-4	k-4	final final k -
+typo-0857	,-4	,二	final final , -
+typo-0858	9-4	9-4	final final 9 -
+typo-0859	o-4	o-4	final final o -
+typo-0860	l-4	l-4	final final l -
+typo-0861	.-4	.二	final final . -
+typo-0862	0-4	0-4	final final 0 -
+typo-0863	p-4	二	final final p -
+typo-0864	;-4	;二	final final ; -
+typo-0865	/-4	/二	final final / -
+typo-0866	xo84	辣	final-repeat-combo final o 8 x
+typo-0867	xok4	樂	final-repeat-combo final o k x
+typo-0868	xo96	來	final-repeat-combo final o 9 x
+typo-0869	xol3	老	final-repeat-combo final o l x
+typo-0870	xo.4	漏	final-repeat-combo final o . x
+typo-0871	xo04	爛	final-repeat-combo final o 0 x
+typo-0872	xo;4	浪	final-repeat-combo final o ; x
+typo-0873	a83	碼	final-repeat-combo rep 8 plain x1 tone
+typo-0874	a883	碼	final-repeat-combo rep 8 plain x2 tone
+typo-0875	a8883	a8883	final-repeat-combo rep 8 plain x3 tone
+typo-0876	a88883	a88883	final-repeat-combo rep 8 plain x4 tone
+typo-0877	a888883	a888883	final-repeat-combo rep 8 plain x5 tone
+typo-0878	a88␣	嗎	final-repeat-combo rep 8 plain x2 space
+typo-0879	a888␣	a888␣	final-repeat-combo rep 8 plain x3 space
+typo-0880	a8888␣	a8888␣	final-repeat-combo rep 8 plain x4 space
+typo-0881	a88888␣	a88888␣	final-repeat-combo rep 8 plain x5 space
+typo-0882	ru84	架	final-repeat-combo rep 8 medial x1 tone
+typo-0883	ru884	架	final-repeat-combo rep 8 medial x2 tone
+typo-0884	ru8884	架	final-repeat-combo rep 8 medial x3 tone
+typo-0885	ru88884	ru88884	final-repeat-combo rep 8 medial x4 tone
+typo-0886	ru888884	ru888884	final-repeat-combo rep 8 medial x5 tone
+typo-0887	ru88␣	家	final-repeat-combo rep 8 medial x2 space
+typo-0888	ru888␣	家	final-repeat-combo rep 8 medial x3 space
+typo-0889	ru8888␣	ru8888␣	final-repeat-combo rep 8 medial x4 space
+typo-0890	ru88888␣	ru88888␣	final-repeat-combo rep 8 medial x5 space
+typo-0891	s94	奈	final-repeat-combo rep 9 plain x1 tone
+typo-0892	s994	奈	final-repeat-combo rep 9 plain x2 tone
+typo-0893	s9994	s9994	final-repeat-combo rep 9 plain x3 tone
+typo-0894	s99994	s99994	final-repeat-combo rep 9 plain x4 tone
+typo-0895	s999994	s999994	final-repeat-combo rep 9 plain x5 tone
+typo-0896	s99␣	s99␣	final-repeat-combo rep 9 plain x2 space
+typo-0897	s999␣	s999␣	final-repeat-combo rep 9 plain x3 space
+typo-0898	s9999␣	s9999␣	final-repeat-combo rep 9 plain x4 space
+typo-0899	s99999␣	s99999␣	final-repeat-combo rep 9 plain x5 space
+typo-0900	cj94	壞	final-repeat-combo rep 9 medial x1 tone
+typo-0901	cj994	壞	final-repeat-combo rep 9 medial x2 tone
+typo-0902	cj9994	壞	final-repeat-combo rep 9 medial x3 tone
+typo-0903	cj99994	cj99994	final-repeat-combo rep 9 medial x4 tone
+typo-0904	cj999994	cj999994	final-repeat-combo rep 9 medial x5 tone
+typo-0905	cj99␣	c歪	final-repeat-combo rep 9 medial x2 space
+typo-0906	cj999␣	cj999␣	final-repeat-combo rep 9 medial x3 space
+typo-0907	cj9999␣	cj9999␣	final-repeat-combo rep 9 medial x4 space
+typo-0908	cj99999␣	cj99999␣	final-repeat-combo rep 9 medial x5 space
+typo-0909	w04	探	final-repeat-combo rep 0 plain x1 tone
+typo-0910	w004	探	final-repeat-combo rep 0 plain x2 tone
+typo-0911	w0004	w0004	final-repeat-combo rep 0 plain x3 tone
+typo-0912	w00004	w00004	final-repeat-combo rep 0 plain x4 tone
+typo-0913	w000004	w000004	final-repeat-combo rep 0 plain x5 tone
+typo-0914	w00␣	攤	final-repeat-combo rep 0 plain x2 space
+typo-0915	w000␣	w000␣	final-repeat-combo rep 0 plain x3 space
+typo-0916	w0000␣	w0000␣	final-repeat-combo rep 0 plain x4 space
+typo-0917	w00000␣	w00000␣	final-repeat-combo rep 0 plain x5 space
+typo-0918	ru04	建	final-repeat-combo rep 0 medial x1 tone
+typo-0919	ru004	建	final-repeat-combo rep 0 medial x2 tone
+typo-0920	ru0004	建	final-repeat-combo rep 0 medial x3 tone
+typo-0921	ru00004	ru00004	final-repeat-combo rep 0 medial x4 tone
+typo-0922	ru000004	ru000004	final-repeat-combo rep 0 medial x5 tone
+typo-0923	ru00␣	兼	final-repeat-combo rep 0 medial x2 space
+typo-0924	ru000␣	兼	final-repeat-combo rep 0 medial x3 space
+typo-0925	ru0000␣	ru0000␣	final-repeat-combo rep 0 medial x4 space
+typo-0926	ru00000␣	ru00000␣	final-repeat-combo rep 0 medial x5 space
+typo-0927	2u0004	2u0004	final-repeat-combo rep extra
+typo-0928	2u00004	2u00004	final-repeat-combo rep extra
+typo-0929	2uu0004	2uu0004	final-repeat-combo rep extra
+typo-0930	hkgl6	hkg熬	final-repeat-combo combo hkgl6
+typo-0931	ckgl6	ckg熬	final-repeat-combo combo ckgl6
+typo-0932	hkg;4	hkg盎	final-repeat-combo combo hkg;4
+typo-0933	zsuj4	怒	final-repeat-combo combo zsuj4
+typo-0934	gsuj4	g怒	final-repeat-combo combo gsuj4
+typo-0935	hhkkgg6	hhkkg時	final-repeat-combo combo hhkkgg6
+typo-0936	qqwwuu//6	停	final-repeat-combo combo qqwwuu//6
+typo-0937	zak7	麼	final-repeat-combo combo zak7
+typo-0938	sxk7	了	final-repeat-combo combo sxk7
+typo-0939	dxk7	了	final-repeat-combo combo dxk7
+typo-0940	vak7	v麼	final-repeat-combo combo vak7
+typo-0941	qwu0␣	天	final-repeat-combo combo qwu0␣
+typo-0942	xwu0␣	x天	final-repeat-combo combo xwu0␣
+typo-0943	hkg3	捨	final-repeat-combo combo hkg3
+typo-0944	ftg;4	上	final-repeat-combo combo ftg;4
+typo-0945	fcg;4	fc上	final-repeat-combo combo fcg;4
+typo-0946	cfg;4	c上	final-repeat-combo combo cfg;4
+typo-0947	ji3qwu0␣	我天	final-repeat-combo combo ji3qwu0␣
+typo-0948	qwu0␣ji3	天我	final-repeat-combo combo qwu0␣ji3
+typo-0949	1q06	1盤	digit-classifier cls 1 q06
+typo-0950	1qu/6	1平	digit-classifier cls 1 qu/6
+typo-0951	1q96	1排	digit-classifier cls 1 q96
+typo-0952	1qp6	1盆	digit-classifier cls 1 qp6
+typo-0953	1q84	怕	digit-classifier non 1 q84
+typo-0954	1ql3	跑	digit-classifier non 1 ql3
+typo-0955	1q/6	朋	digit-classifier non 1 q/6
+typo-0956	1q;4	胖	digit-classifier non 1 q;4
+typo-0957	2q06	2盤	digit-classifier cls 2 q06
+typo-0958	2qu/6	2平	digit-classifier cls 2 qu/6
+typo-0959	2q96	2排	digit-classifier cls 2 q96
+typo-0960	2qp6	2盆	digit-classifier cls 2 qp6
+typo-0961	2q84	怕	digit-classifier non 2 q84
+typo-0962	2ql3	跑	digit-classifier non 2 ql3
+typo-0963	2q/6	朋	digit-classifier non 2 q/6
+typo-0964	2q;4	胖	digit-classifier non 2 q;4
+typo-0965	1wul6	1條	digit-classifier cls 1 wul6
+typo-0966	1w96	1台	digit-classifier cls 1 w96
+typo-0967	1wu6	1提	digit-classifier cls 1 wu6
+typo-0968	1w.6	1頭	digit-classifier cls 1 w.6
+typo-0969	1w;4	1燙	digit-classifier cls 1 w;4
+typo-0970	1w94	太	digit-classifier non 1 w94
+typo-0971	1wj/4	痛	digit-classifier non 1 wj/4
+typo-0972	1w06	潭	digit-classifier non 1 w06
+typo-0973	1w8␣	它	digit-classifier non 1 w8␣
+typo-0974	2wul6	2條	digit-classifier cls 2 wul6
+typo-0975	2w96	2台	digit-classifier cls 2 w96
+typo-0976	2wu6	2提	digit-classifier cls 2 wu6
+typo-0977	2w.6	2頭	digit-classifier cls 2 w.6
+typo-0978	2w;4	2燙	digit-classifier cls 2 w;4
+typo-0979	2w94	太	digit-classifier non 2 w94
+typo-0980	2wj/4	痛	digit-classifier non 2 wj/4
+typo-0981	2w06	潭	digit-classifier non 2 w06
+typo-0982	2w8␣	它	digit-classifier non 2 w8␣
+typo-0983	2ek4	各	digit-classifier cls 2 ek4
+typo-0984	2ep␣	2跟	digit-classifier cls 2 ep␣
+typo-0985	2ej04	2灌	digit-classifier cls 2 ej04
+typo-0986	2ej3	2古	digit-classifier cls 2 ej3
+typo-0987	2el␣	高	digit-classifier non 2 el␣
+typo-0988	2eo3	給	digit-classifier non 2 eo3
+typo-0989	2e03	感	digit-classifier non 2 e03
+typo-0990	2e.3	狗	digit-classifier non 2 e.3
+typo-0991	5ru04	5建	digit-classifier cls 5 ru04
+typo-0992	5ru8␣	5家	digit-classifier cls 5 ru8␣
+typo-0993	5rm4	5句	digit-classifier cls 5 rm4
+typo-0994	5rup␣	5金	digit-classifier cls 5 rup␣
+typo-0995	5rul4	叫	digit-classifier non 5 rul4
+typo-0996	5ru.3	久	digit-classifier non 5 ru.3
+typo-0997	5rul3	5角	digit-classifier non 5 rul3
+typo-0998	5rup4	5進	digit-classifier non 5 rup4
+typo-0999	5t;3	5場	digit-classifier cls 5 t;3
+typo-1000	5tj04	5串	digit-classifier cls 5 tj04
+typo-1001	5t3	5尺	digit-classifier cls 5 t3
+typo-1002	5tj4	5畜	digit-classifier cls 5 tj4
+typo-1003	5t␣	吃	digit-classifier non 5 t␣
+typo-1004	5t86	查	digit-classifier non 5 t86
+typo-1005	5tl3	吵	digit-classifier non 5 tl3
+typo-1006	5tj;␣	窗	digit-classifier non 5 tj;␣
+typo-1007	5yji4	5做	digit-classifier cls 5 yji4
+typo-1008	5yj3	5組	digit-classifier cls 5 yj3
+typo-1009	5yk6	5則	digit-classifier cls 5 yk6
+typo-1010	5y4	5字	digit-classifier cls 5 y4
+typo-1011	5y94	在	digit-classifier non 5 y94
+typo-1012	5y.3	走	digit-classifier non 5 y.3
+typo-1013	5yl3	早	digit-classifier non 5 yl3
+typo-1014	5yjo4	最	digit-classifier non 5 yjo4
+typo-1015	1e93	1改	digit-classifier far 1e93
+typo-1016	5w94	5太	digit-classifier far 5w94
+typo-1017	2rul4	2叫	digit-classifier far 2rul4
+typo-1018	1t␣	1吃	digit-classifier far 1t␣
+typo-1019	w9q;6	w9旁	combo-2 combo2 w9q;6
+typo-1020	c8d04	c8看	combo-2 combo2 c8d04
+typo-1021	x9s06	x9難	combo-2 combo2 x9s06
+typo-1022	c9q;6	c9旁	combo-2 combo2 c9q;6
+typo-1023	hkdl3	h考	combo-2 combo2 hkdl3
+typo-1024	wlq;6	旁	combo-3 combo3 wlq;6
+typo-1025	wpq/6	朋	combo-3 combo3 wpq/6
+typo-1026	c.d04	c.看	combo-3 combo3 c.d04
+typo-1027	x/s06	x/難	combo-3 combo3 x/s06
+typo-1028	hpgl3	少	combo-3 combo3 hpgl3
+typo-1029	flg/4	剩	combo-3 combo3 flg/4
+typo-1030	clq;6	c旁	combo-3 combo3 clq;6
+typo-1031	w8q84	怕	combo-3 combo3 w8q84
+typo-1032	w8q;6	w8旁	combo-3 combo3 w8q;6
+typo-1033	wlql3	跑	combo-3 combo3 wlql3
