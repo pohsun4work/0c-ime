@@ -1,0 +1,233 @@
+name: Hoshi release
+
+# 手動執行（main）：測試、打包，發布 v<官方版號>-hoshi.N（N 接著已發布的同官方版號往上加），簽好更新索引。
+# 每天排程：更新索引剩不到 7 天時續簽（有效 14 天，過期的話更新器會拒收）。都不推送到 main。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hoshi-release
+  cancel-in-progress: false
+
+env:
+  FEED_URL: https://github.com/${{ github.repository }}/releases/latest/download/public-beta.json
+  # 腳本讀寫的中文檔案都是 UTF-8；Windows runner 的預設編碼不是。
+  PYTHONUTF8: '1'
+
+jobs:
+  plan:
+    if: github.repository == 'pohsun4work/0c-ime' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.plan.outputs.base }}
+      version: ${{ steps.plan.outputs.version }}
+      previous: ${{ steps.plan.outputs.previous }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - id: plan
+        run: |
+          base=$(jq -r .upstream hoshi/fork-state.json)
+          tags=$(git ls-remote --tags --refs "https://github.com/$GITHUB_REPOSITORY.git" 'refs/tags/v*-hoshi.*' | sed 's#.*refs/tags/##')
+          build=$(printf '%s\n' "$tags" | sed -n "s/^${base//./\\.}-hoshi\.\([0-9]*\)$/\1/p" | sort -n | tail -n 1)
+          version="${base#v}-hoshi.$(( ${build:-0} + 1 ))"
+          previous=$(printf '%s\n' "$tags" | sort -V | tail -n 1)
+          printf 'base=%s\nversion=%s\nprevious=%s\n' "$base" "$version" "$previous" >> "$GITHUB_OUTPUT"
+          echo "官方 $base；上一版 ${previous:-（沒有）}；本次 $version" >> "$GITHUB_STEP_SUMMARY"
+
+  # Checks 只在 Linux 跑；Windows 才編得到的 Go 程式與外殼的測試在這裡跑，跟 neural 並行。
+  test:
+    needs: plan
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - name: Check public source paths
+        run: python scripts/check_public_tree.py
+      - name: Vet Go code
+        run: go vet ./...
+      - name: Test Go code
+        run: go test ./...
+      - name: Add 32-bit Rust target
+        run: rustup target add i686-pc-windows-msvc
+      - name: Test Windows shell
+        working-directory: platforms/windows
+        run: cargo test --locked
+
+  # 可攜 Python 的 bytecode 要用 Linux 版直譯器編（scripts/prepare_neural.py），所以在 Linux 準備；
+  # 用官方那一版的原始碼，跟官方出貨的 neural/ 與字典相同。
+  neural:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: 0c-biggo/0c-ime
+          ref: ${{ needs.plan.outputs.base }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+      - env:
+          BASE: ${{ needs.plan.outputs.base }}
+        run: |
+          python scripts/fetch_assets.py --release "$BASE"
+          python scripts/prepare_neural.py --platform windows-amd64 --dictionary assets/data --models models --out build/neural-windows-amd64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: assets
+          path: |
+            build/neural-windows-amd64
+            assets/data
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    needs: [plan, test, neural]
+    runs-on: windows-2025
+    timeout-minutes: 120
+    # 索引簽章的 secret 只在這個 environment，它只允許 main 取用。
+    environment: release
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE: ${{ needs.plan.outputs.base }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      PREVIOUS: ${{ needs.plan.outputs.previous }}
+      TAG: v${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+
+      # 外殼（TSF DLL、候選窗）跟上一版比有變才發 shell 更新：shell 要系統管理員確認、已開著的應用程式重新開啟才換新，core 在背景完成。
+      - name: Release kind
+        id: kind
+        run: |
+          $fork = Get-Content hoshi/fork-state.json -Raw | ConvertFrom-Json
+          $kind = "shell"
+          if ($env:PREVIOUS) {
+            $changed = git diff --name-only $env:PREVIOUS HEAD -- @($fork.shell_paths)
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            if (-not $changed) { $kind = "core" }
+          }
+          "kind=$kind" | Out-File $env:GITHUB_OUTPUT -Append
+          "publisher=$($fork.publisher)" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: assets
+
+      - name: Build settings
+        run: python scripts/build_settings_windows.py --version $env:VERSION --out build/settings
+      # 不做 Authenticode 簽章：更新器只認索引的 ed25519 簽名，TSF 載入 DLL 也不看 Authenticode。
+      - name: Build package
+        env:
+          PUBLISHER: ${{ steps.kind.outputs.publisher }}
+        run: >-
+          python scripts/package_windows.py --data assets/data --neural build/neural-windows-amd64 --settings build/settings/windows-amd64
+          --release-docs hoshi/windows --version $env:VERSION --out build/release --unsigned --publisher $env:PUBLISHER
+
+      - name: Sign feed and publish
+        env:
+          KIND: ${{ steps.kind.outputs.kind }}
+          FEED_SIGNING_KEY: ${{ secrets.FEED_SIGNING_KEY }}
+        run: |
+          $key = Join-Path $env:RUNNER_TEMP "feed.key"
+          [IO.File]::WriteAllText($key, $env:FEED_SIGNING_KEY)
+          $zip = (Get-ChildItem build/release/*-windows-amd64.zip).FullName
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TAG/$(Split-Path $zip -Leaf)"
+          # 序號用 Unix 時間：一定大於前一份索引與續簽時一次加一的序號，也大於官方索引的序號。
+          try {
+            go run ./cmd/0c-release feed -key $key -serial ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -kind $env:KIND -asset "$zip=$url" -out build/release/public-beta.json
+          } finally {
+            Remove-Item $key
+          }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release create $env:TAG $zip "$zip.sha256" build/release/public-beta.json build/release/public-beta.json.sig `
+            --repo $env:GITHUB_REPOSITORY --target (git rev-parse HEAD) --latest --title "靈犀注音 hoshi $env:VERSION" `
+            --notes "官方 $env:BASE 的 hoshi 版（$env:KIND 更新）。第一次安裝請看 hoshi/windows/INSTALL.md。"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # 「最新 release」的轉址可能晚幾秒才指到新版。
+          foreach ($i in 1..5) {
+            go run ./cmd/0c-release verify -url $env:FEED_URL
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Start-Sleep -Seconds 30
+          }
+          exit 1
+
+  renew:
+    if: github.repository == 'pohsun4work/0c-ime' && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - env:
+          FEED_SIGNING_KEY: ${{ secrets.FEED_SIGNING_KEY }}
+        run: |
+          latest=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)
+          if [ -z "$latest" ]; then echo "還沒有 release，不需續簽。" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          key="$RUNNER_TEMP/feed.key"
+          out="$RUNNER_TEMP/public-beta.json"
+          trap 'rm -f "$key"' EXIT
+          (umask 077; printf '%s' "$FEED_SIGNING_KEY" > "$key")
+          go run ./cmd/0c-release renew -url "$FEED_URL" -key "$key" -out "$out"
+          if [ -f "$out" ]; then gh release upload "$latest" "$out" "$out.sig" --clobber --repo "$GITHUB_REPOSITORY"; fi
+
+  report:
+    needs: [plan, test, neural, release, renew]
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - run: |
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "hoshi release 失敗 in:title" --json number -q '.[0].number')
+          if [ -n "$open" ]; then gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body "又失敗一次：$run"
+          else gh issue create --repo "$GITHUB_REPOSITORY" --title "hoshi release 失敗" --body "測試、打包、發布或續簽失敗，已停止，電腦上維持原本的版本。詳情：$run"
+          fi

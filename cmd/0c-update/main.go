@@ -348,6 +348,7 @@ func run(args []string) error {
 		if err := uninstall(); err != nil {
 			return err
 		}
+		releaseForkFeed(basePath())
 		// 排程沒移除時照樣請引擎結束、清掉穩定副本，最後再回報錯誤（Windows 的排程刪除改為照實回報，#284）。
 		scheduleErr := removeSchedule()
 		removeResidentEngine()

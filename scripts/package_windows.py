@@ -146,8 +146,8 @@ def file_version(version):
     return tuple(int(part) for part in version.split("-")[0].split(".")) + (0,)
 
 
-def version_info(name, version, dll):
-    """VS_VERSIONINFO 資源（RT_VERSION）：固定欄位＋一個 zh-TW／UTF-16 字串表。"""
+def version_info(name, version, dll, publisher=PUBLISHER):
+    """VS_VERSIONINFO 資源（RT_VERSION）：固定欄位＋一個 zh-TW／UTF-16 字串表。公司名是這次的發行者，著作權維持原作者。"""
     def pad(data):
         return data + b"\0" * (-len(data) % 4)
 
@@ -165,7 +165,7 @@ def version_info(name, version, dll):
     fixed = struct.pack("<13I", 0xFEEF04BD, 0x00010000, major << 16 | minor, patch << 16 | build,
                         major << 16 | minor, patch << 16 | build, 0x3F, 0, 0x00040004, 2 if dll else 1, 0, 0, 0)
     strings = b"".join(text(k, v) for k, v in (
-        ("CompanyName", PUBLISHER), ("FileDescription", DESCRIPTIONS[name]), ("FileVersion", version),
+        ("CompanyName", publisher), ("FileDescription", DESCRIPTIONS[name]), ("FileVersion", version),
         ("InternalName", name.rsplit(".", 1)[0]), ("LegalCopyright", f"© {PUBLISHER}"),
         ("OriginalFilename", name), ("ProductName", PRODUCT), ("ProductVersion", version)))
     table = node("040404B0", children=strings)
@@ -202,7 +202,7 @@ def existing_version_languages(path):
     return languages
 
 
-def stamp_version(path, version):
+def stamp_version(path, version, publisher):
     """以 Win32 UpdateResource 寫入版本資訊；必須在簽章與計算雜湊之前。"""
     import ctypes
     from ctypes import wintypes
@@ -213,7 +213,7 @@ def stamp_version(path, version):
     kernel32.UpdateResourceW.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wintypes.WORD,
                                          ctypes.c_void_p, wintypes.DWORD]
     kernel32.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
-    data = version_info(path.name, version, path.suffix.lower() == ".dll")
+    data = version_info(path.name, version, path.suffix.lower() == ".dll", publisher)
     handle = kernel32.BeginUpdateResourceW(str(path), False)
     if not handle:
         raise OSError(ctypes.get_last_error(), f"無法寫入版本資訊：{path}")
@@ -348,7 +348,7 @@ def build(args):
         for binary in ours:
             check_static_crt(binary)
         for binary in ours:
-            stamp_version(binary, args.version)
+            stamp_version(binary, args.version, args.publisher)
         # 先寫版本資訊再簽章；之後才計算 release.json 與 SHA256SUMS 的雜湊。
         if args.sign:
             authenticode_sign(ours, args)
@@ -418,14 +418,18 @@ def main():
     parser.add_argument("--signtool", type=Path, help="Windows SDK x64 signtool.exe")
     parser.add_argument("--sign-dlib", type=Path, help="Artifact Signing 用戶端的 Azure.CodeSigning.Dlib.dll")
     parser.add_argument("--sign-metadata", type=Path, help="Artifact Signing metadata.json（端點、帳戶、憑證設定檔）")
+    parser.add_argument("--publisher", default=PUBLISHER, help="寫進版本資訊的公司名")
+    parser.add_argument("--unsigned", action="store_true", help="公開包不做 Authenticode 簽章（fork：更新只靠索引的 ed25519 簽名）")
     try:
         args = parser.parse_args()
         sign = (args.signtool, args.sign_dlib, args.sign_metadata)
         if any(sign) and not all(sign):
             parser.error("簽章需要同時指定 --signtool、--sign-dlib、--sign-metadata")
         args.sign = all(sign)
-        if not args.preview and not args.sign:
-            parser.error("公開包必須簽章：請指定 --signtool、--sign-dlib、--sign-metadata")
+        if args.unsigned and args.sign:
+            parser.error("--unsigned 不能跟 --signtool、--sign-dlib、--sign-metadata 一起用")
+        if not args.preview and not args.sign and not args.unsigned:
+            parser.error("公開包必須簽章：請指定 --signtool、--sign-dlib、--sign-metadata，或明確指定 --unsigned")
         if args.e2etest and not args.preview:
             parser.error("--e2etest 只能用於 --preview 套件")
         if args.e2e_fault and not args.e2etest:

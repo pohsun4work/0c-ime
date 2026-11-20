@@ -2455,6 +2455,11 @@ class ReleaseTests(unittest.TestCase):
         exe = struct.unpack("<13I", parse(package_windows.version_info("0c-update.exe", "1.2.3", dll=False))[0][2])
         self.assertEqual((exe[2], exe[3], exe[9]), (1 << 16 | 2, 3 << 16 | 0, 1))
 
+    def test_fork_publisher(self):
+        data = package_windows.version_info("0c-ui.exe", "0.2.13-hoshi.1", False, "Hoshi 0c-ime fork")
+        self.assertIn("Hoshi 0c-ime fork".encode("utf-16-le"), data)
+        self.assertIn("© FUNMULA PTE. LTD.".encode("utf-16-le"), data)
+
     def test_authenticode_leaf_signer_ignores_timestamp_chain(self):
         output = """Signing Certificate Chain:
     Issued to: Microsoft Identity Verification Root Certificate Authority 2020
