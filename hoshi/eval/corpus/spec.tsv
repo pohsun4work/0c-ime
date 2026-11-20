@@ -1,0 +1,59 @@
+# 規格裡寫得成按鍵的例子；want 是規格要的結果，備註寫官方 0.2.13 的行為與對應的 Phase。
+# 要先學習、加自訂詞彙、看候選清單內容的例子不在這裡（見 hoshi/eval/README.md）。
+# profile: user
+id	keys	want	note
+mix-01	ji3a␣	我a␣	保留官方（規格寫「我a」，英文後面的空白照打）
+mix-02	ji3a␣{Left}{Left}{Down}{pick:ㄇ}	我ㄇ	保留官方：注音文用 ↓ 選
+mix-03	3nm54t/6	3nm製程	P7；官方 3nm54成
+mix-04	4ku/6aj4	4k螢幕	P7；官方 4ku/6木
+mix-05	ji3vu84y94xk7mp3ek6g4	我下載了mp3格式	P7；官方 我下在了隕格式
+mix-06	m4nj0453e.4i31u3rul4ejo4	預算只夠i3比較貴	P7；官方 預算只夠嚄比較貴
+mix-07	tj3xu3fu4g4i7	處理器是喔	保留官方：句尾後面沒字的不換回英數
+mix-08	ep␣␣2␣	跟␣2␣	保留官方：盤古之白（規格寫「跟 2」）
+mix-09	win10␣	win10␣	保留官方：型號詞表（規格寫「win10」，後面的空白照打）
+mix-10	ps52k7	ps5的	保留官方：型號詞表
+mix-11	npm␣	npm	P5；官方 ㄙㄩㄣ
+mix-12	cpu␣	cpu	P5；官方 ㄏㄧㄣ
+mix-13	nm{Enter}	nm	P5；官方送出 ㄙㄩ
+mix-14	url␣	交	保留官方：反過來打的英文字
+mix-15	e(	e(	P5；官方 ㄍ（
+mix-16	e{KP2}e	e2e	P5；官方 ㄍ2e
+sel-01	w8␣{Down}{pick:它}2k7t/6ru␣	它的成績	P8：手選過就固定
+red-01	wuuuu/6	停	P6；官方 wuuu營
+red-02	wu//6	停	P6
+red-03	wuwu/6	停	P6
+red-04	ggggk6	什	P6
+red-05	ji3wuuuu/6su3	我停你	P6
+red-06	hellowu//6	hello停	P6
+red-07	wu//␣	聽	P6：結尾是空白也合併
+red-08	ssl␣	孬	P6：英文字典沒收的會變字
+red-09	ru8884	架	P6：有介音時數字鍵＋聲調 4 個以內合併
+red-10	a8883	a8883	P6：沒有介音時 4 個照字面
+red-11	gkgk6	什	P6；華碩 gkg額，不照抄
+typo-01	hkg6	什	P6：相鄰的聲母丟掉
+typo-02	ckg6	c什	P6：不相鄰的切成英文
+typo-03	qwu0␣	天	P6
+typo-04	ji3rup␣qwu0␣cp3d9␣vup␣	我今天很開心	P6；官方 我今qwu0␣很開心
+typo-05	sju3	你	P6：介音後按的蓋掉前面的
+typo-06	sujm3	女	P6
+typo-07	g8k4	設	P6：韻母後按的蓋掉前面的
+typo-08	cip3	很	P6
+typo-09	asu3	a你	照官方（不是華碩的 as以）
+typo-10	1qu0␣	1篇	P6：數字一律留數字
+typo-11	2wk4	2特	P6
+typo-12	kg6	什	保留官方：按鍵順序打錯
+typo-13	/uw6	停	保留官方
+typo-14	5jiy6	昨	P6
+typo-15	gjn␣	蘇	P6
+sym-01	<	<	P4：Shift+, 打半形
+sym-02	[	[	P4；官方預設「
+sym-03	]	]	P4；官方預設」
+sym-04	ji3[{Down}{pick:「}	我「	P4：↓ 第二個是「
+sym-05	{Ctrl+[}	【	P4；官方沒反應
+sym-06	{Ctrl+]}	】	P4；官方沒反應
+sym-07	{Ctrl+[}{Down}2	「	P4：照畫面順序選
+sym-08	`	`	P4：不做微軟的前導鍵
+sym-09	=	=	P11：不開 Emoji
+sym-10	ji3$wu0␣	我$天	P4；官方 我$wu0␣
+sym-11	$su3	$你	P4
+sym-12	$20␣	$20␣	P4：緊接在後面的數字照數字留

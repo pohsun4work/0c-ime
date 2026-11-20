@@ -1,0 +1,5 @@
+# 全形時混打（規格「中英混打」最後一段）：自訂風格把 Shift+空白設成切換全半形。官方切全形會關混打。
+# profile: fullwidth
+id	keys	want	note
+fw-01	{ShiftSpace}hello␣	ｈｅｌｌｏ　	P4
+fw-02	{ShiftSpace}gmail.com	ｇｍａｉｌ．ｃｏｍ	P4
