@@ -31,6 +31,7 @@ type Dictionary struct {
 	words     []Word
 	nodes     []trieNode
 	noSuggest []bool
+	priors    *Dictionary // Reranked 換過排序時，門檻（NearCommon）照樣看原本的先驗
 }
 
 type trieNode struct {
@@ -178,6 +179,9 @@ func (d *Dictionary) Corrections(typed string, limit int) []Candidate {
 func (d *Dictionary) NearCommon(typed string, minimumPrior float64) bool {
 	if minimumPrior <= 0 || math.IsNaN(minimumPrior) || math.IsInf(minimumPrior, 0) {
 		return false
+	}
+	if d != nil && d.priors != nil {
+		d = d.priors
 	}
 	return len(d.corrections(typed, 1, minimumPrior)) > 0
 }

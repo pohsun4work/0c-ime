@@ -154,7 +154,8 @@ func TestFullEnglishPackEnglishModeTabCompletionAndCorrection(t *testing.T) {
 	e.EnglishAutocomplete = true
 	e.MixedInput = true
 	for _, tc := range []struct{ typed, want string }{
-		{"hel", "hello"}, {"recieve", "receive"}, {"teh", "the"},
+		// fork：補全照 wordfreq 詞頻排序，hel 的補全是 help、held、hell（官方是 hello）
+		{"hel", "help"}, {"recieve", "receive"}, {"teh", "the"},
 		{"configuraton", "configuration"}, {"notifcation", "notification"},
 		{"RECIEVE", "RECEIVE"}, {"Recieve", "Receive"},
 	} {
