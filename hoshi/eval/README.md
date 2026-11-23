@@ -5,21 +5,21 @@
 - 工具：`hoshi/cmd/hoshi-eval`（`keys` 文字轉按鍵、`run` 重播、`report` 報告）
 - 語料：`corpus/*.tsv`
 - 設定：`profiles/*.json`（語料檔頭的 `# profile:` 選用哪一份）
-- 基準報告：`reports/official-0.2.13.md`（官方 0.2.13 單獨跑的報告：`report -new official.json -out …`，不帶 `-base`）
+- 基準報告：`reports/official-0.2.14.md`（官方 0.2.14 單獨跑的報告：`report -new official.json -out …`，不帶 `-base`）
 
 ## 怎麼跑
 
 ```powershell
 go build -o build/hoshi-eval/hoshi-eval.exe ./hoshi/cmd/hoshi-eval
 
-# 資料與神經模型用已安裝的官方版本（data 旁邊要有配對的 neural\）
-$v = "$env:LOCALAPPDATA\Zuin\versions\0.2.13-73fd9193c77c"
+# 資料與神經模型用已安裝的版本（官方或 fork 都可以，字典要跟官方 tag 同一份；data 旁邊要有配對的 neural\）
+$v = "$env:LOCALAPPDATA\Zuin\versions\<已安裝的版本目錄>"
 
 # 官方引擎：已安裝版本目錄裡的 0c-server.exe；那個目錄被更新清掉時從官方 tag 建置
-git worktree add --detach build/eval-upstream v0.2.13
-go -C build/eval-upstream build -o ../hoshi-eval/0c-server-v0.2.13.exe ./cmd/0c-server
+git worktree add --detach build/eval-upstream v0.2.14
+go -C build/eval-upstream build -o ../hoshi-eval/0c-server-v0.2.14.exe ./cmd/0c-server
 git worktree remove build/eval-upstream
-build\hoshi-eval\hoshi-eval.exe run -server build\hoshi-eval\0c-server-v0.2.13.exe -data "$v\data" -label "官方 0.2.13" -out build\hoshi-eval\official.json (Get-ChildItem hoshi\eval\corpus\*.tsv)
+build\hoshi-eval\hoshi-eval.exe run -server build\hoshi-eval\0c-server-v0.2.14.exe -data "$v\data" -label "官方 0.2.14" -out build\hoshi-eval\official.json (Get-ChildItem hoshi\eval\corpus\*.tsv)
 
 # fork：這個 checkout 建置的引擎
 go build -o build/hoshi-eval/0c-server.exe ./cmd/0c-server

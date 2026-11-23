@@ -1,5 +1,5 @@
 {
-  "upstream": "v0.2.13",
+  "upstream": "v0.2.14",
   "publisher": "Hoshi 0c-ime fork",
   "shell_paths": [
     "platforms/windows/tsf",
