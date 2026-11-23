@@ -194,10 +194,10 @@ func TestCustomRulesCannotBypassCompatibility(t *testing.T) {
 	if err := s.ProfileAction("copy", "0c", "custom"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Set("style-punctuation", "microsoft"); err != nil {
+	if err := s.Set("style-tab", "cycle"); err != nil { // fork：0c 風格本來就是微軟參考標點，改一條別的規則讓它跟內建不同
 		t.Fatal(err)
 	}
-	for _, p := range [][2]string{{"keyboard-layout", "hsu"}, {"toneless", "on"}} {
+	for _, p := range [][2]string{{"keyboard-layout", "hsu"}, {"toneless", "on"}} { // 自訂規則不能配許氏；微軟參考標點不能開不打聲調
 		before := s
 		if err := s.Set(p[0], p[1]); err == nil || s != before {
 			t.Fatalf("unsupported combination accepted: %v", p)
@@ -208,7 +208,7 @@ func TestCustomRulesCannotBypassCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := s
-	if err := s.Set("style-shift-space", "fullwidth"); err == nil || s != before {
+	if err := s.Set("style-tab", "segment"); err == nil || s != before { // fork：Shift＋空白全形不再和混打衝突，改用 Tab 斷詞
 		t.Fatal("reverse-order rule edit bypassed constraint")
 	}
 }
@@ -223,7 +223,7 @@ func TestStyleRulesDisableOnlyConflictingFeatures(t *testing.T) {
 		{"style-punctuation", "microsoft", want{"", "", "style-punctuation"}},
 		{"style-punctuation", "standard", want{"", "", "style-punctuation"}},
 		{"style-punctuation", "chewing", want{"", "", "style-punctuation"}},
-		{"style-shift-space", "fullwidth", want{"style-shift-space", "", ""}},
+		{"style-shift-space", "fullwidth", want{}}, // fork：全形時混打照常
 		{"style-shift-space", "space", want{}},
 		{"style-shift-space", "single", want{}},
 		{"style-tab", "segment", want{"style-tab", "", ""}},
@@ -241,9 +241,7 @@ func TestStyleRulesDisableOnlyConflictingFeatures(t *testing.T) {
 		{"style-page-size", "9", want{}},
 	} {
 		s := Default()
-		if err := s.ProfileAction("copy", "0c", "custom"); err != nil {
-			t.Fatal(err)
-		}
+		officialPunctuation(t, &s) // fork：從官方標點起算，每列只看它自己的規則
 		if err := s.Set(tc.rule, tc.value); err != nil {
 			t.Fatal(err)
 		}

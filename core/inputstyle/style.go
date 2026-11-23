@@ -106,6 +106,7 @@ func GetForPlatform(id, goos string) (Preset, bool) {
 	switch id {
 	case "0c":
 		p.Name = "靈犀注音"
+		p.Rules.Punctuation = "microsoft" // fork：符號照微軟
 	case "microsoft":
 		p.Name = "微軟新注音"
 		p.Behavior.ToggleKey = "both"

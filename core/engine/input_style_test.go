@@ -8,15 +8,13 @@ import (
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
-func TestMicrosoftIdleKeysDoNotClaimRawHalfwidthPunctuation(t *testing.T) {
+// fork：微軟參考的半形原字元沒在組字時也留在組字區（官方交還應用程式），TestKeyDown 要吃；` 打 `。
+func TestMicrosoftIdleKeysClaimRawHalfwidthPunctuation(t *testing.T) {
 	e := testEngine()
 	p, _ := inputstyle.Get("microsoft")
 	e.InputStyle = p.Rules
-	if strings.ContainsAny(e.IdleKeys(), "\\'\"<>?") {
-		t.Fatalf("TestKeyDown must not claim halfwidth pass-through keys: %q", e.IdleKeys())
-	}
-	if !strings.Contains(e.IdleKeys(), "`") {
-		t.Fatal("the prefix must still reach the core")
+	if !containsAll(e.IdleKeys(), "\\'\"<>?`") {
+		t.Fatalf("TestKeyDown must claim the raw halfwidth keys: %q", e.IdleKeys())
 	}
 }
 
@@ -105,37 +103,6 @@ func TestStylesAreCopiedAndCapsRemainLocal(t *testing.T) {
 	}
 	if snap := styleDo(t, e, a, proto.Request{Type: proto.CapsLock, On: false}); snap.Mode != proto.ModeZhuyin || snap.CapsEnglish {
 		t.Fatalf("temporary mode did not restore: %+v", snap)
-	}
-}
-
-func TestStylePrefixCannotCrossFocusOrMode(t *testing.T) {
-	e := testEngine()
-	p, _ := inputstyle.Get("microsoft")
-	e.InputStyle = p.Rules
-	a, b := e.OpenSession(), e.OpenSession()
-	styleDo(t, e, a, proto.Request{Type: proto.Key, Key: "`"})
-	if _, n := e.Sessions(); n != 1 {
-		t.Fatalf("prefix must count as composition, got %d", n)
-	}
-	if snap := styleDo(t, e, a, proto.Request{Type: proto.Commit}); snap.Commit != "`" || snap.Text() != "" {
-		t.Fatalf("focus commits displayed prefix exactly once: %+v", snap)
-	}
-	if snap := styleDo(t, e, a, proto.Request{Type: proto.Commit}); snap.Commit != "" {
-		t.Fatalf("duplicate focus commit: %+v", snap)
-	}
-	styleDo(t, e, b, proto.Request{Type: proto.Mode, On: true})
-	if snap := styleDo(t, e, b, proto.Request{Type: proto.Key, Key: ","}); snap.Handled {
-		t.Fatalf("prefix leaked to next field: %+v", snap)
-	}
-	for _, op := range []proto.Request{{Type: proto.Key, Key: proto.KeyEscape}, {Type: proto.Cancel}, {Type: proto.Mode, On: true}} {
-		styleDo(t, e, a, proto.Request{Type: proto.Mode, On: false})
-		styleDo(t, e, a, proto.Request{Type: proto.Key, Key: "`"})
-		if snap := styleDo(t, e, a, op); snap.Text() != "" || snap.Commit != "" {
-			t.Fatalf("prefix cancellation %+v: %+v", op, snap)
-		}
-		if _, n := e.Sessions(); n != 0 {
-			t.Fatalf("stale prefix after %+v", op)
-		}
 	}
 }
 

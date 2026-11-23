@@ -239,8 +239,7 @@ func TestCandidateJKIgnoredOutsideOrdinaryCandidates(t *testing.T) {
 	unchanged(t, "pending", p)
 
 	b := jkSession(false)
-	key(b, proto.KeyLeft)
-	if key(b, "`"); b.cand == nil || !b.cand.literal || b.cand.length != 0 {
+	if openSymbolMenu(b); b.cand == nil || b.cand.symbols == "" {
 		t.Fatalf("symbol menu fixture: %+v", b.cand)
 	}
 	unchanged(t, "symbols", b)

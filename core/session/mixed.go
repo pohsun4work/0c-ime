@@ -1420,7 +1420,11 @@ func (s *Session) settleTokenAn() {
 
 // literalDigitBefore：游標前一個字是照字面送出的半形數字。
 func (s *Session) literalDigitBefore() bool {
-	at := s.cursor - 1
+	return s.literalDigitAt(s.cursor - 1)
+}
+
+// literalDigitAt：組字位置 at 是照字面的半形數字。
+func (s *Session) literalDigitAt(at int) bool {
 	return at >= 0 && s.literals[at] && len(s.syls[at]) == 1 && s.syls[at][0] >= '0' && s.syls[at][0] <= '9'
 }
 
@@ -1608,6 +1612,10 @@ func (s *Session) mixedKey(k string) bool {
 		}
 		return true
 	}
+	if s.mixed.raw == "" && (s.explicitSymbol(k) || s.digitAfterExplicitSymbol(k)) {
+		s.insertLiteral(k) // 明確打的符號不參與組字，後面的按鍵另起一串（我$天）；緊接的數字照數字留（$20）。見 hoshi_symbols.go
+		return true
+	}
 	s.mixed.raw += k
 	return true
 }
@@ -1654,6 +1662,9 @@ type mixedOrigin struct {
 
 func (s *Session) insertMixedLiteral(text string, assisted, explicit bool) {
 	at := s.cursor
+	if s.fullWidth && !s.english {
+		text = s.fullWidthText(text) // 全形時混打照常，英數與空白照微軟打全形（hello␣ → ｈｅｌｌｏ　）
+	}
 	s.insertLiteral(text)
 	if s.mixedOrigins == nil {
 		s.mixedOrigins = map[int]mixedOrigin{}

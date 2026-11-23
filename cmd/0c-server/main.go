@@ -139,6 +139,13 @@ func serve() string {
 			lg.Printf("中英切換鍵改成左右 Shift（Windows 的新預設，#206；可在設定程式改回右 Shift）")
 		}
 	}
+	if writable {
+		if adopted, err := settings.AdoptHoshiSymbols(*user); err != nil {
+			lg.Printf("符號預設未換成照微軟，下次啟動再試：%v", err)
+		} else if adopted {
+			lg.Printf("符號預設改成照微軟：標點寬度所有符號鍵打半形、內建靈犀注音的標點操作改微軟參考")
+		}
+	}
 	settingsReport, configErr := settings.Read(settings.Path(*user))
 	config := settingsReport.Settings
 	if configErr != nil {

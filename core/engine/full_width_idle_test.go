@@ -83,11 +83,17 @@ func TestIdleKeysFullWidthLegacyStandard(t *testing.T) {
 			t.Errorf("半形會處理的 %q 全形也要處理：%q", r, keys)
 		}
 	}
-	id := e.OpenSession()
-	styleDo(t, e, id, proto.Request{Type: proto.Key, Key: proto.KeyShiftSpace})
+	// fork：0c 風格的標點操作是微軟參考，全形符號跟半形一樣先留在組字區，Enter 送出。
 	for k, want := range map[string]string{"@": "＠", "*": "＊", "#": "＃", "+": "＋", "KP1": "１", "KP*": "＊"} {
-		if snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: k}); !snap.Handled || snap.Commit != want {
+		id := e.OpenSession()
+		styleDo(t, e, id, proto.Request{Type: proto.Key, Key: proto.KeyShiftSpace})
+		snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: k})
+		if snap.Commit == "" {
+			snap = styleDo(t, e, id, proto.Request{Type: proto.Key, Key: proto.KeyEnter})
+		}
+		if !snap.Handled || snap.Commit != want {
 			t.Errorf("全形 %q：%+v", k, snap)
 		}
+		e.CloseSession(id)
 	}
 }

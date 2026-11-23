@@ -15,6 +15,7 @@ func TestOriginalStylePreservesLegacySequences(t *testing.T) {
 		{"`", proto.KeyPageDown, proto.KeyEnter, proto.KeyEnter},
 	} {
 		a, b := styleSession("0c"), styleSession("0c")
+		a.InputStyle.Punctuation = "0c" // fork 的 0c 風格標點操作是微軟參考；其餘規則仍要同零值
 		b.InputStyle = inputstyle.Rules{}
 		for _, k := range sequence {
 			sa, sb := key(a, k), key(b, k)
@@ -103,15 +104,18 @@ func TestMicrosoftWidthIsStateAndIncludesEnglish(t *testing.T) {
 	}
 }
 
-func TestMicrosoftPrefixAndInlineUp(t *testing.T) {
+// fork：` 不是前導鍵，跟其他明確打的符號一樣留在組字區。
+func TestMicrosoftBacktickIsLiteralAndInlineUp(t *testing.T) {
 	s := styleSession("microsoft")
-	if a := key(s, "`"); a.Text() != "`" || a.Candidates != nil {
-		t.Fatalf("prefix: %+v", a)
+	if a := key(s, "`"); !a.Handled || a.Text() != "`" || a.Candidates != nil {
+		t.Fatalf("backtick: %+v", a)
 	}
-	if a := key(s, ","); a.Text() != "，" {
-		t.Fatalf("prefixed punctuation: %+v", a)
+	if a := key(s, "<"); a.Text() != "`<" {
+		t.Fatalf("raw punctuation after backtick: %+v", a)
 	}
-	key(s, proto.KeyEnter)
+	if a := key(s, proto.KeyEnter); a.Commit != "`<" {
+		t.Fatalf("commit: %+v", a)
+	}
 	typeSyl(s, "ㄐㄧㄥˇ")
 	if a := key(s, proto.KeyUp); a.Text() != "井" || a.Candidates != nil || a.Commit != "" {
 		t.Fatalf("inline Up: %+v", a)
@@ -122,39 +126,16 @@ func TestMicrosoftPrefixAndInlineUp(t *testing.T) {
 	}
 }
 
-func TestMicrosoftPrefixCancellationPreservesComposition(t *testing.T) {
-	s := styleSession("microsoft")
-	typeSyl(s, "ㄨㄛˇ")
-	key(s, "`")
-	if a := key(s, proto.KeyEscape); a.Text() != "我" || a.Commit != "" {
-		t.Fatalf("Escape must cancel just the prefix: %+v", a)
-	}
-	key(s, "`")
-	if a := key(s, proto.KeyEnter); a.Commit != "我`" || a.Text() != "" {
-		t.Fatalf("Enter must preserve the displayed raw prefix: %+v", a)
-	}
-	key(s, "`")
-	// Navigation does not reinterpret a named key as a printable symbol.
-	if a := key(s, proto.KeyLeft); a.Text() != "`" {
-		t.Fatalf("named key discarded prefix: %+v", a)
-	}
-	if a := key(s, ","); a.Text() != "，" {
-		t.Fatalf("prefix was not consumed once: %+v", a)
-	}
-	key(s, proto.KeyEnter)
-	if a := key(s, ","); a.Text() != "ㄝ" {
-		t.Fatalf("prefix survived commit: %+v", a)
-	}
-}
-
-func TestMicrosoftObservedRawAndPrefixPunctuation(t *testing.T) {
-	for _, tc := range []struct{ key, wide, prefix string }{
-		{"\\", "＼", "＼"}, {"'", "’", "、"}, {"\"", "＂", "＂"}, {"<", "＜", "＜"}, {">", "＞", "＞"}, {"?", "？", "？"},
+// fork：半形原字元沒在組字時也留在組字區；全形時照微軟。
+func TestMicrosoftObservedRawPunctuation(t *testing.T) {
+	for _, tc := range []struct{ key, wide string }{
+		{"\\", "＼"}, {"'", "’"}, {"\"", "＂"}, {"<", "＜"}, {">", "＞"}, {"?", "？"},
 	} {
 		s := styleSession("microsoft")
-		if a := key(s, tc.key); a.Handled || a.Commit != "" || a.Text() != "" {
-			t.Fatalf("halfwidth idle %q must reach app: %+v", tc.key, a)
+		if a := key(s, tc.key); !a.Handled || a.Commit != "" || a.Text() != tc.key {
+			t.Fatalf("halfwidth idle %q stays in composition: %+v", tc.key, a)
 		}
+		key(s, proto.KeyEscape)
 		key(s, proto.KeyShiftSpace)
 		if a := key(s, tc.key); a.Text() != tc.wide || a.Commit != "" {
 			t.Fatalf("Chinese fullwidth %q: %+v", tc.key, a)
@@ -164,13 +145,6 @@ func TestMicrosoftObservedRawAndPrefixPunctuation(t *testing.T) {
 		if a := key(s, tc.key); a.Text() != tc.wide || a.Commit != "" {
 			t.Fatalf("English fullwidth %q: %+v", tc.key, a)
 		}
-		key(s, proto.KeyEscape)
-		s.Handle(proto.Request{Type: proto.Mode, On: false})
-		key(s, proto.KeyShiftSpace)
-		key(s, "`")
-		if a := key(s, tc.key); a.Text() != tc.prefix {
-			t.Fatalf("prefix %q: %+v", tc.key, a)
-		}
 	}
 }
 
@@ -179,9 +153,10 @@ func TestMicrosoftRawPunctuationInComposition(t *testing.T) {
 		s := styleSession("microsoft")
 		key(s, "s")
 		key(s, "u")
-		if a := key(s, r); a.Commit != r || a.Text() != "" {
+		if a := key(s, r); a.Commit != "" || a.Text() != r { // fork：未打完的注音丟掉，符號留在組字區
 			t.Fatalf("unfinished reading + raw %q: %+v", r, a)
 		}
+		key(s, proto.KeyEscape)
 		typeSyl(s, "ㄨㄛˇ")
 		if a := key(s, r); a.Commit != "" || a.Text() != "我"+r {
 			t.Fatalf("completed word + raw %q: %+v", r, a)

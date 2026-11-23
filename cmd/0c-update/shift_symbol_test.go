@@ -6,7 +6,7 @@ import "testing"
 // 不屬於輸入習慣風格，新安裝（內建靈犀注音風格）也不鎖。
 func TestShiftSymbolHalfwidthContractReportsPending(t *testing.T) {
 	base := t.TempDir()
-	writeSettings(t, base, `{"shift_symbol_halfwidth":true}`)
+	writeSettings(t, base, `{"shift_symbol_halfwidth":true,"all_symbols_halfwidth":false}`) // fork：缺 all_symbols_halfwidth 時照預設讀成 all
 	for _, tc := range []struct{ runtime, want string }{{"false", "off"}, {"true", "on"}, {"", ""}} {
 		v, ok := runningValues(map[string]string{"shift_symbol_halfwidth": tc.runtime})["shift-symbol-halfwidth"]
 		if v != tc.want || ok != (tc.runtime != "") {
@@ -14,7 +14,7 @@ func TestShiftSymbolHalfwidthContractReportsPending(t *testing.T) {
 		}
 		doc := buildSettingsDoc(base, modelStatusDial(map[string]string{"shift_symbol_halfwidth": tc.runtime}, true))
 		it := item(t, doc, "shift-symbol-halfwidth")
-		if it.Value != "on" || it.Default != "off" || it.Locked || it.Pending != (tc.runtime == "false") || (it.Running != nil) != ok {
+		if it.Value != "on" || it.Default != "all" || it.Locked || it.Pending != (tc.runtime == "false") || (it.Running != nil) != ok {
 			t.Fatalf("pending contract: %+v", it)
 		}
 	}

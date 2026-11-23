@@ -2,7 +2,9 @@ package session
 
 import (
 	"slices"
+	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/proto"
@@ -17,9 +19,28 @@ func (s *Session) insertStyleLiteral(text string) {
 	s.insertLiteral(text)
 }
 
-func (s *Session) fullWidthText(k string) string {
-	if s.InputStyle.Punctuation == "microsoft" && k == "'" {
-		return "’"
+// fullWidthText 逐字轉全形（混打的英數整段轉：don't 的 ' 也照風格）。
+func (s *Session) fullWidthText(text string) string {
+	if utf8.RuneCountInString(text) == 1 {
+		return s.fullWidthKey(text)
+	}
+	var b strings.Builder
+	for _, r := range text {
+		b.WriteString(s.fullWidthKey(string(r)))
+	}
+	return b.String()
+}
+
+func (s *Session) fullWidthKey(k string) string {
+	if s.InputStyle.Punctuation == "microsoft" {
+		switch k { // 微軟新注音全形的 ' ^ ` 不是 Unicode 的全形字
+		case "'":
+			return "’"
+		case "^":
+			return "︿"
+		case "`":
+			return "‵"
+		}
 	}
 	if s.InputStyle.Punctuation == "chewing" {
 		switch k {
@@ -64,6 +85,9 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	if k == proto.KeyShiftSpace {
 		switch s.InputStyle.ShiftSpace {
 		case "fullwidth":
+			if !s.english {
+				s.flushMixed() // 混打切換前打的英數照切換前的字寬定案（全形時混打的英數打全形，insertMixedLiteral）
+			}
 			s.fullWidth = !s.fullWidth
 			return true, "", true
 		case "space":
@@ -84,33 +108,6 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 			return s.composing(), "", true
 		default:
 			return s.composing(), "", true
-		}
-	}
-	if s.symbolPrefix {
-		if len([]rune(k)) != 1 && k != proto.KeyEscape && k != proto.KeyBackspace {
-			return false, "", false
-		}
-		s.symbolPrefix = false
-		if k == proto.KeyEscape || k == proto.KeyBackspace {
-			return true, "", true
-		}
-		if p, ok := microsoftPrefixPunctuation(k); ok {
-			s.insertStyleLiteral(p)
-			return true, "", true
-		}
-		if p, ok := proto.CtrlPunct(proto.CtrlPrefix + k); ok {
-			s.insertStyleLiteral(p)
-			return true, "", true
-		}
-		if r := []rune(k); len(r) == 1 {
-			if p, ok := s.layout.Punct(r[0]); ok {
-				s.insertStyleLiteral(p)
-				return true, "", true
-			}
-		}
-		if r := []rune(k); len(r) == 1 && unicode.IsPrint(r[0]) {
-			s.insertStyleLiteral(s.fullWidthText(k))
-			return true, "", true
 		}
 	}
 	// English autocomplete suggestions are advisory: a printable full-width
@@ -164,11 +161,6 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		}
 		return s.composing(), "", true
 	}
-	if !s.english && k == "`" && s.InputStyle.Punctuation == "microsoft" {
-		s.flushMixed()
-		s.symbolPrefix = true
-		return true, "", true
-	}
 	if !s.english && ((k == proto.KeyTab || k == proto.KeyBackTab) && s.InputStyle.Tab == "cycle" || k == proto.KeyUp && s.InputStyle.Up == "cycle") {
 		if !s.composing() {
 			return false, "", true
@@ -202,8 +194,8 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	if len(r) != 1 || !unicode.IsPrint(r[0]) {
 		return false, "", false
 	}
-	// 設定「Shift＋符號打半形」開著時照樣打鍵帽字元（#272，見 halfwidthShift）；反引號前導已在上面處理。
-	if s.InputStyle.Punctuation == "microsoft" && microsoftRawPunctuation(k) {
+	// 設定「Shift＋符號打半形」開著時照樣打鍵帽字元（#272，見 halfwidthShift）。
+	if s.microsoftRaw(k) {
 		if s.mixedKeepsPunctuation(k) {
 			return true, "", true
 		}
@@ -225,11 +217,8 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 			// Half-width raw punctuation cancels an unfinished syllable.
 			// Already converted words remain in their original order.
 			s.comp.Reset()
-			if !s.composing() {
-				return true, k, true
-			}
 		}
-		if !s.composing() {
+		if !s.composing() && !s.explicitSymbol(k) {
 			return false, "", true
 		}
 		s.insertStyleLiteral(k)
@@ -290,6 +279,9 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		s.insertStyleLiteral(text)
 		return true, "", true
 	}
+	if s.fullWidthMixedKey(r[0]) {
+		return false, "", false
+	}
 	if s.fullWidth && !s.english {
 		_, phonetic := s.layout.Symbol(r[0])
 		_, punct := s.layout.Punct(r[0])
@@ -323,7 +315,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 // paths (C:\Users), contractions (i'm) and quoted words stay one English run
 // instead of flushing it and reading the following letters as Bopomofo.
 func (s *Session) mixedKeepsPunctuation(k string) bool {
-	if s.fullWidth || s.english || !s.mixedInput() || !s.comp.Empty() || s.mixed.raw == "" || s.mixed.accepted != "" || len(s.mixed.raw) >= maxMixedPending {
+	if s.english || !s.mixedInput() || !s.comp.Empty() || s.mixed.raw == "" || s.mixed.accepted != "" || len(s.mixed.raw) >= maxMixedPending {
 		return false
 	}
 	if s.mixedText() != s.mixed.raw && !(s.mixed.choice == 0 && s.mixedEnglishWord(s.mixed.raw)) {
@@ -471,7 +463,7 @@ func (s *Session) changeSegmentation() {
 	s.refresh()
 }
 
-// These raw and prefix mappings were observed in the isolated Windows 11
+// These raw mappings were observed in the isolated Windows 11
 // Microsoft Bopomofo reference run; unobserved keys retain their prior routing.
 func microsoftRawPunctuation(k string) bool {
 	switch k {
@@ -480,20 +472,12 @@ func microsoftRawPunctuation(k string) bool {
 	}
 	return false
 }
-func microsoftPrefixPunctuation(k string) (string, bool) {
-	switch k {
-	case "\\":
-		return "＼", true
-	case "'":
-		return "、", true
-	case "\"":
-		return "＂", true
-	case "<":
-		return "＜", true
-	case ">":
-		return "＞", true
-	case "?":
-		return "？", true
+
+// microsoftRaw：微軟參考打半形原字元的鍵；排列把它當注音鍵時（倚天的 ' 是 ㄘ）讓給排列（fork 的 0c 風格是微軟參考）。
+func (s *Session) microsoftRaw(k string) bool {
+	if s.InputStyle.Punctuation != "microsoft" || !microsoftRawPunctuation(k) {
+		return false
 	}
-	return "", false
+	_, phonetic := s.layout.Symbol(rune(k[0]))
+	return !phonetic
 }

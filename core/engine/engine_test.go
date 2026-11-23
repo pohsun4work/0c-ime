@@ -106,9 +106,19 @@ func TestIdleKeysFollowLayout(t *testing.T) {
 		t.Fatalf("許氏：%q", got)
 	}
 	e.EmojiShortcut = "off"
-	if strings.Contains(e.IdleKeys(), "=") {
-		t.Fatal("關閉 Emoji 選單時 = 交還應用程式")
+	if !strings.Contains(e.IdleKeys(), "=") {
+		t.Fatal("關閉 Emoji 選單時 = 是明確打的符號，留在組字區（fork）")
 	}
+}
+
+// containsAll 回報 keys 是否包含 want 的每個字元。
+func containsAll(keys, want string) bool {
+	for _, r := range want {
+		if !strings.ContainsRune(keys, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // #133：使用者開啟「選字後游標移到下一個字」時，之後開的每個 session 都照設定；預設關閉。

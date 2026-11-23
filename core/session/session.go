@@ -52,7 +52,7 @@ type candState struct {
 	kind          string
 	direct        bool   // empty composition: selection commits once.
 	ids           []int  // stable palette IDs, independent of recent order.
-	symbols       string // 反引號符號選單的目前分頁（#290）；空字串表示不是符號選單
+	symbols       string // 符號選單的目前分頁（#290；fork 從符號上按 ↑ 開）；空字串表示不是符號選單
 	// split > 0 時是混合清單（#161）：items[:split] 是 start/length 的詞，items[split:] 接著列
 	// 游標那個字（位置 single）的單字候選，翻頁就看得到，不必先按 Tab 換到單字。
 	split  int
@@ -100,11 +100,10 @@ func DefaultOptions() Options {
 }
 
 type Session struct {
-	styleCycle   *candState
-	InputStyle   inputstyle.Rules
-	fullWidth    bool
-	symbolPrefix bool
-	styleGrid    bool
+	styleCycle *candState
+	InputStyle inputstyle.Rules
+	fullWidth  bool
+	styleGrid  bool
 	// Rerank 由宿主在第一次 Handle 前設定；零值保持原引擎。
 	Rerank rerank.Options
 	// Punct 由宿主設定：提交時補標點（只插入、不改原字）；nil 停用。私人／暫停／英數狀態一律不送出文字。
@@ -172,10 +171,10 @@ type Session struct {
 	// CtrlPunct 由宿主依「Ctrl＋標點打全形」設定（#168，預設開）：中文模式的 Ctrl＋, . ' ; 與 Ctrl＋Shift＋/ 1 ; 9 0（#231）
 	// 打全形標點，跟一般標點一樣插進組字區。零值時這些鍵回 handled=false，外殼照一般快捷鍵交給應用程式。
 	CtrlPunct bool
-	// ShiftSymbolHalfwidth 由宿主依「Shift＋符號打半形」設定（#258，預設關）：注音模式的 Shift＋符號鍵打英文鍵盤上的
+	// ShiftSymbolHalfwidth 由宿主依「Shift＋符號打半形」設定（#258；fork 預設跟著所有符號鍵打半形開）：注音模式的 Shift＋符號鍵打英文鍵盤上的
 	// 半形符號（shift_symbol.go），全形標點改用 Ctrl＋符號。零值時行為與沒有此功能時相同。
 	ShiftSymbolHalfwidth bool
-	// AllSymbolsHalfwidth 由宿主依「標點寬度：所有符號鍵打半形」設定（#282，預設關）：注音模式所有排列有全形標點的鍵
+	// AllSymbolsHalfwidth 由宿主依「標點寬度：所有符號鍵打半形」設定（#282；fork 預設開）：注音模式所有排列有全形標點的鍵
 	// （含未按 Shift 的 [ ] ' \）都打鍵帽上的半形字元（all_symbols.go），全形標點用 Ctrl＋符號。開著時 ShiftSymbolHalfwidth
 	// 不起作用。零值時行為與沒有此功能時相同。
 	AllSymbolsHalfwidth bool
@@ -310,7 +309,7 @@ func (s *Session) emojiEquals() bool {
 }
 
 func (s *Session) composing() bool {
-	return s.symbolPrefix || len(s.syls) > 0 || !s.comp.Empty() || s.mixed.raw != "" || s.ninePending()
+	return len(s.syls) > 0 || !s.comp.Empty() || s.mixed.raw != "" || s.ninePending()
 }
 
 // Composing 回報是否有未提交的組字；引擎交接只在沒有組字時進行。
@@ -567,7 +566,6 @@ func (s *Session) status(snap *proto.Snapshot) {
 // setMode 切換中英模式（單按 Shift、外殼設定模式、Caps Lock）。切到英文清掉未打完的注音（#90），已組好的字與游標保留；
 // 切換本身也關閉候選。restore 是外殼確認中間沒有任何操作就立即切回注音：把剛清掉的注音放回原處（防誤觸）。
 func (s *Session) setMode(english, restore bool, stash *pendingStash) {
-	s.symbolPrefix = false
 	if english && !s.english {
 		s.finishUntoned() // 聲調選填：已是完整音節的注音留在組字區，不當成打到一半清掉（#150）
 		s.nineKeys = nil  // 九宮格組不成音節的鍵同未打完的注音清掉
@@ -628,6 +626,9 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	s.retypeLiteral = false
 	run := s.untonedRun // 聲調選填時連續打的注音鍵（#150）：只有緊接著的這一鍵能接續
 	s.untonedRun = nil
+	if s.hoshiSymbolKey(k) {
+		return true, ""
+	}
 	if handled, commit, done := s.allSymbolsKey(k); done {
 		return handled, commit
 	}
@@ -884,11 +885,6 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		s.openCandidates(0)
 		return true, ""
 	}
-	if k == "`" {
-		s.flushMixed()
-		s.openSymbolMenu(s.cursor, 0, !s.comp.Empty())
-		return true, ""
-	}
 	runes := []rune(k)
 	if len(runes) != 1 {
 		return false, ""
@@ -906,7 +902,11 @@ func (s *Session) key(k string) (handled bool, commit string) {
 			// 使用者關閉「空白鍵選字」時一般注音模式也一樣（#107、#110）。
 			// 緊接在數字後面（連打的聲調鍵 34、數字鍵盤）也是空白，同沒在組字時打數字再按空白（#135）。
 			if s.mixedInput() || s.SpaceInsertsSpace || s.literalNumberBefore() != "" {
-				s.insertLiteral(" ")
+				sp := " "
+				if s.fullWidth {
+					sp = s.fullWidthText(sp) // 全形時照微軟是全形空白
+				}
+				s.insertLiteral(sp)
 				return true, ""
 			}
 			s.openCandidates(0)
@@ -934,19 +934,12 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	}
 	// 標點保留在組字區，可移動、替換候選；Enter 才提交。
 	if p, ok := s.layout.Punct(runes[0]); ok {
-		if s.halfwidthShift(k) && !s.composing() {
-			// Shift＋符號打半形（#258）：沒在組字時，半形就是鍵帽字元的同 @ # 交還應用程式；< > " 直接送出 , . ;。
-			if half := halfwidthPunct(p, k); half != k {
-				return true, half
-			}
-			return false, ""
-		}
 		s.insertPendingLiteral()
 		s.insertPunctKey(k, p)
 		return true, ""
 	}
-	// 其他可見字元（Shift＋字母、@、#、落單聲調鍵等）在游標處逐字保留。
-	if s.composing() && unicode.IsPrint(runes[0]) {
+	// 其他可見字元（Shift＋字母、@、#、落單聲調鍵等）在游標處逐字保留；明確打的符號（@ #）沒在組字時也一樣。
+	if (s.composing() || s.explicitSymbol(k)) && unicode.IsPrint(runes[0]) {
 		s.insertPendingLiteral()
 		s.insertLiteral(k)
 		return true, ""
@@ -1408,7 +1401,7 @@ func (s *Session) openCandidates(length int) {
 		for _, r := range s.syls[start:end] {
 			text.WriteString(string(r))
 		}
-		alternatives := symbolAlternatives(text.String())
+		alternatives := literalAlternatives(text.String())
 		if (s.InputStyle.Punctuation == "standard" || s.InputStyle.Punctuation == "chewing") && (text.String() == "＼" || text.String() == "／") {
 			alternatives = []string{text.String()}
 			if text.String() == "＼" {
@@ -1989,7 +1982,6 @@ func (s *Session) reset() {
 	s.styleCycle = nil
 	s.englishWord, s.englishDismissed, s.englishTokenBlocked = false, false, false
 	s.paletteUndo = nil
-	s.symbolPrefix = false
 	s.styleGrid = false
 	s.mark = nil
 	s.phonetic, s.phoneticUndo = nil, nil
@@ -2026,9 +2018,6 @@ func (s *Session) reset() {
 func (s *Session) snapshot() proto.Snapshot {
 	snap := proto.Snapshot{FullWidth: s.fullWidth, Revision: s.rev, EnglishAutocomplete: s.EnglishAutocomplete, EnglishPending: s.englishWord, EnglishCanStart: s.englishCanStart()}
 	pending := s.comp.String()
-	if s.symbolPrefix {
-		pending += "`"
-	}
 	if s.mixed.raw != "" {
 		pending = s.mixedText()
 	}
@@ -2044,10 +2033,13 @@ func (s *Session) snapshot() proto.Snapshot {
 	case s.mixed.raw != "":
 		_, unfinished = s.mixedPending(pending)
 	default:
-		unfinished = !s.comp.Empty() && !s.symbolPrefix
+		unfinished = !s.comp.Empty()
 	}
 	// 中英混打照字面顯示、按空白會組成中文的數字按鍵（#162）：那段組字以 StyleReading 畫，另附讀音提示。
 	hintAt, hintSyl, hinted := s.mixedSpaceReading()
+	if s.mixed.raw != "" && s.fullWidth && !s.english && !hinted {
+		pending = s.fullWidthText(pending) // 全形時打到一半的英數也照全形顯示（insertMixedLiteral）
+	}
 	pendingSegments := func() []proto.Segment {
 		if !hinted {
 			return []proto.Segment{{Text: pending, Style: proto.StylePending, Unfinished: unfinished}}

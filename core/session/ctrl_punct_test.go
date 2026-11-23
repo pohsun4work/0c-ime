@@ -84,7 +84,7 @@ func TestCtrlPunctOffOrEnglishGoesToTheApp(t *testing.T) {
 	}
 	// 其他 Ctrl 鍵名不是協定的按鍵。
 	s := ctrlPunctSession()
-	for _, k := range []string{"Ctrl+/", "Ctrl+1", "Ctrl+[", "Ctrl+<"} {
+	for _, k := range []string{"Ctrl+/", "Ctrl+1", "Ctrl+{", "Ctrl+<"} { // fork 的 Ctrl+[ 打【（hoshi_symbols_test.go）
 		if snap := key(s, k); snap.Handled {
 			t.Fatalf("%s 不是 Ctrl＋標點：%+v", k, snap)
 		}

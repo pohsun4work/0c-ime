@@ -169,9 +169,9 @@ func TestConvertedSyllableCanReturnToLiteral(t *testing.T) {
 
 func TestSymbolPaletteAndCancel(t *testing.T) {
 	s := newSession()
-	snap := key(s, "`")
+	snap := openSymbolMenu(s)
 	if !snap.Handled || snap.Candidates == nil || snap.Candidates.Pages < 2 || snap.Commit != "" {
-		t.Fatalf("反引號應開符號選單：%+v", snap)
+		t.Fatalf("符號上按 ↑ 應開符號選單：%+v", snap)
 	}
 	key(s, proto.KeyPageDown)
 	key(s, proto.KeyBackTab) // 注音是最後一個分頁（#290）

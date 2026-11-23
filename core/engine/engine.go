@@ -5,7 +5,6 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/0c-biggo/0c-ime/core/english"
@@ -106,30 +105,9 @@ func (e *Engine) ToneMarkKeys() bool {
 // IdleKeys 回報沒在組字、注音模式時輸入法會處理的可見 ASCII 按鍵（session.IdleKeys），依鍵盤排列與設定而不同（#183）。
 // 給自己過濾閒置按鍵的外殼（Windows）查詢，外殼不必各自維護每種排列的按鍵表。
 func (e *Engine) IdleKeys() string {
+	// fork：微軟參考的半形原字元（#272）、Shift＋符號打半形（#258）與所有符號鍵打半形（#282）的符號沒在組字時也留在
+	// 組字區（session/hoshi_symbols.go），不像官方交還應用程式，所以不從清單拿掉。
 	keys := session.IdleKeys(e.Layout, e.mixedKeys(), e.EmojiShortcut)
-	if e.InputStyle.Punctuation == "microsoft" {
-		// 風格的半形原字元交還應用程式；設定「Shift＋符號打半形」開著時也一樣（#272）。
-		keys = strings.Map(func(r rune) rune {
-			if strings.ContainsRune("\\'\"<>?", r) {
-				return -1
-			}
-			return r
-		}, keys)
-	}
-	if e.ShiftSymbolHalfwidth || e.AllSymbolsHalfwidth {
-		// Shift＋符號打半形（#258）與所有符號鍵打半形（#282）：沒在組字時這些鍵交還應用程式，TestKeyDown 不能吃。
-		// 所有符號鍵打半形拿掉排列裡全部的標點鍵，涵蓋前者（< > " 打鍵帽字元，不由核心送出 , . ;）。
-		drop := session.HalfwidthShiftKeys(e.Layout)
-		if e.AllSymbolsHalfwidth {
-			drop = session.AllSymbolsHalfwidthKeys(e.Layout)
-		}
-		keys = strings.Map(func(r rune) rune {
-			if strings.ContainsRune(drop, r) {
-				return -1
-			}
-			return r
-		}, keys)
-	}
 	if e.InputStyle.ShiftLetter == "commit" || e.InputStyle.ShiftLetter == "lower" {
 		keys += "ABCDEFGHIJKLMNOPQRSTUVWXYZ" // 送出組字或改打小寫（#210）：沒在組字時也要吃，不能交給應用程式打大寫
 	}

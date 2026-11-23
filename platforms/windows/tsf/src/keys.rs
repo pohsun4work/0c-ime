@@ -346,7 +346,7 @@ impl Tested {
     }
 }
 
-/// 不按 Ctrl 時的字元對應的 Ctrl＋標點鍵名（#168；: ( ) 是 #231 的 Ctrl+Shift+; 9 0）。引擎認不認得見 [`ctrl_punct_known`]。
+/// 不按 Ctrl 時的字元對應的 Ctrl＋標點鍵名（#168；: ( ) 是 #231 的 Ctrl+Shift+; 9 0；[ ] 是 fork 加的）。引擎認不認得見 [`ctrl_punct_known`]。
 pub fn ctrl_punct_name(c: &str) -> Option<&'static str> {
     Some(match c {
         "," => "Ctrl+,",
@@ -358,6 +358,8 @@ pub fn ctrl_punct_name(c: &str) -> Option<&'static str> {
         ":" => "Ctrl+:",
         "(" => "Ctrl+(",
         ")" => "Ctrl+)",
+        "[" => "Ctrl+[", // fork：照微軟新注音打【】
+        "]" => "Ctrl+]",
         _ => return None,
     })
 }
@@ -937,10 +939,10 @@ mod tests {
             assert_eq!(ctrl_punct_name(c), Some(want), "{c}");
         }
         // #231：Ctrl+Shift+; 9 0。
-        for (c, want) in [(":", "Ctrl+:"), ("(", "Ctrl+("), (")", "Ctrl+)")] {
+        for (c, want) in [(":", "Ctrl+:"), ("(", "Ctrl+("), (")", "Ctrl+)"), ("[", "Ctrl+["), ("]", "Ctrl+]")] {
             assert_eq!(ctrl_punct_name(c), Some(want), "{c}");
         }
-        for c in ["/", "1", "<", ">", "[", "]", "a", "A", "\""] {
+        for c in ["/", "1", "<", ">", "{", "}", "a", "A", "\""] {
             assert_eq!(ctrl_punct_name(c), None, "{c}");
         }
     }
@@ -955,6 +957,7 @@ mod tests {
         assert!(ctrl_punct_known("Ctrl+(", ",.';?!:()"));
         assert!(ctrl_punct_known("Ctrl+)", ",.';?!:()"));
         assert!(!ctrl_punct_known("Ctrl+[", ",.';?!:()"));
+        assert!(ctrl_punct_known("Ctrl+[", ",.';?!:()[]")); // fork 的引擎列了 [ ]
         assert!(!ctrl_punct_known("Ctrl+", ",.';?!:()"));
     }
 

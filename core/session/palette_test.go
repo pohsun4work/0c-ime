@@ -71,9 +71,10 @@ func TestPaletteDirectSelectionAndEscapes(t *testing.T) {
 		t.Fatalf("cancel: %+v", snap)
 	}
 	s.EmojiShortcut = "off"
-	if snap := key(s, "="); snap.Handled || snap.Candidates != nil {
-		t.Fatal("disabled trigger captured input")
+	if snap := key(s, "="); !snap.Handled || snap.Candidates != nil || snap.Text() != "=" {
+		t.Fatal("disabled trigger: = is an explicit symbol and stays in the composition (fork)")
 	}
+	key(s, proto.KeyEscape)
 	s.EmojiShortcut = "equals"
 	s.Handle(proto.Request{Type: proto.Mode, On: true})
 	if snap := key(s, "="); snap.Handled || snap.Candidates != nil {

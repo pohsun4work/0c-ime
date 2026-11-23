@@ -7,20 +7,21 @@ import (
 	"testing"
 )
 
-// #258：「Shift＋符號打半形」預設關閉，舊設定檔沒有欄位時也是關；可以開、關，讀不懂的值退回預設（關）並在存檔時保留原文。
-func TestShiftSymbolHalfwidthDefaultsOffAndPersists(t *testing.T) {
+// #258：「標點寬度」可以開、關，讀不懂的值退回預設並在存檔時保留原文。
+// fork：預設改成所有符號鍵打半形（all），舊設定檔沒有欄位時也是。
+func TestShiftSymbolHalfwidthDefaultsAllAndPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
-	if s, err := Load(path); err != nil || s.ShiftSymbolHalfwidth {
-		t.Fatalf("預設關閉：%+v %v", s, err)
+	if s, err := Load(path); err != nil || !s.ShiftSymbolHalfwidth || !s.AllSymbolsHalfwidth {
+		t.Fatalf("預設所有符號鍵打半形：%+v %v", s, err)
 	}
-	if v, _ := Default().Value("shift-symbol-halfwidth"); v != "off" {
+	if v, _ := Default().Value("shift-symbol-halfwidth"); v != "all" {
 		t.Fatalf("命令列預設值：%q", v)
 	}
 	if err := os.WriteFile(path, []byte(`{"schema":1,"selection":"statistical","future":42}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if s, err := Load(path); err != nil || s.ShiftSymbolHalfwidth || s.ReadOnly() {
-		t.Fatalf("舊設定檔沒有欄位時應是關、可寫：%+v %v", s, err)
+	if s, err := Load(path); err != nil || !s.AllSymbolsHalfwidth || s.ReadOnly() {
+		t.Fatalf("舊設定檔沒有欄位時應是 all、可寫：%+v %v", s, err)
 	}
 	for _, value := range []string{"on", "off", "on"} {
 		s, err := Load(path)
@@ -46,8 +47,8 @@ func TestShiftSymbolHalfwidthDefaultsOffAndPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := Load(path)
-	if err != nil || s.ShiftSymbolHalfwidth {
-		t.Fatalf("讀不懂的值退回預設：%+v %v", s, err)
+	if err != nil || !s.ShiftSymbolHalfwidth {
+		t.Fatalf("讀不懂的值退回預設（fork：all）：%+v %v", s, err)
 	}
 	if err := Save(path, s); err != nil {
 		t.Fatal(err)
@@ -67,7 +68,7 @@ func TestShiftSymbolHalfwidthDefaultsOffAndPersists(t *testing.T) {
 	}
 	for _, it := range Default().Items() {
 		if it.Key == "shift-symbol-halfwidth" {
-			if it.Value != "off" || it.Default != "off" || it.Label != "標點寬度" || it.Locked {
+			if it.Value != "all" || it.Default != "all" || it.Label != "標點寬度" || it.Locked {
 				t.Fatalf("設定程式的項目：%+v", it)
 			}
 			return
