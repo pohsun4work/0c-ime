@@ -17,7 +17,7 @@ import (
 )
 
 // #282：標點寬度選「所有符號鍵打半形」時，引擎載入 all_symbols_halfwidth，Ctrl＋標點固定開、聲調選填暫停（設定檔關著也一樣），
-// idle_keys 不列 [ _（沒在組字時交還應用程式），health 回報實際值給 0c-update 比較。
+// health 回報實際值給 0c-update 比較。fork：沒在組字時打的符號也留在組字區，idle_keys 照樣列 [ _。
 func TestAllSymbolsHalfwidthSettingInServer(t *testing.T) {
 	binary := buildServer(t)
 	dir := t.TempDir()
@@ -50,14 +50,14 @@ func TestAllSymbolsHalfwidthSettingInServer(t *testing.T) {
 		return r
 	}
 	info := call(ipc.Envelope{Op: ipc.OpHealth}).Info
-	if info["all_symbols_halfwidth"] != "true" || info["shift_symbol_halfwidth"] != "true" || info["ctrl_punctuation"] != "true" || info["toneless"] != "false" || strings.ContainsAny(info["idle_keys"], "[_") {
+	if info["all_symbols_halfwidth"] != "true" || info["shift_symbol_halfwidth"] != "true" || info["ctrl_punctuation"] != "true" || info["toneless"] != "false" || !strings.Contains(info["idle_keys"], "[") || !strings.Contains(info["idle_keys"], "_") {
 		t.Fatalf("health：%+v", info)
 	}
 	open := call(ipc.Envelope{Op: ipc.OpOpen, Version: proto.Version})
 	for _, tc := range []struct {
 		key, text string
 		handled   bool
-	}{{"[", "", false}, {"_", "", false}, {proto.KeyCtrlComma, "，", true}, {"[", "，[", true}} {
+	}{{"[", "[", true}, {"_", "[_", true}, {proto.KeyCtrlComma, "[_，", true}, {"[", "[_，[", true}} {
 		req := proto.Request{Type: proto.Key, Key: tc.key}
 		snap := call(ipc.Envelope{Op: ipc.OpHandle, Session: open.Session, Req: &req}).Snapshot
 		if snap == nil || snap.Handled != tc.handled || snap.Text() != tc.text {
