@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/0c-biggo/0c-ime/internal/autoupdate"
-	"github.com/0c-biggo/0c-ime/internal/models"
 	"github.com/0c-biggo/0c-ime/internal/settings"
 )
 
@@ -61,7 +60,6 @@ type contractError struct {
 func classify(err error) contractError {
 	var se *settings.SetError
 	var ue usageError
-	var me *models.Error
 	switch {
 	case errors.As(err, &ue):
 		return contractError{Code: codeUsage, Message: err.Error()}
@@ -77,8 +75,6 @@ func classify(err error) contractError {
 		return contractError{Code: codeBusy, Message: err.Error()}
 	case errors.Is(err, errResetBusy):
 		return contractError{Code: codeBusy, Message: err.Error()}
-	case errors.As(err, &me):
-		return contractError{Code: me.Code, Message: me.Message}
 	}
 	return contractError{Code: codeIO, Message: err.Error()}
 }

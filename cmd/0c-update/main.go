@@ -68,6 +68,11 @@ func listSettings(w io.Writer, r settings.Report) {
 
 func isJSONFlag(arg string) bool { return arg == "-json" || arg == "--json" }
 
+func regularFile(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
+}
+
 func settingsCommand(args []string) error {
 	switch {
 	case len(args) == 0:
@@ -150,7 +155,7 @@ func run(args []string) error {
 		return settingsCommand(args[1:])
 	case "set":
 		return setCommand(args[1:])
-	case "models": // 個人目錄的神經模型（#180）
+	case "models": // 安裝包內建的神經模型資訊（#180）
 		return modelsCommand(args[1:])
 	case "vocab": // 自訂詞彙（#122）
 		return vocabCommand(args[1:])

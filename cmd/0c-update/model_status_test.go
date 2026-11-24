@@ -87,16 +87,16 @@ func TestModelStatusExplainsFallbackReason(t *testing.T) {
 	}
 }
 
-// 找到模型卻缺 numpy／onnxruntime，或模型放在個人目錄時，狀態要說清楚；推論元件內附在安裝包裡，不提 apt 的套件名。
-func TestModelStatusExplainsRuntimeMissingAndUserModel(t *testing.T) {
+// 找到模型卻缺 numpy／onnxruntime 時，狀態要說清楚；推論元件內附在安裝包裡，不提 apt 的套件名。
+func TestModelStatusExplainsRuntimeMissing(t *testing.T) {
 	got := modelStatus(modelStatusDial(map[string]string{"version": "dev", "selection_state": "runtime_missing",
-		"punctuation_state": "ready", "punctuation_source": "user"}, true))
-	if got["selection_state"] != "runtime_missing" || got["punctuation_source"] != "user" || got["selection_source"] != nil {
+		"punctuation_state": "ready"}, true))
+	if got["selection_state"] != "runtime_missing" {
 		t.Fatalf("runtime status: %v", got)
 	}
 	var text bytes.Buffer
 	printModelStatus(&text, got)
-	for _, want := range []string{"神經選字：缺少推論元件，使用統計引擎", "補標點：已就緒（個人目錄的模型）"} {
+	for _, want := range []string{"神經選字：缺少推論元件，使用統計引擎", "補標點：已就緒"} {
 		if !strings.Contains(text.String(), want) {
 			t.Fatalf("missing %q: %s", want, text.String())
 		}

@@ -5,20 +5,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// 布局：root/data（字典）、root/neural（worker、內附模型、內附 Python）、home（個人目錄）。
-type findLayout struct{ root, data, neural, user string }
+// 布局：root/data（字典）、root/neural（worker、內附模型、內附 Python）。
+type findLayout struct{ root, data, neural string }
 
 func newFindLayout(t *testing.T) findLayout {
 	t.Helper()
 	root := t.TempDir()
-	l := findLayout{root: root, data: filepath.Join(root, "data"), neural: filepath.Join(root, "neural"),
-		user: filepath.Join(root, "home")}
+	l := findLayout{root: root, data: filepath.Join(root, "data"), neural: filepath.Join(root, "neural")}
 	os.MkdirAll(l.data, 0o755)
 	return l
 }
@@ -35,59 +33,31 @@ func touch(t *testing.T, path string) {
 
 func bundledPython(neural string) string { return filepath.Join(neural, "python", "python.exe") }
 
-const testDictionary = "91620d9640525e694afe417bd03e500a666441f72b59bc92c1913c83c17a3b9b"
-
-func (l findLayout) find() Bundled {
-	return Find(Options{DataDir: l.data, UserDir: l.user, DictionarySHA256: testDictionary})
-}
-
-// 官網安裝包：內附 Python、worker、模型都在 <data>/../neural；結果與 FindBundled 相同，不看個人目錄。
-func TestFindBundledLayoutUnchanged(t *testing.T) {
+// 官網安裝包：內附 Python、worker、模型都在 <data>/../neural。
+func TestFindBundledLayout(t *testing.T) {
 	l := newFindLayout(t)
 	touch(t, bundledPython(l.neural))
 	for _, p := range []string{"sequence_runtime.py", "punct_runtime.py", "select/manifest.json", "punct/manifest.json"} {
 		touch(t, filepath.Join(l.neural, p))
 	}
-	touch(t, filepath.Join(l.user, "models", testDictionary, "select", "manifest.json"))
-	for _, b := range []Bundled{l.find(), FindBundled(l.data)} {
-		if !b.HasSelect || !b.HasPunct || b.Python != bundledPython(l.neural) || b.PythonSource != SourceBundled ||
-			b.SelectSource != SourceBundled || b.PunctSource != SourceBundled ||
-			b.SelectPackage != filepath.Join(l.neural, "select") || b.SelectWorker != filepath.Join(l.neural, "sequence_runtime.py") ||
-			b.PunctPackage != filepath.Join(l.neural, "punct") || b.PunctWorker != filepath.Join(l.neural, "punct_runtime.py") {
-			t.Fatalf("bundled layout: %+v", b)
-		}
+	b := Find(l.data)
+	if !b.HasSelect || !b.HasPunct || b.Python != bundledPython(l.neural) || b.PythonSource != SourceBundled ||
+		b.SelectSource != SourceBundled || b.PunctSource != SourceBundled ||
+		b.SelectPackage != filepath.Join(l.neural, "select") || b.SelectWorker != filepath.Join(l.neural, "sequence_runtime.py") ||
+		b.PunctPackage != filepath.Join(l.neural, "punct") || b.PunctWorker != filepath.Join(l.neural, "punct_runtime.py") {
+		t.Fatalf("bundled layout: %+v", b)
 	}
 }
 
-// 模型放在個人目錄（#180）時依字典雜湊分開；安裝包內建的優先。
-func TestFindUserModels(t *testing.T) {
+// 少了模型或 worker 的那一項不啟動，由統計引擎選字（或原文提交）。
+func TestFindMissingModel(t *testing.T) {
 	l := newFindLayout(t)
 	touch(t, bundledPython(l.neural))
 	touch(t, filepath.Join(l.neural, "sequence_runtime.py"))
-	touch(t, filepath.Join(l.neural, "punct_runtime.py"))
-	user := filepath.Join(l.user, "models", testDictionary)
-	touch(t, filepath.Join(user, "select", "manifest.json"))
-	b := l.find()
-	if !b.HasSelect || b.PythonSource != SourceBundled || b.SelectSource != SourceUser ||
-		b.SelectPackage != filepath.Join(user, "select") || b.SelectWorker != filepath.Join(l.neural, "sequence_runtime.py") {
-		t.Fatalf("user model: %+v", b)
-	}
-	if b.HasPunct || b.PunctSource != "" {
-		t.Fatalf("punct model is not installed: %+v", b)
-	}
-	// 只找安裝包內附時（官網安裝包的規則），個人目錄不算。
-	if fb := FindBundled(l.data); fb.HasSelect || fb.SelectSource != "" {
-		t.Fatalf("FindBundled must ignore user models: %+v", fb)
-	}
-	// 換了字典（雜湊不同）：舊配對不會被找到。
-	other := Find(Options{DataDir: l.data, UserDir: l.user, DictionarySHA256: strings.Repeat("0", 64)})
-	if other.HasSelect || other.SelectSource != "" {
-		t.Fatalf("model paired with another dictionary was used: %+v", other)
-	}
-	// 安裝包內建優先於個人目錄。
-	touch(t, filepath.Join(l.neural, "select", "manifest.json"))
-	if b := l.find(); b.SelectSource != SourceBundled || b.SelectPackage != filepath.Join(l.neural, "select") {
-		t.Fatalf("bundled model must win over user model: %+v", b)
+	touch(t, filepath.Join(l.neural, "punct", "manifest.json"))
+	b := Find(l.data)
+	if b.HasSelect || b.SelectSource != "" || b.HasPunct || b.PunctSource != "" {
+		t.Fatalf("missing model or worker must not start: %+v", b)
 	}
 }
 

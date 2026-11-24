@@ -147,15 +147,9 @@ pub fn api_args(action: &str, port: Option<u16>) -> Result<Vec<String>, String> 
     Ok(out)
 }
 
-/// 「模型」頁（#180）的固定動作對應到 0c-update models 的參數與逾時（秒）。download 在背景開始下載、立刻回傳，
-/// 進度由 status 的 operation 輪詢；網路與檔案動作都在 Go 端。
-pub fn models_args(action: &str) -> Result<(Vec<String>, u64), String> {
-    let timeout = match action {
-        "status" => 20,
-        "download" | "cancel" | "remove" => 60,
-        _ => return Err("未知的模型動作".to_string()),
-    };
-    Ok((vec!["models".to_string(), action.to_string(), "-json".to_string()], timeout))
+/// 「模型」頁（#180）只讀狀態：0c-update models status -json 的參數與逾時（秒），不連網。
+pub fn models_args() -> (Vec<String>, u64) {
+    (vec!["models".to_string(), "status".to_string(), "-json".to_string()], 20)
 }
 
 /// 「清除學習紀錄」（#301）：只有 reset。0c-update personal reset -json 在引擎執行中時請它清空並存檔，
@@ -576,14 +570,8 @@ mod tests {
     }
 
     #[test]
-    fn models_args_only_fixed_actions() {
-        assert_eq!(models_args("status").unwrap(), (strings(&["models", "status", "-json"]), 20));
-        assert_eq!(models_args("download").unwrap().0, strings(&["models", "download", "-json"]));
-        assert_eq!(models_args("cancel").unwrap().0, strings(&["models", "cancel", "-json"]));
-        assert_eq!(models_args("remove").unwrap().0, strings(&["models", "remove", "-json"]));
-        for bad in ["remind", "", "-json", "status -json", "download;rm"] {
-            assert!(models_args(bad).is_err(), "{bad:?}");
-        }
+    fn models_args_only_status() {
+        assert_eq!(models_args(), (strings(&["models", "status", "-json"]), 20));
     }
 
     #[test]

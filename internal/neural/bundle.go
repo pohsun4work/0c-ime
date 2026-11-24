@@ -6,27 +6,8 @@ import (
 	"runtime"
 )
 
-// 模型與推論環境的來源，health 的 selection_source／punctuation_source、neural_python 回報這些值。
-const (
-	SourceBundled = "bundled" // 安裝包內附（官網安裝包；發行版另外裝的模型套件也放在這裡）
-	SourceUser    = "user"    // 個人目錄（#180 下載後在本機配對）
-)
-
-// Options 是找神經推論三樣東西（Python、worker、模型）的位置。
-//
-//	<data>/../neural/python/             內附 Python 與 numpy、onnxruntime（官網安裝包）
-//	<data>/../neural/*_runtime.py        worker
-//	<data>/../neural/select|punct/       安裝包內建的模型，與該字典配對出貨
-//	<UserDir>/models/<字典 manifest SHA-256>/select|punct/   個人目錄的模型（#180）
-//
-// 模型依「安裝包內建 → 個人目錄」的順序取第一個；都沒有時由統計引擎選字。個人目錄以字典 manifest 的
-// 雜湊分開：worker 啟動時本來就核對這個雜湊（DictionarySHA256），換了字典的舊配對不會被找到。
-type Options struct {
-	DataDir string
-	// UserDir 是個人資料目錄（%LOCALAPPDATA%\Zuin）；空字串或 DictionarySHA256 為空時不找個人目錄。
-	UserDir          string
-	DictionarySHA256 string
-}
+// SourceBundled 是模型與推論環境的來源（安裝包內附），health 的 selection_source／punctuation_source、neural_python 回報它。
+const SourceBundled = "bundled"
 
 // Bundled 是找到的推論環境與模型。HasSelect／HasPunct 表示可以啟動 worker（有模型、worker 與內附的 Python）。
 // 內附 Python 不見是安裝損毀：Python 為空、不啟動 worker，狀態是 not_installed。
@@ -36,34 +17,23 @@ type Bundled struct {
 	HasSelect, HasPunct                                            bool
 }
 
-// FindBundled 只找安裝包內附的 Python 與模型（官網安裝包的布局）。
-func FindBundled(dataDir string) Bundled { return Find(Options{DataDir: dataDir}) }
-
-// Find 分開找 Python、worker 與模型；見 Options。
-func Find(o Options) Bundled {
-	dir := filepath.Join(filepath.Dir(filepath.Clean(o.DataDir)), "neural")
+// Find 分開找安裝包內附的 Python、worker 與模型；模型沒有時由統計引擎選字。
+//
+//	<data>/../neural/python/             內附 Python 與 numpy、onnxruntime
+//	<data>/../neural/*_runtime.py        worker
+//	<data>/../neural/select|punct/       內建的模型，與該字典配對出貨
+func Find(dataDir string) Bundled {
+	dir := filepath.Join(filepath.Dir(filepath.Clean(dataDir)), "neural")
 	var b Bundled
 	if python := filepath.Join(dir, "python", "python.exe"); regular(python) {
 		b.Python, b.PythonSource = python, SourceBundled
 	}
-	var user string
-	if o.UserDir != "" && len(o.DictionarySHA256) == 64 {
-		user = filepath.Join(o.UserDir, "models", o.DictionarySHA256)
-	}
 	find := func(worker, name string) (string, string, string) {
-		script := filepath.Join(dir, worker)
-		if !regular(script) {
-			return script, filepath.Join(dir, name), ""
+		script, pkg := filepath.Join(dir, worker), filepath.Join(dir, name)
+		if regular(script) && regular(filepath.Join(pkg, "manifest.json")) {
+			return script, pkg, SourceBundled
 		}
-		if bundled := filepath.Join(dir, name); regular(filepath.Join(bundled, "manifest.json")) {
-			return script, bundled, SourceBundled
-		}
-		if user != "" {
-			if p := filepath.Join(user, name); regular(filepath.Join(p, "manifest.json")) {
-				return script, p, SourceUser
-			}
-		}
-		return script, filepath.Join(dir, name), ""
+		return script, pkg, ""
 	}
 	b.SelectWorker, b.SelectPackage, b.SelectSource = find("sequence_runtime.py", "select")
 	b.PunctWorker, b.PunctPackage, b.PunctSource = find("punct_runtime.py", "punct")

@@ -167,10 +167,10 @@ fn vocab_unwatch(watcher: State<'_, watch::Watcher>) {
     watcher.stop();
 }
 
-/// 「模型」頁（#180）：0c-update models status|download|cancel|remove -json。結果（status 或契約錯誤）原樣交給前端。
+/// 「模型」頁（#180）：0c-update models status -json。結果（status 或契約錯誤）原樣交給前端。
 #[tauri::command]
-async fn models_command(action: String) -> Result<Value, String> {
-    let (command, timeout) = updater::models_args(&action)?;
+async fn models_command() -> Result<Value, String> {
+    let (command, timeout) = updater::models_args();
     call(command, timeout).await
 }
 

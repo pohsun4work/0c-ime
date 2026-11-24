@@ -297,6 +297,4 @@ input.port { width: 8em; }
 .model-card .sha code { background: var(--accent-soft); padding: 1px 6px; border-radius: 6px; }
 .model-card .path { word-break: break-all; }
 .model-card button.link.ext { padding: 0 4px; margin-left: -4px; text-align: left; overflow-wrap: anywhere; }
-.download-note { margin: 0 0 4px; }
-.model-actions { margin-bottom: 18px; }
 .side { overflow-y: auto; }

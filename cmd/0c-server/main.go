@@ -173,9 +173,8 @@ func main() {
 	if manifestErr == nil {
 		dictionarySHA = fmt.Sprintf("%x", sha256.Sum256(dictionaryManifest))
 	}
-	// Python、worker 與模型分開找：Python 用安裝包內附的；模型依安裝包內建 → 個人目錄（#180）的順序；
-	// 都沒有時統計選字。
-	bundled := neural.Find(neural.Options{DataDir: *data, UserDir: filepath.Dir(*user), DictionarySHA256: dictionarySHA})
+	// Python、worker 與模型都用安裝包內附的；沒有模型時統計選字。
+	bundled := neural.Find(*data)
 	python, pythonSource := bundled.Python, bundled.PythonSource
 	if explicit["neural-python"] {
 		python, pythonSource = *neuralPython, "custom"
@@ -368,7 +367,7 @@ func main() {
 		"ctrl_punctuation": "true", "input_style_shift_space": config.ShiftSpace}
 	// 啟動時載入的設定：外殼讀其中幾項（中英切換鍵、Shift＋空白、開始時的模式…），0c-update 拿它跟設定檔比較。
 	maps.Copy(srv.Info, config.HealthInfo())
-	// #181：模型從哪裡來（bundled：安裝包內建；user：個人目錄），推論用哪個 Python（bundled、custom、missing）。
+	// #181：模型從哪裡來（bundled：安裝包內建），推論用哪個 Python（bundled、custom、missing）。
 	srv.Info["neural_python"] = pythonSource
 	if selectionSource != "" {
 		srv.Info["selection_source"] = selectionSource

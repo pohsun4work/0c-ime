@@ -619,10 +619,7 @@
       personalReset,
       personalResetEnabled: () => !!(state.settings && state.settings.features && state.settings.features.personal_reset),
     });
-    models = window.ZcModels({
-      h, invoke, toast, copyText, modelLabel, render,
-      visible: () => page === 'models' && !document.hidden,
-    });
+    models = window.ZcModels({ h, invoke, toast, copyText, modelLabel, render });
     document.querySelectorAll('.nav').forEach((button) => button.addEventListener('click', () => show(button.dataset.page)));
     try { state.info = await invoke('app_info'); } catch (_) { /* 關於頁顯示未知 */ }
     // 要開的頁面由網址參數帶進來（?page=update）；舊的 input 導到中英切換，不認得的開總覽。
@@ -634,7 +631,6 @@
     }
     render();
     refresh();
-    setInterval(() => models.poll(), 1000);
     setInterval(() => { if (!document.hidden) refresh(); }, 15000);
     setInterval(pollUpdate, 1000);
     window.addEventListener('focus', () => { refresh(); vocab.focus(); });

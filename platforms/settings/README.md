@@ -39,7 +39,7 @@
 - **我加的詞**：頂端是搜尋與新增列。打字時（組字結束後 250 毫秒）查 `annotate`，每個字一格讀音：破音字是黃色下拉選單，查不到的字自己填注音；Enter 加入。英文詞（`ls`、`kubectl`，#146）不查讀音，直接 Enter 加入，清單上讀音的位置標示「英文」、沒有排名。一次貼上多行變成預覽清單（不是漢字也不是英文詞的行不能勾），勾選後一起加入（超過 500 個分批送，整批復原）；「詞＋Tab＋讀音」的行照那個讀音加，不重查。每列：詞、讀音（點了改，可加到 4 個讀音，送出時附 `expect`）、排名徽章（`rank`：首選／第 N 個／第 N 頁，滑過顯示前面是哪個詞）、來源與時間、刪除。超過 1,000 筆分頁，搜尋交給引擎（`list` 的 `query`）。
 - **匯出、匯入**（#255）：標題列右邊兩個按鈕。「匯出」把我加的詞與我的片語存成文字檔（`ui/vocab-text.js` 組字串，Rust 的 `export_vocab` 寫到下載資料夾），頁首顯示路徑。「匯入」開 WebView 的檔案對話框（`<input type="file">`），讀進來和貼上多行同一個預覽：上方是摘要（已經有的略過幾個、幾行不能加）與「加入勾選的…」，清單超過 12 列時在框內捲動，片語列在詞下面。格式與合併規則見 [`ui/vocab-text.js`](ui/vocab-text.js)。
 - **靈犀學到的**（#182）：`learned` 清單，`kind` 顯示成「常一起用」（`phrase`）或「你選過的寫法」（`reading`），不顯示次數；頂端說明三個動作，每列有勾選框與「保留」（`keep`）、「移除」（`unlearn`）、「不再學」（`forget`），已是自訂詞的顯示「已在我加的詞」、不能勾。勾選列有全選（部分勾選時半勾）與三個批次按鈕，一次送一個指令。移除、不再學、恢復學習之後先拿掉那幾列，底部提示附「復原」（`learned-undo`），焦點交給它；保留是自訂詞的批次，照舊從「最近變更」也能復原。`forgotten_count` 大於 0 時右上角出現「不再學的詞（N）」，打開是另一個清單（`forgotten`），每列與批次都能「恢復學習」（`relearn`），「‹ 靈犀學到的」返回；全部恢復後自動返回、入口消失。清單最後是「清除學習紀錄」（#301，見下面一節；「不再學的詞」裡不顯示）。
-- **我的片語**：新增（Ctrl／⌘＋Enter）、刪除、↑↓ 或拖曳把手排序（`phrase-move`）。拖曳用指標事件，不用 HTML5 拖放（各平台 WebView 的拖放處理不一致）。
+- **我的片語**：新增（Ctrl＋Enter）、刪除、↑↓ 或拖曳把手排序（`phrase-move`）。拖曳用指標事件，不用 HTML5 拖放（各平台 WebView 的拖放處理不一致）。
 - **最近變更**：最近 5 批（可展開全部）：時間、誰（你／AI 助手／打字時／學到的）、摘要、復原；點摘要看明細。
 - **讓 AI 幫你加詞**（頁面最下方，預設收合）：開關旁一行「AI 助手讀得到你加的詞」；token 預設遮住，可顯示、複製、重新產生（先確認「已設定的 AI 工具要重新貼上設定」），列出建立與最後使用時間；「你用哪個 AI 工具？」只顯示選到的那段範例（網址、token、`0c-mcp` 路徑自動填好，未顯示 token 時範例裡也遮住，「複製」一律複製完整內容，含 token 的註明不要分享）；「測試連線」。埠被占用時可以換埠。
 - 引擎沒有執行時只能查看：新增列停用、刪除與復原鈕藏起來，頁首說明。
@@ -49,17 +49,16 @@
 
 ## 模型（#180）
 
-側欄「模型」在「更新」上面（`--page models`、`0c-update open-settings models`），總覽的「神經選字」列有「查看」連過來。選字、補標點各一張卡片：引擎回報的狀態（文字同總覽）、版本、路徑、`model.onnx` 的 SHA-256（等寬字型、截斷顯示、可複製）；`0c-update models status` 給了 Hugging Face 網址（本機雜湊等於 `models.lock.json` 時才有）就顯示連結與授權。
+側欄「模型」在「更新」上面（`--page models`、`0c-update open-settings models`），總覽的「神經選字」列有「查看」連過來。只顯示資訊，沒有按鈕：
 
-- 內建模型（`source=bundled`）只顯示資訊，沒有按鈕。
-- 可下載（`can_download`，只有沒有內建模型的 Linux 系統安裝）：頁首一句狀態（未安裝、已安裝、需要重新下載、字典更新後自動重新配對），下載中改顯示進度條與已下載大小、核對中、配對中；按鈕「下載模型」（上方寫明大小、Hugging Face 的 repo 與 revision、授權）、下載中「取消」、個人目錄的模型「刪除」（先確認，焦點在「取消」）。`runtime.ok=false` 時列出要 `apt install` 的套件（可複製），`last_error` 顯示它的 `message`。
-- 不能下載又沒有模型：依 `disabled_reason`（platform／distribution）說明原因，沒有按鈕。`dictionary_mismatch`（安裝的字典不在 pairing.lock 上，例如發行版自己重建字典）不論有沒有下載過的權重都說明「不能使用下載的模型」，不顯示「已安裝」、不給下載；個人目錄裡的仍可刪除。
+- 頁首一句狀態：內建模型（`source=bundled`）是「隨安裝包內附」；找不到內建模型（`source=none`，安裝損毀）說明目前用統計選字、重新安裝可以修復。
+- 選字、補標點各一張卡片：引擎回報的狀態（文字同總覽）、版本、路徑、`model.onnx` 的 SHA-256（等寬字型、截斷顯示、可複製）；`0c-update models status` 給了 Hugging Face 網址（本機雜湊等於 `models.lock.json` 或 `equivalent.json` 時才有）就顯示連結與授權。
 
-網路與檔案動作都在 `0c-update models status|download|cancel|remove -json`；畫面每秒讀一次 status 的 `operation`（只在這一頁顯示中、有進行中的作業時），同「更新」頁。Tauri 指令：
+資料來自 `0c-update models status -json`（只讀、不連網）。Tauri 指令：
 
 | 指令 | 參數 | 說明 |
 |---|---|---|
-| `models_command` | `action`：`status`／`download`／`cancel`／`remove` | 對應 `0c-update models <action> -json`，結果原樣回傳；status 逾時 20 秒，其他 60 秒（download 在背景開始、立刻回傳） |
+| `models_command` | 無 | 對應 `0c-update models status -json`，結果原樣回傳；逾時 20 秒 |
 | `open_url` | `url` | 交給系統瀏覽器（`rundll32 url.dll,FileProtocolHandler`）；只放行 `https://huggingface.co/` 開頭、路徑只有英數與 `/._-` 的網址。設定視窗本身照舊不離開本機頁面 |
 
 ## 清除學習紀錄（#301）
@@ -92,9 +91,9 @@ python scripts\build_settings_windows.py --version <版本> --test
 - Windows 用 WebView2 Runtime（Windows 11 與近年的 Windows 10 內建，Evergreen 版）；缺少時由 `0c-update open-settings` 在啟動前偵測並說明。WebView2 的使用者資料夾放在 `%LOCALAPPDATA%\Zuin\settings-webview`，不另外建立以 identifier 命名的目錄。找不到 `0c-update` 時依序試 `ZC_UPDATER`、同資料夾（版本目錄）、`%LOCALAPPDATA%\Zuin\bin`（穩定副本）。匯出的狀態摘要把家目錄換成 `~`，連同 JSON 跳脫後的反斜線與正斜線寫法一起換。
 - 單一實例：已開著就聚焦既有視窗並切到要求的頁面。
 
-更新頁提供檢查更新、立即下載、背景下載加速及立即安裝。下載顯示實際百分比與已收到／總大小，每秒重讀執行狀態；核對和安裝顯示處理中的進度條。總覽與關於頁分開標示已安裝版本、目前執行的引擎及設定視窗版本，Windows 新外殼已安裝但尚未重新登入時明確提示。後端命令及進度格式見 [JSON 契約實作](../../cmd/0c-update/contract.go)。
+更新頁提供檢查更新、立即下載、背景下載加速及立即安裝。下載顯示實際百分比與已收到／總大小，每秒重讀執行狀態；核對和安裝顯示處理中的進度條。總覽與關於頁分開標示已安裝版本、目前執行的引擎及設定視窗版本，Windows 新外殼裝好後說明不必登出、已經開著的程式要重新開啟才會換成新版。後端命令及進度格式見 [JSON 契約實作](../../cmd/0c-update/contract.go)。
 
-Windows 完整更新視窗驗收另有 `test/settings-update-test.ps1`：在沒有安裝的專用測試機，以隔離個人資料目錄、已簽章測試 HTTPS 索引和真套件驗證立即下載、共用並加速背景下載、手動安裝與重新登入前的版本提示。測試使用 e2etest 更新器；互動視窗以管理員執行，所以不包含原生 UAC 同意／取消對話框的真人驗證。
+Windows 完整更新視窗驗收另有 [`settings-update-test.ps1`](../windows/test/settings-update-test.ps1)：在沒有安裝的專用測試機，以隔離個人資料目錄、已簽章測試 HTTPS 索引和真套件驗證立即下載、共用並加速背景下載、手動安裝，以及裝好後總覽的版本說明（不要求登出）。測試使用 e2etest 更新器；互動視窗以管理員執行，所以不包含原生 UAC 同意／取消對話框的真人驗證。
 
 輸入設定的「按 Esc 清除整段組字」（`esc-clear`，`settings.json` 的 `esc_clear`）預設開啟，與多數注音輸入法相同。不論開關，Esc 都先清除還沒打完的注音；開啟時再按一次清除整段，關閉時保留已組好的字。引擎讀設定，套用（引擎重啟）後生效，外殼不必改。
 
