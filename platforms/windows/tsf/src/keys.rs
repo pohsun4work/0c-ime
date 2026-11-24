@@ -3,7 +3,7 @@
 //! 只有中文模式的 Ctrl＋標點（#168，見 [`ctrl_punct`]）例外。
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, GetKeyboardState, ToUnicode, VK_BACK, VK_CAPITAL, VK_CONTROL,
-    VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10, VK_F11, VK_F12,
+    VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F10, VK_F12,
     VK_HOME, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT,
     VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
@@ -11,13 +11,6 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 pub fn shift_down() -> bool {
     unsafe { GetKeyState(VK_SHIFT.0 as i32) < 0 }
 }
-
-/// Caps Lock 是否鎖定（這個執行緒收到按鍵當下的狀態，#173）。不看鍵盤燈號。
-pub fn caps_lock_on() -> bool {
-    unsafe { GetKeyState(VK_CAPITAL.0 as i32) & 1 != 0 }
-}
-
-pub const VK_CAPS_LOCK: u32 = VK_CAPITAL.0 as u32;
 
 /// 系統的輸入法開關熱鍵（Ctrl＋Space）是否按著：鍵盤開關 compartment 改變時用來分辨使用者按的熱鍵，
 /// 與 TIP 啟用、換程式時系統的重設（#117）。Ctrl 看這個執行緒的按鍵狀態（只有前景、收到按鍵的執行緒才是按著），
@@ -234,23 +227,18 @@ pub fn composing_wants(english: bool, protocol: Option<&str>) -> bool {
 /// 協定的 Key；不該交給輸入法的按鍵回傳 None。數字鍵盤送 "KP" 加上產生的字元，核心不當注音鍵（#75）。
 /// `vocab` 見 [`named_with`]；只有 Shift（沒有 Ctrl／Alt／Win，組合鍵在這裡已回 None）時才換成新鍵名。
 /// `caps_lock` 見 [`printable`]：英文模式傳 true，中文模式傳 false（不理 Caps Lock，#168）。
-pub fn style_key(key: String, shift: bool, caps: bool, shift_space: bool, caps_lower: bool) -> String {
-    if key == " " && shift && shift_space { return "ShiftSpace".into(); }
-    if caps && caps_lower && key.len() == 1 && key.as_bytes()[0].is_ascii_alphabetic() {
-        return if shift { key.to_ascii_uppercase() } else { key.to_ascii_lowercase() };
+pub fn to_key(vk: u32, lparam: isize, vocab: bool, caps_lock: bool) -> Option<String> {
+    if modifier_down() || is_modifier(vk) {
+        return None;
     }
-    key
+    if let Some(n) = named_with(vk, shift_down(), vocab) {
+        return Some(n.to_string());
+    }
+    let c = printable(vk, lparam, caps_lock)?;
+    Some(if is_keypad(vk) { format!("KP{c}") } else { c })
 }
 
-/// 英文模式交給程式的按鍵裡，要由輸入法直接送出的 Caps Lock 小寫字母（#112）。`key` 是 [`style_key`] 之後的鍵：
-/// 「Caps Lock 英文字母：預設小寫」時 Caps Lock 是小寫、加 Shift 是大寫，交給程式的話系統照 Caps Lock 反過來打。
-/// 數字、標點、空白與具名鍵不受 Caps Lock 影響，照舊交給程式。
-pub fn caps_lower_literal(caps_lower: bool, key: Option<&str>) -> Option<String> {
-    let key = key?;
-    (caps_lower && key.len() == 1 && key.as_bytes()[0].is_ascii_alphabetic()).then(|| key.to_string())
-}
-
-/// 英文補字的單字中，IMM32 程式的這一鍵怎麼送出單字（#260）。`key` 是 [`style_key`] 之後的協定鍵。
+/// 英文補字的單字中，IMM32 程式的這一鍵怎麼送出單字（#260）。`key` 是協定鍵。
 /// IMM32 程式經系統相容層接 TSF，單字送出後是以 WM_IME_COMPOSITION 的結果字串排在程式自己的訊息之後：
 /// 先送出單字再把按鍵交給程式的話，按鍵先作用（空白、標點比單字先進文件，方向鍵先移動插入點）。
 /// - `Some(字)`：空白、標點、數字（含數字鍵盤）——吃下，單字連同這個字一起送出。
@@ -269,20 +257,9 @@ pub fn imm32_word_end(key: &str) -> Option<String> {
     }
 }
 
-pub fn to_key(vk: u32, lparam: isize, vocab: bool, caps_lock: bool) -> Option<String> {
-    if modifier_down() || is_modifier(vk) {
-        return None;
-    }
-    if let Some(n) = named_with(vk, shift_down(), vocab) {
-        return Some(n.to_string());
-    }
-    let c = printable(vk, lparam, caps_lock)?;
-    Some(if is_keypad(vk) { format!("KP{c}") } else { c })
-}
-
 /// Ctrl＋標點（#168）：只按著 Ctrl（可以加 Shift，沒有 Alt／Win）時這一鍵的協定鍵名；不是這六個鍵回傳 None。
 /// 字元是不按 Ctrl 時這一鍵產生的字元（Ctrl+Shift+/ 是 ?）。AltGr 是 Ctrl＋Alt，不算。
-/// 要不要送由呼叫端決定（中文模式、引擎回報 ctrl_punctuation）。
+/// 要不要送由呼叫端決定（中文模式、引擎認得這個鍵名）。
 pub fn ctrl_punct(vk: u32, lparam: isize) -> Option<&'static str> {
     let alone = unsafe {
         GetKeyState(VK_CONTROL.0 as i32) < 0
@@ -296,30 +273,7 @@ pub fn ctrl_punct(vk: u32, lparam: isize) -> Option<&'static str> {
     ctrl_punct_name(&printable(vk, lparam, false)?)
 }
 
-/// 切換「輸出簡體字」的鍵（#192，settings.SimplifiedHotkeyLabel 的 Ctrl＋Shift＋F11）。
-pub const VK_SIMPLIFIED_HOTKEY: u32 = VK_F11.0 as u32;
-
-/// 這一鍵是不是切換簡體字的 Ctrl＋Shift＋F11（#192）：只按著 Ctrl 與 Shift，沒有 Alt、Win。
-/// 要不要攔由呼叫端看引擎回報的 simplified_hotkey。
-pub fn simplified_hotkey(vk: u32) -> bool {
-    unsafe {
-        is_simplified_hotkey(
-            vk,
-            GetKeyState(VK_CONTROL.0 as i32) < 0,
-            GetKeyState(VK_SHIFT.0 as i32) < 0,
-            GetKeyState(VK_MENU.0 as i32) < 0
-                || GetKeyState(VK_LWIN.0 as i32) < 0
-                || GetKeyState(VK_RWIN.0 as i32) < 0,
-        )
-    }
-}
-
-/// [`simplified_hotkey`] 的判斷本身（測試用）。
-pub fn is_simplified_hotkey(vk: u32, ctrl: bool, shift: bool, other: bool) -> bool {
-    vk == VK_SIMPLIFIED_HOTKEY && ctrl && shift && !other
-}
-
-/// OnTestKeyDown 對一個鍵的決定，留給接著的 OnKeyDown 沿用（#192）：要問引擎的決定（health IPC）在 TestKeyDown 問一次，
+/// OnTestKeyDown 對一個鍵的決定，留給接著的 OnKeyDown 沿用（#216）：要問引擎的決定（health IPC）在 TestKeyDown 問一次，
 /// 兩次答案不會因為引擎剛好在中間斷線或改了設定而不同（TestKeyDown 說要吃、OnKeyDown 卻交給應用程式），
 /// 宿主的 UI 執行緒每按一次也只多一次同步往返。
 ///
@@ -665,8 +619,7 @@ mod tests {
                 tap_ms: 300
             }
         );
-        let older = json!({"emoji_shortcut": "equals"});
-        assert_eq!(ShiftConfig::from_info(Some(&older)), ShiftConfig::default());
+        assert_eq!(ShiftConfig::from_info(Some(&json!({}))), ShiftConfig::default());
         // toggle-key 四種值（#117）。
         for (left, right, want_left, want_right) in [
             ("false", "true", false, true),   // right
@@ -688,31 +641,6 @@ mod tests {
         assert_eq!(ShiftConfig::from_info(Some(&custom)).tap_ms, 450);
         let bad = json!({"shift_tap_ms": "abc"});
         assert_eq!(ShiftConfig::from_info(Some(&bad)).tap_ms, 300);
-    }
-
-    #[test]
-    fn input_style_modifier_keys() {
-        assert_eq!(style_key(" ".into(), true, false, true, false), "ShiftSpace");
-        assert_eq!(style_key(" ".into(), true, false, false, false), " ");
-        assert_eq!(style_key("A".into(), false, true, false, true), "a");
-        assert_eq!(style_key("A".into(), true, true, false, true), "A");
-        assert_eq!(style_key("a".into(), true, true, false, true), "A");
-        assert_eq!(style_key("a".into(), true, true, false, false), "a");
-    }
-
-    #[test]
-    fn caps_lower_letters_where_english_keys_go_to_the_app() {
-        // #112：IMM32 沒有系統插入點的視窗（#210：英文模式按鍵整個交給程式）裡，Caps Lock 小寫的字母仍由輸入法送出；
-        // 交給程式的話系統照 Caps Lock 打成大寫。style_key 之後的鍵：Caps Lock 是小寫、Caps Lock＋Shift 是大寫。
-        assert_eq!(caps_lower_literal(true, Some("a")).as_deref(), Some("a"));
-        assert_eq!(caps_lower_literal(true, Some("A")).as_deref(), Some("A"));
-        // 數字、標點、空白與具名鍵不受 Caps Lock 影響，照舊交給程式。
-        for key in ["1", ";", " ", "Enter", "Tab", "BackTab", "ShiftSpace", "KP1"] {
-            assert_eq!(caps_lower_literal(true, Some(key)), None, "{key}");
-        }
-        // 「依平台大小寫」或 Caps Lock 沒開：字母照舊交給程式（畫布的單鍵快捷鍵不受影響）。
-        assert_eq!(caps_lower_literal(false, Some("a")), None);
-        assert_eq!(caps_lower_literal(true, None), None);
     }
 
     #[test]
@@ -830,66 +758,19 @@ mod tests {
     }
 
     #[test]
-    fn composition_start_keys_follow_layout() {
-        // 標準排列維持原本的集合（= 由 Emoji 設定決定，不在集合裡）。
-        for key in ["a", "1", "2", "5", "8", "9", "0", ",", "'", "<", "`"] {
-            assert!(starts_composition(Layout::Standard, key), "{key}");
+    fn composition_start_keys_are_visible_ascii() {
+        for key in ["a", "A", "3", "=", "@", "~", "\\"] {
+            assert!(starts_composition(key), "{key}");
         }
-        for key in ["3", "4", "6", "7", "=", "A", "@"] {
-            assert!(!starts_composition(Layout::Standard, key), "{key}");
+        for key in [" ", "KP1", "Enter", "é", ""] {
+            assert!(!starts_composition(key), "{key}");
         }
-        // 倚天 41 鍵（#83）：7 8 9 0 = ' 是注音、\ 是頓號；1–4 是聲調、5 6 不是注音鍵，交還宿主。
-        for key in ["a", "7", "8", "9", "0", "=", "'", ";", ",", ".", "/", "-", "\\", "<", "`"] {
-            assert!(starts_composition(Layout::ETen, key), "{key}");
-        }
-        // 核心標點表的每個鍵兩種排列都要交給核心：\ 頓號（#24）、& 全形＆（#46）、^ 刪節號、_ 破折號（#118）。
-        for key in ["<", ">", "?", ":", "\"", "!", "~", "[", "]", "{", "}", "\\", "(", ")", "&", "^", "_"] {
-            assert!(starts_composition(Layout::Standard, key), "{key}");
-            assert!(starts_composition(Layout::ETen, key), "{key}");
-        }
-        for key in ["1", "2", "3", "4", "5", "6", "A", "@"] {
-            assert!(!starts_composition(Layout::ETen, key), "{key}");
-        }
-        // 聲調鍵（#135）另依設定，不在固定集合裡。
-        for key in ["3", "4", "6", "7"] {
-            assert!(tone_key(Layout::Standard, key) && !starts_composition(Layout::Standard, key), "{key}");
-        }
-        for key in ["1", "2", "3", "4"] {
-            assert!(tone_key(Layout::ETen, key) && !starts_composition(Layout::ETen, key), "{key}");
-        }
-        for key in ["1", "2", "5", " ", "a"] {
-            assert!(!tone_key(Layout::Standard, key), "{key}");
-        }
-        for key in ["5", "6", "7", " ", "a"] {
-            assert!(!tone_key(Layout::ETen, key), "{key}");
-        }
-        // 只有答案不同的鍵要查排列。
-        for c in (0x21u8..0x7f).map(|b| (b as char).to_string()) {
-            let differs = starts_composition(Layout::Standard, &c) != starts_composition(Layout::ETen, &c)
-                || tone_key(Layout::Standard, &c) != tone_key(Layout::ETen, &c);
-            assert!(!differs || layout_dependent(&c), "{c} 的答案依排列而不同，必須查排列");
-        }
-        assert!(layout_dependent("=") && layout_dependent("q") && layout_dependent("a"));
-        assert!(!layout_dependent("A") && !layout_dependent(",") && !layout_dependent("@"));
-    }
-
-    #[test]
-    fn simplified_hotkey_is_only_ctrl_shift_f11() {
-        let f11 = VK_SIMPLIFIED_HOTKEY;
-        assert_eq!(f11, 0x7A);
-        assert!(is_simplified_hotkey(f11, true, true, false));
-        assert!(!is_simplified_hotkey(f11, true, false, false), "Ctrl＋F11");
-        assert!(!is_simplified_hotkey(f11, false, true, false), "Shift＋F11");
-        assert!(!is_simplified_hotkey(f11, false, false, false), "F11（全螢幕）");
-        assert!(!is_simplified_hotkey(f11, true, true, true), "多按 Alt／Win");
-        assert!(!is_simplified_hotkey(0x7B, true, true, false), "Ctrl＋Shift＋F12");
-        assert!(!is_simplified_hotkey(0x46, true, true, false), "Ctrl＋Shift＋F");
     }
 
     #[test]
     fn key_down_reuses_the_test_key_down_decision() {
-        // #192 code review：TestKeyDown 說要吃 Ctrl＋Shift＋F11，OnKeyDown 時引擎剛好斷線也照樣吃，不再問一次。
-        let f11 = VK_SIMPLIFIED_HOTKEY;
+        // #216：TestKeyDown 說要吃，OnKeyDown 時引擎剛好斷線也照樣吃，不再問一次。
+        let f11 = 0x7A;
         let mut tested = Tested::default();
         tested.record(f11, true);
         assert_eq!(tested.take(f11), Some(true));
@@ -906,9 +787,9 @@ mod tests {
 
     #[test]
     fn test_key_down_decision_does_not_outlive_its_key_press() {
-        // #192 發版前 code review 第二輪：OnKeyDown 在 allowed() 提早回傳時，原本沒取走 TestKeyDown 的決定，
+        // 發版前 code review：OnKeyDown 在 allowed() 提早回傳時，原本沒取走 TestKeyDown 的決定，
         // 之後宿主沒先 TestKeyDown 就直接呼叫 OnKeyDown 時沿用了舊的「要吃」。
-        let f11 = VK_SIMPLIFIED_HOTKEY;
+        let f11 = 0x7A;
         let mut tested = Tested::default();
         // OnTestKeyDown 說要吃 → OnKeyDown 一進來就取走（接著在 allowed() 提早回傳，沒用到）。
         tested.record(f11, true);
@@ -1014,40 +895,9 @@ mod tests {
     }
 }
 
-/// 引擎載入的鍵盤排列（health 的 keyboard_layout，#83）：只給沒有回報 idle_keys 的舊引擎推算閒置按鍵（#183 起由引擎回報）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Layout {
-    Standard,
-    ETen,
-}
-
-/// 空組字時可接受的字元，依鍵盤排列。大寫／其他 ASCII 須在 TestKeyDown
-/// 就放行；某些宿主在 Test 回報吃鍵後，會忽略 OnKeyDown 的 handled=false。聲調鍵另由 tone_key 依設定決定（#135）。
-/// 標準排列的 = 由 Emoji 設定決定（呼叫端處理）。倚天 41 鍵的 = 是 ㄦ、7 是 ㄑ，1–4 是聲調、5 6 不是注音鍵，
-/// ' 是 ㄘ（#83）。標點要跟核心的標點表（core/layout）一致，否則沒在打字時會直接交給應用程式打出半形：
-/// \ 是頓號（#24）、& 是全形＆（#46）、^ 是「……」、_ 是「——」（#118），兩種排列都一樣。
-pub fn starts_composition(layout: Layout, key: &str) -> bool {
-    let keys = match layout {
-        Layout::Standard => "`abcdefghijklmnopqrstuvwxyz125890,.;/-<>?:\"!~[]{}'\\()&^_",
-        Layout::ETen => "`abcdefghijklmnopqrstuvwxyz7890,.;/-='\\<>?:\"!~[]{}()&^_",
-    };
-    key.len() == 1 && keys.contains(key)
-}
-
-/// 聲調鍵（不含空白的一聲）：標準排列 3 4 6 7、倚天 1 2 3 4。沒在組字時要不要交給引擎依引擎回報（#135、#175，
-/// 見 session::idle_tone_keys），不在 starts_composition 的固定集合裡。
-pub fn tone_key(layout: Layout, key: &str) -> bool {
-    let keys = match layout {
-        Layout::Standard => "3467",
-        Layout::ETen => "1234",
-    };
-    key.len() == 1 && keys.contains(key)
-}
-
-/// 沒在組字時答案依排列或設定而不同的鍵，照引擎回報的 idle_keys 決定（session::idle_key，依連線快取，不每鍵往返）：
-/// 6 是標準排列的 ˊ、倚天不是注音鍵（#135）；許氏的數字、- / 與 q 都不是注音鍵，交還宿主（#183）；= 看 Emoji 設定。
-/// 小寫字母也在內：之後的排列不一定每個字母都用到。其他鍵（Shift＋字母、, . ; ' 與 Shift 標點）三種排列答案相同，
-/// 照 starts_composition 的固定集合；中英混打時引擎雖然也收 Shift＋字母與 @，外殼照舊交給應用程式。
-pub fn layout_dependent(key: &str) -> bool {
-    key.len() == 1 && (key.as_bytes()[0].is_ascii_lowercase() || "1234567890=-/".contains(key))
+/// 沒在組字時交給引擎的鍵，只在從沒問到引擎（health 的 idle_keys）時用：引擎把每個可見 ASCII 字元都留在組字區
+/// （注音鍵、中英混打的英數、明確打的符號，core/session.IdleKeys）。要在 TestKeyDown 就決定：某些宿主在 Test 回報吃鍵後，
+/// 會忽略 OnKeyDown 的 handled=false。
+pub fn starts_composition(key: &str) -> bool {
+    key.len() == 1 && key.as_bytes()[0].is_ascii_graphic()
 }

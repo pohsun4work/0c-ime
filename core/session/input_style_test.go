@@ -1,52 +1,26 @@
 package session
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
-func TestOriginalStylePreservesLegacySequences(t *testing.T) {
-	for _, sequence := range [][]string{
-		{"j", "i", "3", "<", proto.KeyDown, " ", proto.KeyEnter, proto.KeyEnter},
-		{"w", "u", "/", "3", proto.KeyTab, proto.KeyBackTab, proto.KeyEscape},
-		{"`", proto.KeyPageDown, proto.KeyEnter, proto.KeyEnter},
-	} {
-		a, b := styleSession("0c"), styleSession("0c")
-		a.InputStyle.Punctuation = "0c" // fork 的 0c 風格標點操作是微軟參考；其餘規則仍要同零值
-		b.InputStyle = inputstyle.Rules{}
-		for _, k := range sequence {
-			sa, sb := key(a, k), key(b, k)
-			if !reflect.DeepEqual(sa, sb) {
-				t.Fatalf("0c changed at %q: %+v != %+v", k, sa, sb)
-			}
-		}
-	}
-}
-
-func TestMcBopomofoCycleInSecondWordAndCaps(t *testing.T) {
-	s := styleSession("mcbopomofo")
+func TestTabCycleInSecondWord(t *testing.T) {
+	s := newSession()
+	s.InputStyle.Tab = inputstyle.TabCycle
 	typeSyl(s, "ㄨㄛˇ")
 	typeSyl(s, "ㄐㄧㄥˇ")
 	if a := key(s, proto.KeyTab); a.Text() != "我井" {
 		t.Fatalf("second word cycle: %+v", a)
 	}
-	key(s, proto.KeyEnter)
-	s.Handle(proto.Request{Type: proto.CapsLock, On: true})
-	if a := key(s, "a"); !a.Handled || a.Commit != "a" {
-		t.Fatalf("shell-translated lowercase must be committed: %+v", a)
-	}
-	if a := key(s, "A"); !a.Handled || a.Commit != "A" {
-		t.Fatalf("shell-normalized Caps+Shift must commit uppercase: %+v", a)
-	}
 }
 
 func TestCustomCandidateSelectionAndCommit(t *testing.T) {
-	s := styleSession("0c")
-	s.InputStyle.CandidateSpace = "select"
-	s.InputStyle.CandidateEnter = "commit"
+	s := newSession()
+	s.InputStyle.CandidateSpace = inputstyle.CandidateSpaceSelect
+	s.InputStyle.CandidateEnter = inputstyle.CandidateEnterCommit
 	typeSyl(s, "ㄐㄧㄥˇ")
 	key(s, proto.KeyDown)
 	key(s, proto.KeyDown)
@@ -59,26 +33,15 @@ func TestCustomCandidateSelectionAndCommit(t *testing.T) {
 	}
 }
 
-func styleSession(id string) *Session {
+// fullWidthSession 是 Shift＋空白設成切換全半形的 session。
+func fullWidthSession() *Session {
 	s := newSession()
-	p, ok := inputstyle.Get(id)
-	if !ok {
-		panic(id)
-	}
-	s.InputStyle = p.Rules
-	s.CandidateBeforeCursor = p.Behavior.CandidateCursor == "before"
-	s.EscKeepComposition = !p.Behavior.EscClear
-	s.SpaceInsertsSpace = !p.Behavior.SpaceSelects
-	s.AdvanceAfterSelect = p.Behavior.AdvanceAfterSelect
-	s.SelectionKeys = p.Behavior.SelectionKeys
-	s.CapsLockEnglish = p.Behavior.CapsLockEnglish
-	s.CtrlPunct = p.Behavior.CtrlPunctuation
-	s.EmojiShortcut = p.Behavior.EmojiShortcut
+	s.InputStyle.ShiftSpace = inputstyle.ShiftSpaceFullWidth
 	return s
 }
 
 func TestMicrosoftWidthIsStateAndIncludesEnglish(t *testing.T) {
-	s := styleSession("microsoft")
+	s := fullWidthSession()
 	if a := key(s, proto.KeyShiftSpace); !a.FullWidth || a.Text() != "" || a.Commit != "" {
 		t.Fatalf("toggle: %+v", a)
 	}
@@ -106,7 +69,8 @@ func TestMicrosoftWidthIsStateAndIncludesEnglish(t *testing.T) {
 
 // fork：` 不是前導鍵，跟其他明確打的符號一樣留在組字區。
 func TestMicrosoftBacktickIsLiteralAndInlineUp(t *testing.T) {
-	s := styleSession("microsoft")
+	s := newSession()
+	s.InputStyle.CandidateTab = inputstyle.CandidateTabGrid
 	if a := key(s, "`"); !a.Handled || a.Text() != "`" || a.Candidates != nil {
 		t.Fatalf("backtick: %+v", a)
 	}
@@ -131,7 +95,7 @@ func TestMicrosoftObservedRawPunctuation(t *testing.T) {
 	for _, tc := range []struct{ key, wide string }{
 		{"\\", "＼"}, {"'", "’"}, {"\"", "＂"}, {"<", "＜"}, {">", "＞"}, {"?", "？"},
 	} {
-		s := styleSession("microsoft")
+		s := fullWidthSession()
 		if a := key(s, tc.key); !a.Handled || a.Commit != "" || a.Text() != tc.key {
 			t.Fatalf("halfwidth idle %q stays in composition: %+v", tc.key, a)
 		}
@@ -150,13 +114,7 @@ func TestMicrosoftObservedRawPunctuation(t *testing.T) {
 
 func TestMicrosoftRawPunctuationInComposition(t *testing.T) {
 	for _, r := range []string{"\\", "'", "<"} {
-		s := styleSession("microsoft")
-		key(s, "s")
-		key(s, "u")
-		if a := key(s, r); a.Commit != "" || a.Text() != r { // fork：未打完的注音丟掉，符號留在組字區
-			t.Fatalf("unfinished reading + raw %q: %+v", r, a)
-		}
-		key(s, proto.KeyEscape)
+		s := newSession()
 		typeSyl(s, "ㄨㄛˇ")
 		if a := key(s, r); a.Commit != "" || a.Text() != "我"+r {
 			t.Fatalf("completed word + raw %q: %+v", r, a)
@@ -172,21 +130,9 @@ func TestMicrosoftRawPunctuationInComposition(t *testing.T) {
 	}
 }
 
-func TestStyleHotkeyClearsImmediatelyPreviousKeyState(t *testing.T) {
-	s := styleSession("microsoft")
-	key(s, "3")
-	if s.pendingToneKey == nil {
-		t.Fatal("fixture needs an idle tone key")
-	}
-	key(s, proto.KeyShiftSpace)
-	if s.pendingToneKey != nil {
-		t.Fatal("style shortcut left the previous tone key active")
-	}
-}
-
 func TestStyleLiteralPreservesPendingEnglishOrder(t *testing.T) {
 	for _, word := range []string{"h", "he"} {
-		s := styleSession("microsoft")
+		s := fullWidthSession()
 		s.EnglishAutocomplete = true
 		s.Handle(proto.Request{Type: proto.Mode, On: true})
 		for _, r := range word {
@@ -204,17 +150,16 @@ func TestStyleLiteralPreservesPendingEnglishOrder(t *testing.T) {
 	}
 }
 
-func TestStyleLiteralPreservesMixedRunAndShiftCommit(t *testing.T) {
+func TestStyleLiteralPreservesMixedRun(t *testing.T) {
 	for _, tc := range []struct {
-		style, key, suffix string
-		width, commit      bool
+		key, suffix string
+		width       bool
 	}{
-		{"microsoft", "A", "Ａ", true, false},
-		{"mcbopomofo", "\\", "\\", false, false}, // 打到一半的英文收下 \（C:\Users，#233）
-		{"mcbopomofo", "A", "A", false, true},
+		{"A", "Ａ", true},
+		{"\\", "\\", false}, // 打到一半的英文收下 \（C:\Users，#233）
+		{"A", "A", false},   // Shift＋字母留在游標處
 	} {
-		s := styleSession(tc.style)
-		s.MixedInput = true
+		s := fullWidthSession()
 		var before proto.Snapshot
 		for _, r := range "hello" {
 			before = key(s, string(r))
@@ -224,23 +169,20 @@ func TestStyleLiteralPreservesMixedRunAndShiftCommit(t *testing.T) {
 		}
 		a := key(s, tc.key)
 		want := before.Text() + tc.suffix
-		if tc.commit {
-			if a.Commit != want || a.Text() != "" {
-				t.Fatalf("Shift commit: got %+v want %q", a, want)
-			}
-		} else {
-			if a.Text() != want || a.Commit != "" {
-				t.Fatalf("style literal: got %+v want %q", a, want)
-			}
-			if a = key(s, proto.KeyEnter); a.Commit != want {
-				t.Fatalf("commit: got %+v want %q", a, want)
-			}
+		if a.Text() != want || a.Commit != "" {
+			t.Fatalf("style literal: got %+v want %q", a, want)
+		}
+		if a = key(s, proto.KeyEnter); a.Commit != want {
+			t.Fatalf("commit: got %+v want %q", a, want)
 		}
 	}
 }
 
-func TestMcBopomofoCycleAndShiftSpace(t *testing.T) {
-	s := styleSession("mcbopomofo")
+func TestTabCycleAndShiftSpaceInsertsSpace(t *testing.T) {
+	s := newSession()
+	s.InputStyle.Tab = inputstyle.TabCycle
+	s.InputStyle.ShiftSpace = inputstyle.ShiftSpaceSpace
+	s.EscKeepComposition = true
 	typeSyl(s, "ㄐㄧㄥˇ")
 	if a := key(s, proto.KeyTab); a.Text() != "井" || a.Candidates != nil || a.Cursor.Rune != 1 {
 		t.Fatalf("next: %+v", a)
@@ -260,21 +202,11 @@ func TestMcBopomofoCycleAndShiftSpace(t *testing.T) {
 	if a := key(s, proto.KeyShiftSpace); a.Text() != "我 吃" || a.Commit != "" {
 		t.Fatalf("middle space: %+v", a)
 	}
-	if a := key(s, "A"); a.Commit != "我 吃A" || a.Text() != "" {
-		t.Fatalf("ShiftLetter: %+v", a)
-	}
-	if a := key(s, "\\"); a.Text() != "＼" {
-		t.Fatalf("backslash: %+v", a)
-	}
-	if a := key(s, proto.KeyTab); a.Text() != "／" {
-		t.Fatalf("slash cycle: %+v", a)
-	}
 }
 
-func TestMcBopomofoCycleReversesWithManyCandidates(t *testing.T) {
+func TestTabCycleReversesWithManyCandidates(t *testing.T) {
 	s := manySession("1234567890")
-	p, _ := inputstyle.Get("mcbopomofo")
-	s.InputStyle = p.Rules
+	s.InputStyle.Tab = inputstyle.TabCycle
 	s.CandidateBeforeCursor = true
 	before := typeSyl(s, "ㄕˋ").Text()
 	after := key(s, proto.KeyTab).Text()
@@ -288,47 +220,9 @@ func TestMcBopomofoCycleReversesWithManyCandidates(t *testing.T) {
 	}
 }
 
-func TestChewingTabChangesSegmentation(t *testing.T) {
-	s := styleSession("chewing")
-	typeSyl(s, "ㄈㄥ")
-	typeSyl(s, "ㄐㄧㄥˇ")
-	key(s, proto.KeyHome)
-	key(s, proto.KeyRight)
-	if len(s.path) != 1 {
-		t.Fatalf("fixture should be joined: %+v", s.path)
-	}
-	if a := key(s, proto.KeyTab); a.Text() != "風景" || a.Candidates != nil || len(s.path) != 2 {
-		t.Fatalf("split: %+v path=%+v", a, s.path)
-	}
-	if a := key(s, proto.KeyTab); a.Text() != "風景" || len(s.path) != 1 {
-		t.Fatalf("join: %+v path=%+v", a, s.path)
-	}
-	key(s, proto.KeyEnd)
-	key(s, proto.KeyTab)
-	if len(s.path) != 2 {
-		t.Fatalf("end cycle: %+v", s.path)
-	}
-	key(s, proto.KeyTab)
-	if len(s.path) != 1 {
-		t.Fatalf("end cycle back: %+v", s.path)
-	}
-	if a := key(s, proto.KeyBackTab); a.Text() != "風景" || len(s.path) != 1 {
-		t.Fatalf("ShiftTab is not reverse cycle: %+v", a)
-	}
-}
-
-func TestChewingWidthAndHorizontalNavigation(t *testing.T) {
-	s := styleSession("chewing")
-	key(s, proto.KeyShiftSpace)
-	if a := key(s, "["); a.Text() != "「" {
-		t.Fatalf("Chinese punctuation unaffected by width: %+v", a)
-	}
-	key(s, proto.KeyEnter)
-	s.Handle(proto.Request{Type: proto.Mode, On: true})
-	if a := key(s, "["); a.Commit != "〔" {
-		t.Fatalf("English width table: %+v", a)
-	}
-	s.Handle(proto.Request{Type: proto.Mode, On: false})
+func TestHorizontalCandidateNavigation(t *testing.T) {
+	s := newSession()
+	s.InputStyle.CandidateNavigation = inputstyle.NavigationHorizontal
 	typeSyl(s, "ㄐㄧㄥˇ")
 	key(s, proto.KeyDown)
 	if a := key(s, proto.KeyRight); a.Candidates == nil || a.Candidates.Highlight != 1 {
@@ -339,9 +233,10 @@ func TestChewingWidthAndHorizontalNavigation(t *testing.T) {
 	}
 }
 
-func TestAppleShiftDeleteReopensTone(t *testing.T) {
+func TestShiftDeleteReopensTone(t *testing.T) {
 	for _, deleteKey := range []string{proto.KeyShiftDelete, proto.KeyShiftBackspace} {
-		s := styleSession("macos")
+		s := newSession()
+		s.InputStyle.ShiftDelete = inputstyle.ShiftDeleteTone
 		typeSyl(s, "ㄐㄧㄥˇ")
 		if a := key(s, deleteKey); a.Text() != "ㄐㄧㄥ" {
 			t.Fatalf("%s remove tone: %+v", deleteKey, a)
@@ -354,8 +249,7 @@ func TestAppleShiftDeleteReopensTone(t *testing.T) {
 
 func TestStyleCandidatePageSizeAndSpace(t *testing.T) {
 	s := manySession("1234567890")
-	p, _ := inputstyle.Get("mcbopomofo")
-	s.InputStyle = p.Rules
+	s.InputStyle.CandidatePageSize = 9
 	typeSyl(s, "ㄕˋ")
 	a := key(s, proto.KeyDown)
 	if a.Candidates == nil {

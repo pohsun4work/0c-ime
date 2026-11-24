@@ -1,6 +1,7 @@
 package session
 
 import (
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"slices"
 	"strings"
 	"unicode"
@@ -37,12 +38,6 @@ type toneKeyPending struct {
 // 中英混打時連按與「有3個」（u.3 3 ek4）、「到40」（2l4 40）的按鍵完全相同，語料裡漢字緊接著以它的聲調鍵
 // 開頭的數字約每千字一次，所以混打照舊是數字。
 
-// ToneMarkKeys 回報這個設定下，沒在組字時的聲調鍵是否由輸入法處理（先留在組字區等空白）。
-// 外殼若自己判斷閒置按鍵要不要交給核心（Windows 的 TestKeyDown），依這個答案決定聲調鍵。
-func ToneMarkKeys(mixedInput, standardLayout bool) bool {
-	return !mixedInputActive(mixedInput, standardLayout)
-}
-
 // toneKey 處理注音暫存是空的時按下的聲調鍵（空白的一聲不算）：數字照字面留在游標處；
 // 前面沒有緊接著數字時記下來，下一鍵是空白就換成聲調符號（finishToneKey）。
 // repeat 是上一鍵剛用這個聲調鍵打完一個字（#321）：不留數字，只記下來讓緊接著的空白打聲調符號。
@@ -75,7 +70,7 @@ func (s *Session) finishToneKey(p *toneKeyPending) bool {
 	} else if s.cursor != p.at+1 || !s.literals[p.at] || string(s.syls[p.at]) != p.key {
 		return false
 	}
-	sym, ok := s.layout.Symbol([]rune(p.key)[0])
+	sym, ok := layout.Standard.Symbol([]rune(p.key)[0])
 	if !ok || zhuyin.ClassOf(sym) != zhuyin.Tone || sym == zhuyin.Tone1 {
 		return false
 	}
@@ -129,7 +124,7 @@ func (s *Session) lonePhoneticKeyAt(at int) (rune, bool) {
 	if len(rs) != 1 || rs[0] > unicode.MaxASCII {
 		return 0, false
 	}
-	sym, ok := s.layout.Symbol(rs[0])
+	sym, ok := layout.Standard.Symbol(rs[0])
 	if !ok || zhuyin.ClassOf(sym) == zhuyin.Tone || zhuyin.ClassOf(sym) == zhuyin.None {
 		return 0, false
 	}
@@ -149,7 +144,7 @@ func (s *Session) loneToneKeyAt(at int) (rune, bool) {
 	if len(rs) != 1 || !unicode.IsDigit(rs[0]) || rs[0] > unicode.MaxASCII {
 		return 0, false
 	}
-	sym, ok := s.layout.Symbol(rs[0])
+	sym, ok := layout.Standard.Symbol(rs[0])
 	if !ok || zhuyin.ClassOf(sym) != zhuyin.Tone || sym == zhuyin.Tone1 {
 		return 0, false
 	}

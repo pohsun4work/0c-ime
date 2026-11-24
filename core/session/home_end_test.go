@@ -36,20 +36,19 @@ func TestHomeEndMoveWithinComposition(t *testing.T) {
 }
 
 // 音節打到一半時同左右鍵：游標不動、按鍵照樣吃掉，組字區不被應用程式的游標拋下。
+// 用注音鍵打未完成的音節：鍵盤混打的暫存按鍵遇到游標鍵會照字面留下。
 func TestHomeEndWithPendingSyllableLikeArrows(t *testing.T) {
 	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	typeSyl(s, "ㄔ")
-	before := key(s, "v") // ㄒ
+	before := s.Handle(proto.Request{Type: proto.Symbol, Symbol: "ㄒ"})
 	for _, k := range []string{proto.KeyHome, proto.KeyEnd, proto.KeyLeft} {
 		snap := key(s, k)
 		if !snap.Handled || snap.Text() != before.Text() || snap.Cursor != before.Cursor {
 			t.Fatalf("%s：未打完的注音應留在原位：%+v，原本 %+v", k, snap, before)
 		}
 	}
-	key(s, "u")
-	key(s, ";")
-	if snap := key(s, "3"); snap.Text() != "我吃想" { // ㄧㄤˇ 補完仍在原位
+	if snap := symbolSyl(s, "ㄧㄤˇ"); snap.Text() != "我吃想" { // ㄧㄤˇ 補完仍在原位
 		t.Fatalf("補完音節：%+v", snap)
 	}
 	if snap := key(s, proto.KeyHome); snap.Cursor.Rune != 0 {
@@ -59,7 +58,7 @@ func TestHomeEndWithPendingSyllableLikeArrows(t *testing.T) {
 
 // 候選開啟時 Home／End 到第一個／最後一個候選（比照小麥、威注音）；Backspace／Del 同 Esc 關閉候選、保留組字。
 func TestCandidateHomeEndBackspaceDelete(t *testing.T) {
-	s := newSession()
+	s := paletteSession()
 	typeSyl(s, "ㄨㄛˇ")
 	snap := key(s, "=")
 	if snap.Candidates == nil || snap.Candidates.Pages < 3 {
@@ -94,11 +93,28 @@ func TestCandidateHomeEndBackspaceDelete(t *testing.T) {
 	}
 }
 
-// 組字中候選沒開時 ↑、PgUp、PgDn、Shift+Tab、沒有補全的 Tab 吃掉不動作；沒有組字時交還應用程式（#106）。
-func TestComposingNavigationKeysStayInComposition(t *testing.T) {
-	keys := []string{proto.KeyUp, proto.KeyPageUp, proto.KeyPageDown, proto.KeyBackTab, proto.KeyTab}
+// 組字中候選沒開時 ↑ 吃掉不動作（#106）。
+func TestComposingUpStaysInComposition(t *testing.T) {
 	for _, english := range []bool{false, true} {
-		for _, k := range keys {
+		s := newSession()
+		typeSyl(s, "ㄨㄛˇ")
+		typeSyl(s, "ㄔ")
+		before := key(s, proto.KeyLeft)
+		if english {
+			s.Handle(proto.Request{Type: proto.Toggle})
+		}
+		if snap := key(s, proto.KeyUp); !snap.Handled || snap.Commit != "" || snap.Text() != before.Text() || snap.Cursor.Rune != 1 || snap.Candidates != nil {
+			t.Fatalf("english=%v 組字中 ↑ 應吃掉不動作：%+v", english, snap)
+		}
+	}
+}
+
+// 組字中候選沒開時 PgUp、PgDn、Shift+Tab、沒有補全的 Tab 吃掉不動作；沒有組字時交還應用程式（#106）。
+func TestComposingNavigationKeysStayInComposition(t *testing.T) {
+	composing := []string{proto.KeyPageUp, proto.KeyPageDown, proto.KeyBackTab, proto.KeyTab}
+	keys := append([]string{proto.KeyUp}, composing...)
+	for _, english := range []bool{false, true} {
+		for _, k := range composing {
 			s := newSession()
 			typeSyl(s, "ㄨㄛˇ")
 			typeSyl(s, "ㄔ")
@@ -152,7 +168,7 @@ func TestHomeEndInEnglishAndMixedComposition(t *testing.T) {
 		t.Fatalf("英文模式 End：%+v", snap)
 	}
 
-	s = mixedSession()
+	s = newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	key(s, "o")
 	key(s, "k")

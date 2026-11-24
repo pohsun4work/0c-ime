@@ -71,10 +71,11 @@ func fillers(typed string) []word {
 	return out
 }
 
+// fzType 用注音鍵打（symbolSyl）：近音測試要的是只能靠近音成詞的音節，混打會把它們照字面留下。
 func fzType(s *Session, syls string) proto.Snapshot {
 	var snap proto.Snapshot
 	for _, y := range strings.Fields(syls) {
-		snap = typeSyl(s, y)
+		snap = symbolSyl(s, y)
 	}
 	return snap
 }
@@ -313,13 +314,13 @@ func TestFuzzyPickLocksAndFollowsEdits(t *testing.T) {
 	}
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
 	// 鎖定的近音讀音仍在格中：繼續輸入後，含鎖定字的更長詞（知識）可以成詞，鎖定字不跳回原音。
-	snap := typeSyl(s, "ㄕˋ")
+	snap := symbolSyl(s, "ㄕˋ")
 	if snap.Text() != "知識" {
 		t.Fatalf("繼續輸入後鎖定的近音字不得跳回：%q", snap.Text())
 	}
 	// 在前面插入：鎖定與讀音一起右移。
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
-	snap = typeSyl(s, "ㄅㄚˋ")
+	snap = symbolSyl(s, "ㄅㄚˋ")
 	if snap.Text() != "爸知識" {
 		t.Fatalf("插入後 %q", snap.Text())
 	}
@@ -343,11 +344,11 @@ func TestFuzzyLockSurvivesDisablingAndNewInputIsExact(t *testing.T) {
 	fzType(s, "ㄗ")
 	fzSelect(t, s, 0, 1, "知")
 	s.Fuzzy = fuzzy.Config{}
-	snap := typeSyl(s, "ㄕˋ")
+	snap := symbolSyl(s, "ㄕˋ")
 	if snap.Text() != "知識" {
 		t.Fatalf("關閉設定後已選的字不得消失：%q", snap.Text())
 	}
-	typeSyl(s, "ㄗ")
+	symbolSyl(s, "ㄗ")
 	if _, ok := find(listCandidates(s, 2, 1), "知"); ok {
 		t.Error("關閉設定後新輸入不應再有近音候選")
 	}
@@ -453,7 +454,7 @@ func TestFuzzySwapLimitIsTwo(t *testing.T) {
 // 開啟 s-sh 後輸入端收進它、顯示維持原樣注音，開候選才出現 送，選取後鎖定。
 func TestFuzzyAcceptsSyllableOnlyNearReadingsCanRead(t *testing.T) {
 	off := fuzzySession(fuzzy.Config{})
-	if snap := typeSyl(off, "ㄕㄨㄥˋ"); len(off.literals) != len(off.syls) || snap.Text() != "ㄕㄨㄥˋ" {
+	if snap := symbolSyl(off, "ㄕㄨㄥˋ"); len(off.literals) != len(off.syls) || snap.Text() != "ㄕㄨㄥˋ" {
 		t.Fatalf("關閉時不收成音節，連同聲調原樣留在畫面：%+v %q", off.syls, snap.Text())
 	}
 	s := fuzzySession(fuzzy.Config{}.With(fuzzy.SSh, fuzzy.Select))
@@ -545,7 +546,7 @@ func TestFuzzyNeverReachesTheNeuralScorer(t *testing.T) {
 	}
 	fzSelect(t, s, 0, 2, "知識")
 	calls := len(requests)
-	snap := typeSyl(s, "ㄅㄚˋ")
+	snap := symbolSyl(s, "ㄅㄚˋ")
 	if snap.Text() != "知識爸" || len(requests) != calls {
 		t.Fatalf("鎖定後不得有模型回呼改寫：%q，評分器呼叫 %d → %d", snap.Text(), calls, len(requests))
 	}
@@ -560,7 +561,7 @@ func TestFuzzyDisabledByDefault(t *testing.T) {
 	if s.Fuzzy.Enabled() {
 		t.Fatal("缺少設定時不得啟用任何模糊音")
 	}
-	typeSyl(s, "ㄔ")
+	symbolSyl(s, "ㄔ")
 	for _, it := range listCandidates(s, 0, 1) {
 		if it.Note != "" {
 			t.Errorf("預設不應有近音候選：%+v", it)
@@ -620,15 +621,15 @@ func TestFuzzyNearCandidatesAreNotCrowdedOutByExactOnes(t *testing.T) {
 func TestFuzzyKeepsTheJunkSyllableGuardAfterANearOnlySyllable(t *testing.T) {
 	// 信：原樣留下的 ㄅㄨㄛˇ 是解碼邊界，其後的 ㄒㄧㄣˋ 要自己成字（真實詞庫每個合法音節都有字）。
 	s := fuzzySession(fuzzy.Config{}.With(fuzzy.SSh, fuzzy.Select), word{"送", "ㄙㄨㄥˋ", 1e-3}, word{"信", "ㄒㄧㄣˋ", 1e-3})
-	typeSyl(s, "ㄕㄨㄥˋ") // 精確沒有字，近音 ㄙㄨㄥˋ 可成詞
+	symbolSyl(s, "ㄕㄨㄥˋ") // 精確沒有字，近音 ㄙㄨㄥˋ 可成詞
 	if len(s.syls) != 1 {
 		t.Fatalf("近音可成詞的音節應被接受：%v", s.syls)
 	}
-	typeSyl(s, "ㄅㄨㄛˇ") // ㄅㄨㄛˇ 沒有字，近音也沒有：多半是按錯鍵
+	symbolSyl(s, "ㄅㄨㄛˇ") // ㄅㄨㄛˇ 沒有字，近音也沒有：多半是按錯鍵
 	if len(s.syls) != 5 || s.literals[0] || len(s.literals) != 4 || zhuyin.Key(s.syls[1:]) != "ㄅ ㄨ ㄛ ˇ" {
 		t.Fatalf("按錯鍵的音節不收成音節，原樣留下，現有音節 %v", s.syls)
 	}
-	typeSyl(s, "ㄒㄧㄣˋ") // 正常音節照常收進來
+	symbolSyl(s, "ㄒㄧㄣˋ") // 正常音節照常收進來
 	if len(s.syls) != 6 || s.literals[5] {
 		t.Fatalf("正常音節應被接受：%v", s.syls)
 	}
@@ -641,8 +642,8 @@ func TestFuzzyLockSurvivesALiteralInsertedInTheMiddle(t *testing.T) {
 	fzType(s, typed)
 	fzSelect(t, s, 0, 2, "知道")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
-	snap := key(s, "A")
-	if snap.Text() != "知A道" {
+	snap := key(s, "<") // 混打的字母會先待定，標點直接插入
+	if snap.Text() != "知<道" {
 		t.Fatalf("標點插入後 %q", snap.Text())
 	}
 	left, right := s.locks[0], s.locks[2]
@@ -650,7 +651,7 @@ func TestFuzzyLockSurvivesALiteralInsertedInTheMiddle(t *testing.T) {
 		t.Fatalf("兩半應各帶走自己的讀音：%+v／%+v", left, right)
 	}
 	s.Handle(proto.Request{Type: proto.Cursor, To: len(s.syls)})
-	if got := typeSyl(s, "ㄇㄚ˙").Text(); got != "知A道嗎" {
+	if got := symbolSyl(s, "ㄇㄚ˙").Text(); got != "知<道嗎" {
 		t.Fatalf("之後繼續輸入不得整段退成注音：%q", got)
 	}
 }
@@ -662,7 +663,7 @@ func TestFuzzyNearOnlySyllableKeepsEarlierText(t *testing.T) {
 	if before.Text() != "我" {
 		t.Fatalf("前提：%q", before.Text())
 	}
-	snap := typeSyl(s, "ㄕㄨㄥˋ")
+	snap := symbolSyl(s, "ㄕㄨㄥˋ")
 	if snap.Text() != "我ㄕㄨㄥˋ" {
 		t.Fatalf("前面已顯示的字應保留，只有近音音節顯示原樣注音：%q", snap.Text())
 	}
@@ -697,7 +698,7 @@ func TestFuzzyNearOnlySyllableDoesNotBlankLaterText(t *testing.T) {
 	fzType(s, "ㄕㄨㄥˋ ㄍㄟˇ ㄊㄚ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
 	key(s, proto.KeyBackspace)
-	if snap := typeSyl(s, "ㄙㄨㄥˋ"); snap.Text() != "送給他" || s.nearReading {
+	if snap := symbolSyl(s, "ㄙㄨㄥˋ"); snap.Text() != "送給他" || s.nearReading {
 		t.Fatalf("改打正確讀音後整段照常解碼：%q near=%v", snap.Text(), s.nearReading)
 	}
 }

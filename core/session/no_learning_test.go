@@ -127,7 +127,7 @@ func TestNoLearningSkipsEnglishWords(t *testing.T) {
 		}
 	}
 	for _, off := range []bool{false, true} {
-		s := mixedSession()
+		s := newSession()
 		s.NoLearning = off
 		s.model.AdvanceTime(100 * englishDay)
 		for i := 0; i < 3; i++ {

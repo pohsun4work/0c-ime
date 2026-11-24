@@ -1,38 +1,17 @@
 package engine
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
-// fork：微軟參考的半形原字元沒在組字時也留在組字區（官方交還應用程式），TestKeyDown 要吃；` 打 `。
+// fork：微軟的半形原字元沒在組字時也留在組字區（官方交還應用程式），TestKeyDown 要吃；` 打 `。
 func TestMicrosoftIdleKeysClaimRawHalfwidthPunctuation(t *testing.T) {
 	e := testEngine()
-	p, _ := inputstyle.Get("microsoft")
-	e.InputStyle = p.Rules
 	if !containsAll(e.IdleKeys(), "\\'\"<>?`") {
 		t.Fatalf("TestKeyDown must claim the raw halfwidth keys: %q", e.IdleKeys())
-	}
-}
-
-// #210：Shift＋字母打小寫時，沒在組字的大寫字母也由核心吃下改成小寫；Windows 的 TestKeyDown 照 idle_keys 決定。
-func TestShiftLetterLowerClaimsIdleUppercase(t *testing.T) {
-	e := testEngine()
-	p, _ := inputstyle.Get("0c")
-	e.InputStyle = p.Rules
-	if strings.ContainsAny(e.IdleKeys(), "AZ") {
-		t.Fatalf("預設 Shift＋字母交還應用程式：%q", e.IdleKeys())
-	}
-	e.InputStyle.ShiftLetter = "lower"
-	if !strings.Contains(e.IdleKeys(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-		t.Fatalf("小寫規則要吃大寫字母：%q", e.IdleKeys())
-	}
-	id := e.OpenSession()
-	if snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: "Q"}); !snap.Handled || snap.Commit != "q" {
-		t.Fatalf("閒置的 Shift＋Q：%+v", snap)
 	}
 }
 
@@ -47,8 +26,7 @@ func styleDo(t *testing.T, e *Engine, id uint64, r proto.Request) proto.Snapshot
 
 func TestStyleWidthIsolatedAcrossEngineSessions(t *testing.T) {
 	e := testEngine()
-	p, _ := inputstyle.Get("microsoft")
-	e.InputStyle = p.Rules
+	e.InputStyle.ShiftSpace = inputstyle.ShiftSpaceFullWidth
 	e.SharedMode = true
 	e.StartEnglish = true
 	a, b := e.OpenSession(), e.OpenSession()
@@ -77,41 +55,10 @@ func TestStyleWidthIsolatedAcrossEngineSessions(t *testing.T) {
 	}
 }
 
-func TestStylesAreCopiedAndCapsRemainLocal(t *testing.T) {
-	e := testEngine()
-	p, _ := inputstyle.Get("mcbopomofo")
-	e.InputStyle = p.Rules
-	e.CapsLockEnglish = true
-	e.SharedMode = true
-	a := e.OpenSession()
-	zero, _ := inputstyle.Get("0c")
-	e.InputStyle = zero.Rules
-	b := e.OpenSession()
-	styleDo(t, e, a, proto.Request{Type: proto.CapsLock, On: true})
-	if snap := styleDo(t, e, a, proto.Request{Type: proto.Key, Key: "a"}); snap.Commit != "a" || !snap.CapsEnglish || snap.Mode != proto.ModeEnglish {
-		t.Fatalf("McBopomofo lowercase route: %+v", snap)
-	}
-	if snap := styleDo(t, e, a, proto.Request{Type: proto.Key, Key: "A"}); !snap.Handled || snap.Commit != "A" {
-		t.Fatalf("shell-normalized Caps+Shift must commit uppercase: %+v", snap)
-	}
-	if snap := styleDo(t, e, b, proto.Request{Type: proto.Display, Columns: 1}); snap.Mode != proto.ModeZhuyin || snap.CapsLock {
-		t.Fatalf("temporary caps leaked: %+v", snap)
-	}
-	styleDo(t, e, b, proto.Request{Type: proto.CapsLock, On: true})
-	if snap := styleDo(t, e, b, proto.Request{Type: proto.Key, Key: "a"}); snap.Handled {
-		t.Fatalf("new 0c session inherited lowercase profile: %+v", snap)
-	}
-	if snap := styleDo(t, e, a, proto.Request{Type: proto.CapsLock, On: false}); snap.Mode != proto.ModeZhuyin || snap.CapsEnglish {
-		t.Fatalf("temporary mode did not restore: %+v", snap)
-	}
-}
-
 func TestStyleHorizontalCandidateColumnsSurviveDisplayNegotiation(t *testing.T) {
 	for _, size := range []int{9, 10} {
 		e := testEngine()
-		p, _ := inputstyle.Get("chewing")
-		p.Rules.CandidatePageSize = size
-		e.InputStyle = p.Rules
+		e.InputStyle = inputstyle.Rules{CandidateNavigation: inputstyle.NavigationHorizontal, CandidatePageSize: size}
 		e.CandidateColumns = 10
 		id := e.OpenSession()
 		styleDo(t, e, id, proto.Request{Type: proto.Display, Columns: 10})

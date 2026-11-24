@@ -8,7 +8,6 @@
     "allow-get-status",
     "allow-get-settings",
     "allow-set-settings",
-    "allow-profile-command",
     "allow-check-update",
     "allow-download-update",
     "allow-install-update",

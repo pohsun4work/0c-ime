@@ -77,11 +77,6 @@ func TestAbbreviationOff(t *testing.T) {
 	if snap := typeBare(s, "ㄋㄏ"); snap.Text() != "ㄏ" {
 		t.Fatalf("關閉時新聲母照舊取代舊聲母：%q", snap.Text())
 	}
-	s = newTonelessSession(false)
-	s.Abbreviation = true
-	if snap := typeBare(s, "ㄋㄏ"); snap.Text() != "ㄏ" {
-		t.Fatalf("沒開聲調選填時簡拼不作用：%q", snap.Text())
-	}
 }
 
 func TestAbbreviationLearnsLexiconReading(t *testing.T) {
@@ -112,7 +107,7 @@ func symbolType(s *Session, text string) proto.Snapshot {
 }
 
 func coexistSession() *Session {
-	s := mixedSession()
+	s := newSession()
 	s.Toneless, s.Abbreviation, s.MixedWithToneless = true, true, true
 	return s
 }
@@ -203,7 +198,7 @@ func TestNineKeyPhysicalBackspaceDropsOneKey(t *testing.T) {
 }
 
 func TestTonelessWithoutCoexistStillDisablesMixed(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	s.Toneless = true
 	if s.mixedInput() {
 		t.Fatal("沒開共存時聲調選填照舊停用混打")

@@ -223,15 +223,15 @@ func TestNeuralRanksSegmentsAroundLiteralsWithCache(t *testing.T) {
 	key(s, "<")
 	typeSyl(s, "ㄨㄛˇ")
 	snap := typeSyl(s, "ㄐㄧㄥˇ")
-	if got := snap.Text(); got != "我井，我井" {
+	if got := snap.Text(); got != "我井<我井" {
 		t.Fatalf("segmented rerank = %q", got)
 	}
-	if last := contexts[len(contexts)-1]; last != "我井，" {
+	if last := contexts[len(contexts)-1]; last != "我井<" {
 		t.Fatalf("segment context = %q, want shown text before the segment", last)
 	}
 	before := calls
 	snap = key(s, "<") // 新增的字面符號只帶來單音節空段，兩個既有段落都應走快取
-	if calls != before || snap.Text() != "我井，我井，" {
+	if calls != before || snap.Text() != "我井<我井<" {
 		t.Fatalf("cached segments rescored: calls %d→%d text=%q", before, calls, snap.Text())
 	}
 }

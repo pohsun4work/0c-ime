@@ -27,7 +27,7 @@ func TestFuturePersonalStoreContinuesInputWithoutWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(binary, "-mixed-input", "-data", data, "-user", user)
+	cmd := exec.Command(binary, "-data", data, "-user", user)
 	cmd.Stdin = bytes.NewBufferString("hello\n\n:q\n")
 	out, err := cmd.CombinedOutput()
 	if err != nil || !bytes.Contains(out, []byte("hello")) || !bytes.Contains(out, []byte("較新版本")) {

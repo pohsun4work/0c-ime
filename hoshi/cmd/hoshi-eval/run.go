@@ -367,7 +367,6 @@ type shell struct {
 	handle      func(proto.Request) (proto.Snapshot, int64, error)
 	idle        string
 	idleFull    string
-	ctrlOn      bool
 	ctrlKeys    string
 	shiftSpace  string
 	snap        proto.Snapshot
@@ -379,8 +378,7 @@ type shell struct {
 
 func newShell(info map[string]string, handle func(proto.Request) (proto.Snapshot, int64, error)) *shell {
 	return &shell{handle: handle, idle: info["idle_keys"], idleFull: info["idle_keys_full_width"],
-		ctrlOn: info["ctrl_punctuation"] == "true", ctrlKeys: info["ctrl_punctuation_keys"],
-		shiftSpace: info["input_style_shift_space"], snap: proto.Snapshot{Mode: proto.ModeZhuyin}}
+		ctrlKeys: info["ctrl_punctuation_keys"], shiftSpace: info["shift_space"], snap: proto.Snapshot{Mode: proto.ModeZhuyin}}
 }
 
 // send 送一個請求進引擎，收下快照與送出的字。
@@ -403,7 +401,7 @@ func (s *shell) wants(key string) bool {
 	english := s.snap.Mode == proto.ModeEnglish
 	if c, ok := ctrlChar(key); ok {
 		// 最早的六個鍵不看 ctrl_punctuation_keys（keys.rs 的 ctrl_punct_known）
-		return !english && s.ctrlOn && strings.IndexByte(shellCtrlKeys, c) >= 0 && strings.IndexByte(",.';?!"+s.ctrlKeys, c) >= 0
+		return !english && strings.IndexByte(shellCtrlKeys, c) >= 0 && strings.IndexByte(",.';?!"+s.ctrlKeys, c) >= 0
 	}
 	if key == proto.KeyShiftSpace || s.snap.FullWidth && fullWidthExtra(key) {
 		return true

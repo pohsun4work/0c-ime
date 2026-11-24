@@ -1,6 +1,7 @@
 package session
 
 import (
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"strings"
 )
 
@@ -14,10 +15,10 @@ import (
 // 全形標點用 Ctrl＋符號（#168，宿主在這個設定開著時固定打開 CtrlPunct）。照舊的有：英文模式、全形（Shift＋空白切的字寬）、
 // 候選窗開著時。設定排在輸入習慣的標點規則之前：選了這個值，所有風格的符號鍵都打半形。
 func (s *Session) allSymbolsKey(k string) (handled bool, commit string, done bool) {
-	if !s.AllSymbolsHalfwidth || s.english || s.fullWidth || s.cand != nil || len(k) != 1 {
+	if s.english || s.fullWidth || s.cand != nil || len(k) != 1 {
 		return false, "", false
 	}
-	p, ok := s.layout.Punct(rune(k[0]))
+	p, ok := layout.Standard.Punct(rune(k[0]))
 	if !ok {
 		return false, "", false
 	}

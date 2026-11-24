@@ -27,7 +27,6 @@ func lateInitialSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	var words []english.Word
 	for _, w := range []string{"a", "hello"} {
 		words = append(words, english.Word{Text: w, Weight: 65})
@@ -42,7 +41,7 @@ func TestMixedLateDigitInitialComposes(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		{"k27", "的"}, {"k54", "這"}, {"j14", "不"}, {"l24", "到"}, {"o14", "被"}, {"p13", "本"},
 		{"k27ji3", "的我"}, {"k54g4", "這是"}, {"j14cl3", "不好"},
-		{"hello k27", "hello 的"}, {"ji3<k27", "我，的"}, {"ji3k27", "我的"},
+		{"hello k27", "hello 的"}, {"ji3<k27", "我<的"}, {"ji3k27", "我的"},
 		// 取捨：ㄅㄛˊ 連「博士」等詞首算是常用字，i16（iPhone 16 的簡寫）句首也先出博，跟 mp3 先出允一樣 ↓ 有原按鍵。
 		{"i16", "博"},
 	} {

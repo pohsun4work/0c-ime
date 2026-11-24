@@ -41,8 +41,8 @@ func TestGridWordLengthBoundariesPreserveAnchor(t *testing.T) {
 	for _, before := range []bool{false, true} {
 		s := cursorSession()
 		s.CandidateColumns, s.CandidateBeforeCursor = 5, before
-		typeSyl(s, "ㄈㄥ")
-		typeSyl(s, "ㄐㄧㄥˇ")
+		symbolSyl(s, "ㄈㄥ")
+		symbolSyl(s, "ㄐㄧㄥˇ")
 		if !before {
 			key(s, proto.KeyLeft)
 			key(s, proto.KeyLeft)
@@ -103,8 +103,8 @@ func TestCandidateTitleNamesReplacementAndWordLengthShortcut(t *testing.T) {
 	for _, columns := range []int{1, 5} {
 		s := cursorSession()
 		s.CandidateColumns = columns
-		typeSyl(s, "ㄈㄥ")
-		typeSyl(s, "ㄐㄧㄥˇ")
+		symbolSyl(s, "ㄈㄥ")
+		symbolSyl(s, "ㄐㄧㄥˇ")
 		key(s, proto.KeyLeft)
 		key(s, proto.KeyLeft)
 		cursorChoose(t, s, key(s, proto.KeyDown), "風景")

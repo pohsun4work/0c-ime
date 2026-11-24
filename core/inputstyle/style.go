@@ -1,25 +1,16 @@
 // Package inputstyle 是按鍵規則：使用者可在設定改的幾個按鍵操作。核心與宿主共用同一份值；不含平台 I/O。
 package inputstyle
 
-const Version = 1
-
-// Rules 是按鍵規則。ShiftSpace…CandidateNavigation 由設定決定（值見下面的常數），
-// Punctuation、Up、ShiftLetter、CapsLetter 是官方風格留下、引擎目前寫死的值。
-// 零值維持舊的按鍵處理（測試用）。
+// Rules 是按鍵規則，值見下面的常數。零值是各項的第一個值（Shift＋空白不動作、Tab 接受補全…），每頁 10 個候選。
 type Rules struct {
-	CapsLetter          string `json:"caps_letter"`
-	CandidateNavigation string `json:"candidate_navigation"`
-	ShiftDelete         string `json:"shift_delete"`
-	Up                  string `json:"up"`
-	CandidateTab        string `json:"candidate_tab"`
-	CandidatePageSize   int    `json:"candidate_page_size"`
-	Version             int    `json:"version"`
-	Punctuation         string `json:"punctuation"`
-	ShiftSpace          string `json:"shift_space"`
-	Tab                 string `json:"tab"`
-	CandidateSpace      string `json:"candidate_space"`
-	CandidateEnter      string `json:"candidate_enter"`
-	ShiftLetter         string `json:"shift_letter"`
+	ShiftSpace          string
+	Tab                 string
+	CandidateTab        string
+	CandidateSpace      string
+	CandidateEnter      string
+	CandidatePageSize   int
+	ShiftDelete         string
+	CandidateNavigation string
 }
 
 // 設定可選的值。

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"slices"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
@@ -33,7 +34,7 @@ func (s *Session) keySymbol(key string) (rune, bool) {
 	if len(key) != 1 {
 		return 0, false
 	}
-	sym, ok := s.layout.Symbol(rune(key[0]))
+	sym, ok := layout.Standard.Symbol(rune(key[0]))
 	if !ok || zhuyin.ClassOf(sym) == zhuyin.Tone || zhuyin.ClassOf(sym) == zhuyin.None {
 		return 0, false
 	}

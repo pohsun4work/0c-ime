@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use windows::Win32::Foundation::{E_INVALIDARG, HWND, LPARAM, RECT, WPARAM};
-use windows::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows::Win32::System::Variant::{VariantClear, VT_I4};
 use windows::Win32::UI::TextServices::{
     IEnumTfDisplayAttributeInfo, ITfCompartment,
@@ -21,7 +20,7 @@ use windows::Win32::UI::TextServices::{
     ITfThreadMgrEventSink_Impl, ITfUIElementMgr, TfLayoutCode, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
     TF_INVALID_COOKIE, TF_LC_DESTROY, TF_TMAE_COMLESS, TF_TMAE_SECUREMODE, TF_TMAE_UIELEMENTENABLEDONLY,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, MB_OK};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 use windows_core::{implement, ComObject, IUnknownImpl, Interface, Ref, BOOL, GUID};
 use zuin_win_common::{has_content, notice_expires, UiCandidate, UiMessage, NOTICE_MS};
 
@@ -163,9 +162,7 @@ struct State {
     /// 組字中焦點移到 NULL 時組字所在的 context（沒有就是那次的原文件，#189）：送出時組字範圍與這次焦點變化的原文件都拿不到
     /// context（範圍或 context 已失效，A→NULL→B 第二次的原文件是 NULL）才送到這裡，免得打到一半的字沒地方送。
     left_from: Option<ITfContext>,
-    /// OnTestKeyDown 對 Ctrl＋Shift＋F11 的決定（#192），OnKeyDown 沿用。
-    hotkey_tested: keys::Tested,
-    /// OnTestKeyDown 對其他按鍵的決定（#216）：說要吃、OnKeyDown 卻沒吃成時（等不到重啟中的引擎），以原字元補送。
+    /// OnTestKeyDown 對按鍵的決定（#216）：說要吃、OnKeyDown 卻沒吃成時（等不到重啟中的引擎），以原字元補送。
     key_tested: keys::Tested,
     /// Chromium 的視窗組字中（click.rs 看著滑鼠按下）最近一次套用快照的 context：按下滑鼠時組字送到這裡（組字範圍拿不到 context 時，#322）。
     click_context: Option<ITfContext>,
@@ -198,13 +195,6 @@ enum FocusChange {
 }
 
 /// `owner`：組字所在的文件（沒在組字時為 None）。泛型只為了能在測試裡用一般型別代替 ITfDocumentMgr。
-/// 打錯注音時提示（#300，快照的 bell）：系統的預設提示音（MB_OK），照使用者的音效配置，關掉系統音效就不響。
-/// 微軟注音舊版拼錯時也是嗶一聲。
-fn bell() {
-    let ok = unsafe { MessageBeep(MB_OK) }.is_ok();
-    zdebug!("bell: MessageBeep ok={ok}");
-}
-
 fn focus_change<T: PartialEq>(focus: Option<&T>, owner: Option<&T>) -> FocusChange {
     match (focus, owner) {
         (_, None) => FocusChange::Left,
@@ -258,8 +248,6 @@ fn settle_step<T: PartialEq, C>(current: Option<&T>, owner: Option<&T>) -> Focus
 enum EnglishKey {
     /// true：吃下，OnKeyDown 交給引擎；false：交給程式。
     Eat(bool),
-    /// 吃下，OnKeyDown 不經引擎、直接把這段字送進文件（#112 的 Caps Lock 小寫字母）。
-    Literal(String),
     /// IMM32 程式裡英文單字中的空白、標點或方向鍵（#260）：吃下，OnKeyDown 由引擎送出單字，同一次接著送出
     /// `typed`（這一鍵在程式裡會打出的字；方向鍵等是空字串，只送出單字）。
     WordEnd { key: String, typed: String },
@@ -274,10 +262,6 @@ impl EnglishKey {
 /// 同一個畫面版本最多因 OnLayoutChange 重查幾次。
 const MAX_REQUERIES: u32 = 8;
 
-/// 換欄位時，這段時間內已從引擎得知「輸出簡體字」（#169）就不再問：一次點擊或切換視窗常連著好幾次焦點變化，
-/// 而從別處切換後再點回這個程式總要超過這個時間。
-const SIMPLIFIED_FRESH: Duration = Duration::from_secs(1);
-
 /// 重送舊畫面（OnLayoutChange 後移位置）之前拿掉 0c-ui 已自己收起的提示：0c-ui 在 NOTICE_MS 後收起提示，
 /// DLL 不會知道；照舊重送會讓已收起的提示（或只有提示的視窗）在捲動、改視窗大小時又跳出來並重新計時。
 /// 回傳拿掉之後還有沒有東西可畫（只剩提示就不再重送）。
@@ -289,14 +273,13 @@ fn drop_expired_notice(message: &mut UiMessage, age: Duration) -> bool {
 }
 
 impl State {
-    /// 保留風格需要的 Shift＋Space 與 Caps 字母語意；預判和送鍵共用。
+    /// Shift＋空白照設定（Shift＋空白有動作時）送 ShiftSpace；預判和送鍵共用。
     fn styled_key(&mut self, vk: u32, lparam: isize, vocab: bool, english: bool) -> Option<String> {
         let key = keys::to_key(vk, lparam, vocab, english)?;
-        let shift = keys::shift_down();
-        let caps = keys::caps_lock_on();
-        let shift_space = key == " " && shift && self.session.style_shift_space();
-        let caps_lower = caps && self.session.style_caps_lower();
-        Some(keys::style_key(key, shift, caps, shift_space, caps_lower))
+        if key == " " && keys::shift_down() && self.session.style_shift_space() {
+            return Some("ShiftSpace".into());
+        }
+        Some(key)
     }
 
     /// 這一鍵（`vk`）送不送 #123 的新鍵名（keys::named_with 的 `vocab`）：引擎要回報 vocab_keys。英文模式引擎沒有
@@ -307,7 +290,7 @@ impl State {
             && (!self.session.english() || keys::undo_vk(vk) && self.session.english_state.english_suggesting())
     }
 
-    /// 這一鍵是不是要交給引擎的 Ctrl＋標點（#168）：中文模式、引擎可用而且回報 ctrl_punctuation（認得鍵名、設定開著）。
+    /// 這一鍵是不是要交給引擎的 Ctrl＋標點（#168）：中文模式、引擎可用而且認得這個鍵名。
     /// 先看按鍵本身，不是 Ctrl＋標點鍵就不問引擎；Ctrl+: ( )（#231）還要引擎的 ctrl_punctuation_keys 列了它。
     /// TestKeyDown 與 OnKeyDown 用同一個答案；是的話不先送出組字。
     fn ctrl_punct_key(&mut self, vk: u32, lparam: isize) -> Option<&'static str> {
@@ -316,24 +299,6 @@ impl State {
         }
         let key = keys::ctrl_punct(vk, lparam)?;
         (self.session.available() && self.session.ctrl_punctuation(key)).then_some(key)
-    }
-
-    /// 這一鍵是不是要攔下來切換「輸出簡體字」的 Ctrl＋Shift＋F11（#192）：引擎可用而且回報 simplified_hotkey
-    /// （設定開著、能即時切換）。先看按鍵本身，不是這個鍵就不問引擎。是的話不先送出組字（同選單，組字不動）。
-    /// TestKeyDown 問（test_simplified_hotkey），OnKeyDown 沿用同一個答案（key_simplified_hotkey）。
-    fn simplified_hotkey(&mut self, vk: u32) -> bool {
-        keys::simplified_hotkey(vk) && self.session.available() && self.session.simplified_hotkey()
-    }
-
-    fn test_simplified_hotkey(&mut self, vk: u32) -> bool {
-        let decision = self.simplified_hotkey(vk);
-        self.hotkey_tested.record(vk, decision);
-        decision
-    }
-
-    /// `tested`：OnKeyDown 一進來就從 hotkey_tested 取走的 TestKeyDown 決定；沒有時才問。
-    fn key_simplified_hotkey(&mut self, vk: u32, tested: Option<bool>) -> bool {
-        tested.unwrap_or_else(|| self.simplified_hotkey(vk))
     }
 
     fn tap(&mut self, side: keys::Side) -> &mut keys::ShiftTap {
@@ -394,7 +359,6 @@ impl TextService {
                 openclose: None,
                 openclose_value: 0,
                 left_from: None,
-                hotkey_tested: keys::Tested::default(),
                 key_tested: keys::Tested::default(),
                 click_context: None,
             }),
@@ -427,9 +391,6 @@ impl TextService_Impl {
     fn present(&self, ctx: Option<&ITfContext>, snapshot: &Snapshot) -> bool {
         let eaten = self.present_in_edit(ctx, snapshot, None);
         self.sync_langbar();
-        if snapshot.bell {
-            bell();
-        }
         eaten
     }
 
@@ -438,25 +399,6 @@ impl TextService_Impl {
         let ctx = self.focused_context();
         let snapshot = self.state.borrow_mut().session.toggle();
         self.present(ctx.as_ref(), &snapshot);
-    }
-
-    /// 選單的「輸出簡體字」（#169）：在這個程式的 session 請引擎即時切換，組字不動；快照帶的提示
-    /// 「已切換為輸出簡體字／繁體字」照一般提示顯示在游標旁、幾秒後收起，指示器跟著換成「简」／「中」。
-    /// 走的是打字用的同一條引擎管道，沙箱宿主（搜尋框等）也可以。引擎不能即時切換或沒回應時回傳 false。
-    pub(crate) fn set_output_simplified(&self, on: bool) -> bool {
-        let ctx = self.focused_context();
-        let snapshot = {
-            let Ok(mut st) = self.state.try_borrow_mut() else { return false };
-            if !st.session.available() {
-                return false;
-            }
-            st.session.output_simplified(on)
-        };
-        if !snapshot.ok || !snapshot.handled {
-            return false;
-        }
-        self.present(ctx.as_ref(), &snapshot);
-        true
     }
 
     /// 鍵盤開關 compartment 改變（#117）。Windows 繁中的 Ctrl＋Space 是系統的輸入法開關熱鍵（輸入語言熱鍵
@@ -516,42 +458,10 @@ impl TextService_Impl {
         }
     }
 
-    /// Caps Lock 開著時直接打英文（#173）：按鍵當下的鎖定狀態跟引擎記得的不同時告訴引擎；開啟時引擎先送出組字、
-    /// 切到英文，關閉時回到原本的模式，組字區與中／英指示照快照更新。TestKeyDown 與 OnKeyDown 都呼叫，第二次狀態已相同、
-    /// 不再送，兩者看到的模式一樣；Caps Lock 鍵本身在按下時（系統已切換鎖定狀態）與放開時（保險）各同步一次。
-    /// 設定關閉或舊引擎時什麼都不做，注音模式照舊不理 Caps Lock（#168）。
-    fn sync_caps(&self, ctx: Option<&ITfContext>, vk: u32) {
-        let on = keys::caps_lock_on();
-        let snapshot = {
-            let mut st = self.state.borrow_mut();
-            if vk == keys::VK_CAPS_LOCK {
-                st.session.refresh_caps_lock_english(); // 設定剛打開、引擎重啟後的第一次 Caps Lock
-            }
-            if !st.session.caps_needs_sync(on) || !st.session.available() {
-                return;
-            }
-            st.session.caps_lock(on)
-        };
-        zdebug!("Caps Lock {} -> english={}", on, snapshot.english);
-        self.present(ctx, &snapshot);
-    }
-
-    /// 開輸入指示器選單前重新確認「輸出簡體字」（#169）：設定程式或別的程式剛切換過、這個程式還沒有新快照時，
-    /// 勾選與「简」／「中」也要對。只用已經在執行的引擎；宿主正在處理別的事（狀態借用中）時略過。
-    pub(crate) fn recheck_simplified(&self) {
-        let changed = match self.state.try_borrow_mut() {
-            Ok(mut st) => st.session.refresh_simplified(),
-            Err(_) => false,
-        };
-        if changed {
-            self.sync_langbar();
-        }
-    }
-
     fn sync_langbar(&self) {
         let st = self.state.borrow();
         if let Some((_, button)) = st.langbar.as_ref() {
-            crate::langbar::set_state(button, st.session.english(), st.session.simplified());
+            crate::langbar::set_state(button, st.session.english());
         }
     }
 
@@ -1103,11 +1013,11 @@ impl TextService_Impl {
             .and_then(|t| unsafe { t.GetFocus() }.ok());
         let owner = self.composition_document();
         let step = settle_step(current.as_ref(), owner.as_ref());
-        self.follow_focus(step, current.is_some());
+        self.follow_focus(step);
     }
 
-    /// 照 focus_step／settle_step 的決定繼續組字、稍後確認或送出組字；`focused`：焦點落在某個文件（不是 NULL）。
-    fn follow_focus(&self, step: FocusStep<ITfContext>, focused: bool) {
+    /// 照 focus_step／settle_step 的決定繼續組字、稍後確認或送出組字。
+    fn follow_focus(&self, step: FocusStep<ITfContext>) {
         if let Some(window) = self.state.borrow().callback.as_ref() {
             if matches!(step, FocusStep::Wait(_)) {
                 window.settle_focus_later();
@@ -1132,13 +1042,13 @@ impl TextService_Impl {
             FocusStep::Leave(previous) => {
                 let left_from = self.state.borrow_mut().left_from.take();
                 let target = self.composition_context().or(previous).or(left_from);
-                self.leave_document(target.as_ref(), focused);
+                self.leave_document(target.as_ref());
             }
         }
     }
 
     /// 換欄位：把進行中的組字提交到原欄位（與 Fcitx 5 外殼的 deactivate 相同），清掉候選與這個欄位的狀態。
-    fn leave_document(&self, previous: Option<&ITfContext>, focused: bool) {
+    fn leave_document(&self, previous: Option<&ITfContext>) {
         self.finish(previous, "commit");
         self.forget_candidates();
         let changed = {
@@ -1148,12 +1058,7 @@ impl TextService_Impl {
             st.selection = None;
             st.ui.hide();
             // 全部共用（#115）時別的程式可能已經切換：引擎在執行就重新問，中／英指示跟著換（不為此啟動引擎）。
-            // 「輸出簡體字」也可能剛在設定程式或別的程式切換過（#169）：指示器的「简」跟著換。焦點離開文件（focus 為
-            // NULL）時不問；SIMPLIFIED_FRESH 之內剛從引擎得知（剛打字、同一次點擊的前一次焦點變化）也不問，
-            // 不在宿主的 UI 執行緒上每次多一次同步 IPC。開選單時另外照常確認（recheck_simplified）。
-            let mode = st.session.learn_mode(false);
-            let simplified = focused && st.session.refresh_simplified_after(SIMPLIFIED_FRESH);
-            mode || simplified
+            st.session.learn_mode(false)
         };
         if changed {
             self.sync_langbar();
@@ -1221,8 +1126,7 @@ impl TextService_Impl {
                 st.session.english_state.clone()
             }
         };
-        let caps_lower = snap.caps_lock && self.state.borrow_mut().session.style_caps_lower();
-        if !snap.ok || (!snap.english_autocomplete && !snap.full_width && !caps_lower) || snap.composing() && !snap.english_pending {
+        if !snap.ok || (!snap.english_autocomplete && !snap.full_width) || snap.composing() && !snap.english_pending {
             return None;
         }
         if keys::modifier_down() {
@@ -1237,19 +1141,13 @@ impl TextService_Impl {
         // IMM32 程式的焦點不是文字框（Photoshop 的畫布）：英文模式的按鍵是快捷鍵，整個交給程式，不開始補字（#210）。
         let flags = self.state.borrow().activate_flags;
         if !snap.english_pending && ctx.is_some_and(|c| privacy::english_passthrough(c, flags)) {
-            // 「Caps Lock 英文字母：預設小寫」的字母例外（#112）：交給程式的話系統照 Caps Lock 打成大寫（Shift 反而小寫），
-            // 自己繪製插入點的編輯器（沒有系統插入點）裡跟其他程式大小寫不同。照風格的大小寫直接送出，仍不開始補字；
-            // 數字、標點與具名鍵不受 Caps Lock 影響，照舊交給程式。Caps Lock 沒開或「依平台大小寫」時字母也照舊交給程式。
-            if let Some(text) = keys::caps_lower_literal(caps_lower, key.as_deref()) {
-                return Some(EnglishKey::Literal(text));
-            }
             crate::log::once(&format!(
                 "英文模式：IMM32 程式的焦點沒有插入點，不開始英文補字，按鍵直接交給程式 exe={}",
                 crate::log::exe_name()
             ));
             return Some(EnglishKey::Eat(false));
         }
-        if key.as_ref().is_some_and(|k| snap.english_wants_key(k) || caps_lower && k.len() == 1 && k.as_bytes()[0].is_ascii_alphabetic()) {
+        if key.as_ref().is_some_and(|k| snap.english_wants_key(k)) {
             return Some(EnglishKey::Eat(true));
         }
         // IMM32 程式（EDIT、IMM32 模式的 RichEdit、自繪文字框）經系統相容層收到的提交是 WM_IME_COMPOSITION，
@@ -1514,21 +1412,12 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                 // 新開的程式從開始時的中英模式起（#160）：引擎已在執行就先問，中／英指示一開始就對；不為此啟動引擎。
                 st.session.learn_mode(false);
                 let english = st.session.english();
-                let simplified = st.session.simplified();
                 drop(st);
                 // 輸入指示器的中／英按鈕與選單（#13）。按鈕持有本服務的參考，Deactivate 時移除以解開循環。
                 let tm = self.state.borrow().thread_mgr.clone();
                 if let Some(Ok(mgr)) = tm.map(|tm| tm.cast::<ITfLangBarItemMgr>()) {
                     let service = self.to_object();
-                    let simplify = self.to_object();
-                    let recheck = self.to_object();
-                    let button = crate::langbar::LangBarButton::create(
-                        english,
-                        simplified,
-                        Box::new(move || service.toggle_mode()),
-                        Box::new(move |on| simplify.set_output_simplified(on)),
-                        Box::new(move || recheck.recheck_simplified()),
-                    );
+                    let button = crate::langbar::LangBarButton::create(english, Box::new(move || service.toggle_mode()));
                     if let Ok(item) = button.cast::<ITfLangBarItem>() {
                         if mgr.AddItem(&item).is_ok() {
                             self.state.borrow_mut().langbar = Some((mgr, button));
@@ -1650,7 +1539,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             {
                 // 上一次按鍵的決定不留給這一次（keys::Tested）
                 let mut st = self.state.borrow_mut();
-                st.hotkey_tested.forget();
                 st.key_tested.forget();
             }
             // 重排回來的鍵（#66）：攔下重排之後 TSF 一定先呼叫了這一鍵的 OnKeyDown，所以同一個 (vk, lParam) 的 TestKeyDown
@@ -1671,17 +1559,11 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             }
             let vk = wparam.0 as u32;
             self.observe_shift(vk, lparam.0);
-            // 用快捷鍵切換簡體字（#192）：設定開著時吃掉，OnKeyDown 才切換；不先送出組字。
-            if self.state.borrow_mut().test_simplified_hotkey(vk) {
-                zdebug!("OnTestKeyDown vk={} -> 切換簡體字", vk);
-                return Ok(true.into());
-            }
             if self.commit_before_host_key(pic.as_ref(), vk, lparam.0, true) {
                 zdebug!("OnTestKeyDown vk={} -> 攔下重排", vk);
                 return Ok(true.into());
             }
             self.learn_mode(vk);
-            self.sync_caps(pic.as_ref(), vk);
             let wants = match self.english_key_policy(pic.as_ref(), vk, lparam.0) {
                 Some(policy) => policy.eats(),
                 None => self.wants_key(vk, lparam.0),
@@ -1701,7 +1583,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         crate::guarded("OnTestKeyUp", || {
             {
                 let mut st = self.state.borrow_mut();
-                st.hotkey_tested.forget();
                 st.key_tested.forget();
                 // 放開就是這一鍵結束了：重排的鍵沒回來也不再等（#66），放開本身照常交給程式
                 st.pending_repost = None;
@@ -1710,9 +1591,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 return Ok(false.into());
             }
             let vk = wparam.0 as u32;
-            if vk == keys::VK_CAPS_LOCK {
-                self.sync_caps(pic.as_ref(), 0); // #173：按下時沒同步到的話（宿主時序不同），放開時一定已切換
-            }
             // Shift 放開在這裡就切換、不吃（#217）：IMM32 程式（PuTTY）不一定讓 OnKeyUp 來。
             if let Some(side) = keys::shift_side(vk, lparam.0) {
                 self.shift_released(pic.as_ref(), side);
@@ -1739,38 +1617,19 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 }
             }
             // TestKeyDown 的決定一進來就取走，在 allowed() 提早回傳時也不留給之後的按鍵（keys::Tested）。
-            let (tested, key_tested) = {
-                let mut st = self.state.borrow_mut();
-                (st.hotkey_tested.take(vk), st.key_tested.take(vk))
-            };
+            let key_tested = self.state.borrow_mut().key_tested.take(vk);
             if !self.allowed(pic.as_ref()) {
                 return Ok(false.into());
             }
             self.observe_shift(vk, lparam.0);
-            // 用快捷鍵切換簡體字（#192）：跟輸入指示器選單的「輸出簡體字」同一條路，組字不動、提示「已切換為…」、
-            // 工作列「中」↔「简」。沿用 TestKeyDown 的決定（不再問引擎）：說要吃就一定吃，切換失敗（引擎剛好斷線）也照樣吃掉，
-            // 按鍵不會半途交給應用程式（F11 在瀏覽器、Excel 是全螢幕），放開時 OnTestKeyUp 看 eaten 也一致。
-            if self.state.borrow_mut().key_simplified_hotkey(vk, tested) {
-                let on = !self.state.borrow().session.simplified().unwrap_or(false);
-                let switched = self.set_output_simplified(on);
-                zdebug!("OnKeyDown vk={} 切換簡體字 on={} ok={}", vk, on, switched);
-                self.state.borrow_mut().eaten.insert(vk);
-                return Ok(true.into());
-            }
             self.commit_before_host_key(pic.as_ref(), vk, lparam.0, false);
             self.learn_mode(vk);
-            self.sync_caps(pic.as_ref(), vk);
             // TestKeyDown 吃下、沒在組字的注音模式按鍵，最後沒吃成就以原字元補送（type_literal，#216）。
             let literal_fallback = key_tested == Some(true) && {
                 let st = self.state.borrow();
                 !st.composing && !st.session.english()
             };
             let wants = match self.english_key_policy(pic.as_ref(), vk, lparam.0) {
-                Some(EnglishKey::Literal(text)) => {
-                    // #112：IMM32 沒有系統插入點的視窗裡 Caps Lock 小寫的字母，不經引擎直接送出（不開始英文補字）。
-                    zdebug!("OnKeyDown vk={} Caps Lock 小寫字母直接送出", vk);
-                    return Ok(self.type_text(pic.as_ref(), vk, text).into());
-                }
                 Some(EnglishKey::WordEnd { key, typed }) => {
                     zdebug!("OnKeyDown vk={} IMM32 程式：單字連同按鍵一起送出", vk);
                     self.confirm_document_context(pic.as_ref());
@@ -1827,7 +1686,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         crate::guarded("OnKeyUp", || {
             {
                 let mut st = self.state.borrow_mut();
-                st.hotkey_tested.forget();
                 st.key_tested.forget();
                 // 放開就是這一鍵結束了：重排的鍵沒回來也不再等（#66），放開本身照常交給程式
                 st.pending_repost = None;
@@ -1969,7 +1827,7 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
             );
             let can_wait = self.state.borrow().callback.is_some();
             let step = focus_step(focus.as_ref(), owner.as_ref(), previous, can_wait);
-            self.follow_focus(step, focus.as_ref().is_some());
+            self.follow_focus(step);
             Ok(())
         })
     }
@@ -2304,69 +2162,6 @@ mod shift_tests {
         assert!(!test_down(&sink, &ctx, SHIFT, RIGHT));
         assert!(!test_up(&sink, &ctx, SHIFT, RIGHT));
         assert_ne!(english(), start);
-        unsafe {
-            let _ = DestroyWindow(view);
-        }
-    }
-}
-
-#[cfg(test)]
-mod caps_lower_tests {
-    //! #112：「Caps Lock 開著時直接打英文」加「Caps Lock 英文字母：預設小寫」，在 IMM32 沒有系統插入點的視窗
-    //! （#210 英文模式按鍵整個交給程式）裡字母被系統照 Caps Lock 打成大寫，同一台電腦有的程式小寫、有的大寫。
-    //! 以 IMM32 暫時 context 的假宿主走 ITfKeyEventSink；Caps Lock 與 Shift 用 SetKeyboardState 設在本測試執行緒。
-    //! 需要 ZUIN_TEST_CAPS_LOWER_PIPE 的測試引擎：設定 caps-lock-english on、style-caps-letter lower、english-autocomplete on。
-    use super::*;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardState, SetKeyboardState, VK_CAPITAL, VK_SHIFT};
-    use windows::Win32::UI::TextServices::ITfKeyEventSink;
-    use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
-
-    /// 只改本執行緒的鍵盤狀態（GetKeyState、ToUnicode 看的），不動系統的 Caps Lock。
-    fn keyboard(caps: bool, shift: bool) {
-        let mut state = [0u8; 256];
-        unsafe {
-            GetKeyboardState(&mut state).unwrap();
-            state[VK_CAPITAL.0 as usize] = if caps { 1 } else { 0 };
-            state[VK_SHIFT.0 as usize] = if shift { 0x80 } else { 0 };
-            SetKeyboardState(&state).unwrap();
-        }
-    }
-
-    fn down(sink: &ITfKeyEventSink, ctx: &ITfContext, vk: u32, scan: isize) -> (bool, bool) {
-        let (w, l) = (WPARAM(vk as usize), LPARAM(1 | scan << 16));
-        let test = unsafe { sink.OnTestKeyDown(ctx, w, l) }.unwrap().as_bool();
-        let key = test && unsafe { sink.OnKeyDown(ctx, w, l) }.unwrap().as_bool();
-        (test, key)
-    }
-
-    #[test]
-    fn caps_lower_letters_in_imm32_windows_without_caret() {
-        let Some(pipe) = std::env::var("ZUIN_TEST_CAPS_LOWER_PIPE").ok() else {
-            return;
-        };
-        let (view, ctx) = crate::privacy::host_tests::imm32_window_without_caret();
-        let service = ComObject::new(TextService::new());
-        service.state.borrow_mut().session = Session::with_client(crate::ipc::Client::with_pipe(&pipe));
-        let sink: ITfKeyEventSink = service.to_interface();
-        keyboard(true, false);
-        // Caps Lock 開著：第一個按鍵同步到引擎、切到英文；字母由輸入法吃下送出小寫，交給程式就是大寫。
-        assert_eq!(down(&sink, &ctx, 0x41, 0x1e), (true, true), "Caps Lock 的 a 要由輸入法送出");
-        {
-            let st = service.state.borrow();
-            assert!(st.session.english() && st.session.english_state.caps_lock);
-            // 仍不在沒有插入點的視窗開始英文補字（#210）。
-            assert!(!st.composing && !st.session.english_state.english_pending, "不開始英文補字");
-        }
-        keyboard(true, true);
-        assert_eq!(down(&sink, &ctx, 0x42, 0x30), (true, true), "Caps Lock＋Shift 的 B 也由輸入法送出");
-        keyboard(true, false);
-        // 數字與標點不受 Caps Lock 影響，照舊交給程式。
-        assert_eq!(down(&sink, &ctx, 0x31, 0x02), (false, false), "數字交給程式");
-        assert_eq!(down(&sink, &ctx, 0xBA, 0x27), (false, false), "標點交給程式");
-        // 關掉 Caps Lock：回到注音，字母照常組字。
-        keyboard(false, false);
-        assert_eq!(down(&sink, &ctx, 0x41, 0x1e), (true, true));
-        assert!(!service.state.borrow().session.english());
         unsafe {
             let _ = DestroyWindow(view);
         }

@@ -24,7 +24,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/punct"
 	"github.com/0c-biggo/0c-ime/core/rerank"
 	"github.com/0c-biggo/0c-ime/core/suggest"
-	"github.com/0c-biggo/0c-ime/core/zhconv"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -49,8 +48,8 @@ type candState struct {
 	syllable      *pendingLiteral // 原樣留下的音節（#109）：選項是同讀音的各聲調，選入後仍是原樣音節
 	chars         int             // 原樣音節自己有字時（#296），items[chars:] 是這個讀音的字，選了換回一般的字；0 表示沒有
 	kind          string
-	direct        bool   // empty composition: selection commits once.
-	ids           []int  // stable palette IDs, independent of recent order.
+	direct        bool  // empty composition: selection commits once.
+	ids           []int // stable palette IDs, independent of recent order.
 	// split > 0 時是混合清單（#161）：items[:split] 是 start/length 的詞，items[split:] 接著列
 	// 游標那個字（位置 single）的單字候選，翻頁就看得到，不必先按 Tab 換到單字。
 	split  int
@@ -108,9 +107,6 @@ type Session struct {
 	Punct punct.Punctuator
 	// Fuzzy 由宿主依使用者設定：逐對啟用的模糊音；零值全部關閉，行為與沒有此功能時相同。
 	Fuzzy fuzzy.Config
-	// Simplified 由宿主依「輸出簡體字」設定（#118）：送出給應用程式的文字轉成簡體，nil 照原樣送出繁體。
-	// 組字區、候選、學習、補標點與前文都維持繁體，只有 Snapshot.Commit 改變。
-	Simplified *zhconv.Converter
 	// Toneless 由宿主依「不打聲調也能選字」設定（#150，預設關）：聲調選填，沒打聲調的音節由解碼決定（untoned.go）。
 	// 開啟時停用中英混打的自動判斷。零值時行為與沒有此功能時相同。
 	Toneless bool
@@ -119,16 +115,14 @@ type Session struct {
 	Abbreviation bool
 	// MixedWithToneless 由宿主設定（手機）：聲調選填與中英混打共存。聲調選填和簡拼只用在注音鍵
 	// （symbol 請求，手機的注音鍵盤）；實體按鍵照混打規則判斷英文或標準注音。零值時兩者二選一（#150）。
-	MixedWithToneless bool
-	symbolPending     bool                                  // 未打完的注音來自注音鍵（symbol 請求）；接著的實體按鍵要先把它完成（finishSymbolPending）
-	sylPrior          map[zhuyin.Syllable]float64           // 簡拼保留讀音用的單音節常用程度（syllablePrior）
-	missedMemo        map[zhuyin.Syllable][]zhuyin.Syllable // 打的音節補上一鍵的讀音（missedFor，#335）
-	// MixedInput is opt-in; English is a shared, immutable vocabulary.
-	EnglishAutocomplete   bool
-	MixedInput            bool
-	English               *english.Dictionary
-	EmojiShortcut         string
-	EmojiEqualsFirst      bool
+	MixedWithToneless   bool
+	symbolPending       bool                                  // 未打完的注音來自注音鍵（symbol 請求）；接著的實體按鍵要先把它完成（finishSymbolPending）
+	sylPrior            map[zhuyin.Syllable]float64           // 簡拼保留讀音用的單音節常用程度（syllablePrior）
+	missedMemo          map[zhuyin.Syllable][]zhuyin.Syllable // 打的音節補上一鍵的讀音（missedFor，#335）
+	EnglishAutocomplete bool
+	English             *english.Dictionary // 共用、不會改變的英文詞庫
+	// equalsPalette：= 開 Emoji／片語選單。fork 的 = 直接打 =（P4.5），選單到 P10／P11 才有新入口；目前只有測試打開它。
+	equalsPalette         bool
 	CandidateColumns      int
 	CandidateBeforeCursor bool // 由宿主設定；零值維持游標後方選字
 	displayColumns        int
@@ -147,18 +141,8 @@ type Session struct {
 	untonedRun            *untonedRun         // 聲調選填時這一串連續打的注音鍵（#150），認「我的詞彙」的英文詞
 	literalKeys           map[int]string      // 照字面留下的符號位置 → 原按鍵，↓ 第二項可選回（#135 聲調符號、#190 混打的「，」「。」）
 	retypeLiteral         bool                // 上一鍵剛把沒有字的音節原樣留下：緊接著的同類介音／韻母是在改它（#85）
-	// ZhuyinErrorHint 由宿主依「打錯注音時提示」設定（#300，預設開）：按聲調（含空白的一聲）完成的讀音沒有字時
-	// 不收這個聲調，注音停在暫存等使用者修改，快照的 Bell 要外殼提示（tone_check.go）。中英混打與聲調選填時不作用。
-	// 零值時行為與沒有此功能時相同：沒有字的音節照舊原樣留下（#109）。
-	ZhuyinErrorHint bool
-	toneRefused     *refusedTone // 這次請求擋下的聲調（#300）；下一個請求開始時移到 toneRetry
-	toneRetry       *refusedTone // 上一個請求擋下的聲調：這次在同一處再按同一個聲調就照舊收下
-	bell            bool         // 這次請求擋下了按鍵：快照的 Bell，送出後清掉
 	// DocumentContextOff 由宿主依使用者設定：外殼送來的前文確認一律忽略，不以前文選字。
 	DocumentContextOff bool
-	// SpaceInsertsSpace 由宿主依使用者設定（關閉「空白鍵選字」）：注音打完後空白插入半形空白、↓ 選字，
-	// 同中英混打（#107、#110）；零值空白開候選。未打完的注音照樣以空白完成一聲，候選開著時空白照樣換頁。
-	SpaceInsertsSpace bool
 	// AdvanceAfterSelect 由宿主依使用者設定「選字後游標移到下一個字」（#133）：從候選窗選定詞後，
 	// 後方模式游標移到所選詞的結尾，前方模式往後移一個字（同新酷音 autoShiftCur），句尾時不動。
 	// 零值游標留在原處。符號、Emoji 與原樣注音本來就插入在游標處、游標停在它們後面，不受影響。
@@ -166,30 +150,11 @@ type Session struct {
 	// SelectionKeys 由宿主依使用者設定（#112）：候選窗每一頁第 1–10 項的選字鍵，例如 1234qweras。
 	// 空字串或不合用的值為 1234567890。數字 1–0 不論設定都照位置選字。
 	SelectionKeys string
-	// CtrlPunct 由宿主依「Ctrl＋標點打全形」設定（#168，預設開）：中文模式的 Ctrl＋, . ' ; 與 Ctrl＋Shift＋/ 1 ; 9 0（#231）
-	// 打全形標點，跟一般標點一樣插進組字區。零值時這些鍵回 handled=false，外殼照一般快捷鍵交給應用程式。
-	CtrlPunct bool
-	// ShiftSymbolHalfwidth 由宿主依「Shift＋符號打半形」設定（#258；fork 預設跟著所有符號鍵打半形開）：注音模式的 Shift＋符號鍵打英文鍵盤上的
-	// 半形符號（shift_symbol.go），全形標點改用 Ctrl＋符號。零值時行為與沒有此功能時相同。
-	ShiftSymbolHalfwidth bool
-	// AllSymbolsHalfwidth 由宿主依「標點寬度：所有符號鍵打半形」設定（#282；fork 預設開）：注音模式所有排列有全形標點的鍵
-	// （含未按 Shift 的 [ ] ' \）都打鍵帽上的半形字元（all_symbols.go），全形標點用 Ctrl＋符號。開著時 ShiftSymbolHalfwidth
-	// 不起作用。零值時行為與沒有此功能時相同。
-	AllSymbolsHalfwidth bool
-	// CJKLatinSpace 由宿主依「中英文之間自動加空格」設定（#273，預設關）：送出時在同一次送出的文字裡，漢字與英文字母
-	// 直接相連的地方補一個半形空格（cjk_latin_space.go）。組字區照打的顯示；學習、前文與簡體對照都用補空格前的文字，
-	// 送給外殼的 Commit 是補過的（外殼核對前文時比對的就是它）。私人欄位不補。零值時不補。
-	CJKLatinSpace bool
 	// NoLearning 由宿主依「記住我選的字詞」設定（#297，預設開；關閉時為 true）：送出、手選、選表情與符號都不寫進個人資料
 	// （詞的學習、更正、英文單字、中英混打的注音文、最近用過的表情與符號、= 選單的分頁）。其他照常：神經選字、
 	// 依前文選字、英文自動補字的建議，已經學到的資料也照常參與排序；「我的詞彙」的加詞、移除與不再學照常。
 	// 跟暫停學習（proto.Pause）、私人欄位不同，那兩個另外停掉推論、前文與個人候選。零值照常學習。
 	NoLearning bool
-	// CapsLockEnglish 由宿主依「Caps Lock 開著時直接打英文」設定（#173，預設關）：外殼送來的 caps_lock 請求才有作用，
-	// 開啟時暫時切到英文、關閉時回到原本的模式。零值時 caps_lock 回 handled=false，注音模式照舊不理 Caps Lock（#168）。
-	CapsLockEnglish bool
-	capsLock        bool // 最近一次 caps_lock 請求的狀態；mode 請求清掉
-	capsEnglish     bool // 目前的英文模式是 Caps Lock 帶來的：關掉 Caps Lock 回到注音
 	// Preview02 打開時處理 0.2.0 的按鍵（組字中加詞、反悔鍵、「我的片語」，#128）；0.2.0 起宿主一律打開。
 	// 零值時這些按鍵照舊回 handled=false 交還應用程式，行為與沒有此功能時相同（測試用它確認這一點）。
 	Preview02    bool
@@ -240,7 +205,6 @@ type Session struct {
 	lastLearn *personal.Undo
 	dec       *decode.Decoder
 	front     input.Frontend
-	layout    layout.Layout
 	Opt       Options
 
 	comp            zhuyin.Composer
@@ -272,39 +236,17 @@ type Session struct {
 
 func New(m *personal.Model) *Session {
 	return &Session{
-		model:            m,
-		dec:              &decode.Decoder{Lex: m.Source(), Score: m},
-		front:            input.Exact{},
-		layout:           layout.Standard,
-		Opt:              DefaultOptions(),
-		English:          english.Prototype(),
-		EmojiShortcut:    "equals",
-		EmojiEqualsFirst: true,
-		locks:            map[int]decode.Lock{},
+		model:   m,
+		dec:     &decode.Decoder{Lex: m.Source(), Score: m},
+		front:   input.Exact{},
+		Opt:     DefaultOptions(),
+		English: english.Prototype(),
+		locks:   map[int]decode.Lock{},
 	}
 }
 
-// SetLayout 由宿主在第一次 Handle 前設定鍵盤排列；nil 為標準排列（#83）。
-func (s *Session) SetLayout(l layout.Layout) {
-	if l == nil {
-		l = layout.Standard
-	}
-	s.layout = l
-}
-
-// mixedInput：中英混打對「哪些數字、標點是注音鍵」的判斷依標準排列寫成，其他排列先停用（#83）；
-// 使用者的設定保留，切回標準排列就照舊。
-func (s *Session) mixedInput() bool {
-	return mixedInputActive(s.MixedInput && (!s.toneless() || s.MixedWithToneless), s.layout == layout.Standard) // 聲調選填與混打預設二選一（#150）
-}
-
-func mixedInputActive(on, standardLayout bool) bool { return on && standardLayout }
-
-// emojiEquals：= 開 Emoji 選單；排列把 = 當注音鍵（倚天的 ㄦ）時停用，= 一律是注音（#83）。
-func (s *Session) emojiEquals() bool {
-	_, phonetic := s.layout.Symbol('=')
-	return s.EmojiShortcut == "equals" && !phonetic
-}
+// mixedInput：中英混打（fork 固定開）；手機的聲調選填預設跟混打二選一（#150）。
+func (s *Session) mixedInput() bool { return !s.toneless() || s.MixedWithToneless }
 
 func (s *Session) composing() bool {
 	return len(s.syls) > 0 || !s.comp.Empty() || s.mixed.raw != "" || s.ninePending()
@@ -324,14 +266,9 @@ func (s *Session) ForgetLearning() {
 
 // Handle 處理一個請求並回傳完整快照。
 func (s *Session) Handle(r proto.Request) proto.Snapshot {
-	cycleKey := r.Type == proto.Key && ((s.InputStyle.Tab == "cycle" && (r.Key == proto.KeyTab || r.Key == proto.KeyBackTab)) || s.InputStyle.Up == "cycle" && r.Key == proto.KeyUp)
+	cycleKey := r.Type == proto.Key && ((s.InputStyle.Tab == inputstyle.TabCycle && (r.Key == proto.KeyTab || r.Key == proto.KeyBackTab)) || r.Key == proto.KeyUp)
 	if !cycleKey && r.Type != proto.Context && r.Type != proto.Display {
 		s.styleCycle = nil
-	}
-	if r.Type == proto.OutputSimplified {
-		// #169：引擎已換好所有 session 的 Simplified。切換是全域設定、不是對這個輸入框的操作：
-		// 不能清掉下面這些只跟著按鍵的狀態（Shift 誤觸還原、Tab 修正的撤銷、加詞標示……）。
-		return s.View()
 	}
 	s.paletteChanged = false
 	// 前文確認與欄數不是使用者操作；其他任何請求都表示切到英文後已有動作，不再還原注音。
@@ -344,9 +281,6 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 	}
 	if r.Type != proto.Backspace && !(r.Type == proto.Key && r.Key == proto.KeyBackspace) {
 		s.paletteUndo = nil
-	}
-	if r.Type != proto.Context && r.Type != proto.Display {
-		s.toneRetry, s.toneRefused = s.toneRefused, nil // 擋下的聲調只有緊接著的請求能照舊收下（#300）
 	}
 	if r.Type != proto.Key && r.Type != proto.Context && r.Type != proto.Display {
 		s.pendingToneKey = nil // 按鍵由 key 自己取出；其他操作之後的空白不再換成聲調符號（#135）
@@ -365,7 +299,6 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 	} else {
 		s.private = s.private || r.Private
 	}
-	private := s.private // 送出時 reset 會清掉；中英文之間補空格（#273）看送出前的
 	if r.Private || r.Type == proto.Pause && r.On {
 		s.clearDocumentContext()
 		s.localBlocked = true
@@ -487,32 +420,19 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		english := !s.english
 		if r.Type == proto.Mode {
 			english = r.On
-			// 外殼重設模式（換欄位、重開 session、macOS 的 Caps Lock）：忘掉記得的 Caps Lock 狀態，
-			// 下一個按鍵的鎖定狀態跟快照不同時外殼重新送 caps_lock（#173）。
-			s.capsLock = false
 		}
-		// 使用者自己切換或外殼設定模式之後，關掉 Caps Lock 不再改變模式（#173）。
-		s.capsEnglish = false
 		s.setMode(english, r.Type == proto.Toggle && r.Restore, stash)
-	case proto.CapsLock:
-		handled, commit = s.capsLockChanged(r.On)
 	default:
 		handled = false
 	}
-	if r.Type == proto.Toggle || r.Type == proto.Mode || r.Type == proto.CapsLock || !handled && r.Type == proto.Key {
+	if r.Type == proto.Toggle || r.Type == proto.Mode || !handled && r.Type == proto.Key {
 		s.clearDocumentContext()
 	}
 	if s.paletteCommit {
 		s.paletteCommit = false
 		s.refresh()
 		commit = s.snapshot().Text() // direct palette output is exact; no punctuation/model rewrite.
-		commit = s.output(commit, commit, s.readingPins(commit))
 		s.reset()
-	}
-	if commit != "" && s.CJKLatinSpace && !private {
-		// #273：整個送出的字串一起補，含 Shift＋字母送出組字再打的字母（commit()+k）與符號表直接送出的組字，
-		// 同輸出簡體字；commit() 已用原文學過、記好前文。
-		commit = spaceCJKLatin(commit)
 	}
 	s.refresh()
 	// 保護狀態／前文確認／撤銷可以在候選窗仍開啟時變更；不能留下過期的個人或關聯標示。
@@ -528,8 +448,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 	snap.Handled, snap.Commit, snap.Notices = handled, commit, append(notices, s.notices...)
 	snap.PersonalChanged = s.paletteChanged || s.forgot
 	snap.VocabChanged, snap.Forgot = s.vocabChanged, s.forgot
-	snap.Bell = s.bell // #300：只在擋下按鍵的這次快照
-	s.notices, s.vocabChanged, s.forgot, s.bell = nil, false, false, false
+	s.notices, s.vocabChanged, s.forgot = nil, false, false
 	if commit != "" {
 		snap.ContextID = s.pendingContextID
 	}
@@ -557,8 +476,6 @@ func (s *Session) status(snap *proto.Snapshot) {
 	if s.english {
 		snap.Mode = proto.ModeEnglish
 	}
-	snap.CapsLock, snap.CapsEnglish = s.capsLock, s.capsEnglish
-	snap.OutputSimplified = s.Simplified != nil // #169：外殼的狀態顯示跟著
 }
 
 // setMode 切換中英模式（單按 Shift、外殼設定模式、Caps Lock）。切到英文清掉未打完的注音（#90），已組好的字與游標保留；
@@ -578,36 +495,6 @@ func (s *Session) setMode(english, restore bool, stash *pendingStash) {
 	s.english = english
 	s.englishWord, s.englishDismissed, s.englishTokenBlocked = false, false, false
 }
-
-// capsLockChanged 處理外殼回報的 Caps Lock 狀態（#173，設定「Caps Lock 開著時直接打英文」）。設定關閉時回 handled=false、
-// 什麼都不改，跟沒有這個功能時一樣。開啟 Caps Lock：注音模式先送出組字（同 macOS 的 #84），暫時切到英文；
-// 已經是英文模式（單按 Shift 切的）就只記下狀態。關閉：Caps Lock 帶來的英文回到注音，使用者自己切的英文不動。
-// 開著 Caps Lock 時單按 Shift 照常切換（capsEnglish 清掉），之後關掉 Caps Lock 不再改模式。
-func (s *Session) capsLockChanged(on bool) (bool, string) {
-	if !s.CapsLockEnglish {
-		return false, ""
-	}
-	if on == s.capsLock {
-		return true, ""
-	}
-	s.capsLock = on
-	var commit string
-	switch {
-	case on && !s.english:
-		commit = s.commitComposed()
-		s.setMode(true, false, nil)
-		s.toggleStash = nil // 組字已送出，沒有可放回的注音
-		s.capsEnglish = true
-	case !on && s.capsEnglish:
-		s.setMode(false, false, nil)
-		s.capsEnglish = false
-	}
-	return true, commit
-}
-
-// CapsLockOn 回報外殼最近一次 caps_lock 請求是開啟（#173；設定關閉時一律 false）。全部共用時引擎據此讓 Caps Lock
-// 開著的輸入框不跟上別的輸入框切回的注音。
-func (s *Session) CapsLockOn() bool { return s.capsLock }
 
 // EnglishMode 回報目前是否為英文模式（引擎在「全部共用」時用來同步各輸入框，#115）。
 func (s *Session) EnglishMode() bool { return s.english }
@@ -753,7 +640,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		}
 		return true, "" // 候選開啟時吃掉所有按鍵（含 Shift+Tab 等沒有作用的鍵），不與注音鍵同時解讀、不交給應用程式
 	}
-	if k == "=" && s.emojiEquals() && !s.private && s.paletteTriggerAllowed() {
+	if k == "=" && s.equalsPalette && !s.private && s.paletteTriggerAllowed() {
 		s.openPalette()
 		return true, ""
 	}
@@ -893,9 +780,8 @@ func (s *Session) key(k string) (handled bool, commit string) {
 				return false, ""
 			}
 			// 中英混打：注音打完後空白就是半形空白（同英文單字後的空白），↓ 選字（#78）。
-			// 使用者關閉「空白鍵選字」時一般注音模式也一樣（#107、#110）。
 			// 緊接在數字後面（連打的聲調鍵 34、數字鍵盤）也是空白，同沒在組字時打數字再按空白（#135）。
-			if s.mixedInput() || s.SpaceInsertsSpace || s.literalNumberBefore() != "" {
+			if s.mixedInput() || s.literalNumberBefore() != "" {
 				sp := " "
 				if s.fullWidth {
 					sp = s.fullWidthText(sp) // 全形時照微軟是全形空白
@@ -907,7 +793,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 			return true, ""
 		}
 	}
-	if sym, ok := s.layout.Symbol(runes[0]); ok {
+	if sym, ok := layout.Standard.Symbol(runes[0]); ok {
 		if retype && s.retypeSyllableLiteral(runes[0]) {
 			return true, ""
 		}
@@ -927,7 +813,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		}
 	}
 	// 標點保留在組字區，可移動、替換候選；Enter 才提交。
-	if p, ok := s.layout.Punct(runes[0]); ok {
+	if p, ok := layout.Standard.Punct(runes[0]); ok {
 		s.insertPendingLiteral()
 		s.insertPunctKey(k, p)
 		return true, ""
@@ -941,11 +827,11 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	return false, ""
 }
 
-// ctrlPunct 處理 Ctrl＋標點（#168）：設定關閉或英文模式時不處理，外殼照一般快捷鍵先送出組字再交給應用程式。
+// ctrlPunct 處理 Ctrl＋標點（#168）：英文模式時不處理，外殼照一般快捷鍵先送出組字再交給應用程式。
 // 中文模式跟一般標點（Shift＋, 等）走同一條路：未打完的注音留成符號，標點插在游標處、留在組字區，沒在組字時也一樣。
 // 中英混打打到一半的英文先定案（Shift＋, 在原樣英文後是半形 <，Ctrl＋, 一律是全形）。候選開啟時同其他按鍵吃掉不動作。
 func (s *Session) ctrlPunct(p string) bool {
-	if !s.CtrlPunct || s.english {
+	if s.english {
 		return false
 	}
 	if s.cand != nil {
@@ -961,25 +847,20 @@ func (s *Session) ctrlPunct(p string) bool {
 // 一般符號由排列加進暫存；聲調鍵（含空白的一聲）照 symbol 完成音節，暫存是空的時候回傳 false（落單的聲調鍵，#135）。
 func (s *Session) pressKey(key rune) bool {
 	s.restorePendingLiteral()
-	next, sym, ok := s.layout.Press(s.comp, key)
+	next, sym, ok := layout.Standard.Press(s.comp, key)
 	if !ok {
 		return false
 	}
 	if zhuyin.ClassOf(sym) != zhuyin.Tone && !s.MixedWithToneless && s.untonedBreak(sym) {
 		s.finishUntoned() // 聲調選填：這個注音接不上目前的音節，目前的音節不打聲調就完成，這一鍵開始新的音節（#150）
-		next, sym, _ = s.layout.Press(s.comp, key)
+		next, sym, _ = layout.Standard.Press(s.comp, key)
 	}
 	if zhuyin.ClassOf(sym) == zhuyin.Tone {
 		if s.comp.Empty() {
 			return false
 		}
-		typed := s.comp
 		s.comp = next // 許氏的收尾修正：只打 ㄇ 就按聲調是 ㄢ
-		handled := s.symbol(sym)
-		if s.toneRefused != nil {
-			s.comp = typed // 聲調被擋下（#300）：這一鍵沒有作用，許氏的收尾修正也不算
-		}
-		return handled
+		return s.symbol(sym)
 	}
 	s.comp = next
 	return true
@@ -1050,9 +931,6 @@ func (s *Session) completeSyllable(before zhuyin.Composer, done zhuyin.Syllable)
 			s.nearReading = true
 		} else {
 			s.restoreSyllables(saved)
-			if s.refuseTone(before, done) {
-				return // 打錯注音時提示（#300）：聲調不收，注音停在暫存等修改
-			}
 			s.insertSyllableLiteral(before, done)
 			s.retypeLiteral = true // 多半是打錯：緊接著的同類介音／韻母改這個讀音（#85）
 		}
@@ -1122,7 +1000,7 @@ func (s *Session) backspace() bool {
 	}
 	s.restorePendingLiteral()
 	if !s.comp.Empty() {
-		s.comp = s.layout.Backspace(s.comp) // 許氏退掉最後一鍵，那一鍵順便改掉的聲母一起還原（#183）
+		s.comp = layout.Standard.Backspace(s.comp) // 許氏退掉最後一鍵，那一鍵順便改掉的聲母一起還原（#183）
 		return true
 	}
 	if s.cursor == 0 {
@@ -1247,9 +1125,6 @@ func (s *Session) signature() string {
 		b.WriteByte(':')
 		b.WriteString(l.Matched)
 		b.WriteByte(';')
-		if l.Segmentation {
-			b.WriteString("seg;")
-		}
 	}
 	for i := range s.syls {
 		if s.literals[i] {
@@ -1280,7 +1155,7 @@ func (s *Session) refresh() {
 		s.rerankPath()
 		s.autoFuzzy()
 		s.applyPronounHabit()
-		if alias, again := s.absorbReadings(), s.absorbNine(); alias || nine || again {
+		if again := s.absorbNine(); nine || again {
 			sig = s.signature() // 寫回的是同一串按鍵的另一個讀音，音節格不變，不必再解一次
 		}
 		s.shownPath, s.shownSyls = slices.Clone(s.path), slices.Clone(s.syls)
@@ -1396,14 +1271,6 @@ func (s *Session) openCandidates(length int) {
 			text.WriteString(string(r))
 		}
 		alternatives := literalAlternatives(text.String())
-		if (s.InputStyle.Punctuation == "standard" || s.InputStyle.Punctuation == "chewing") && (text.String() == "＼" || text.String() == "／") {
-			alternatives = []string{text.String()}
-			if text.String() == "＼" {
-				alternatives = append(alternatives, "／")
-			} else {
-				alternatives = append(alternatives, "＼")
-			}
-		}
 		s.openSymbols(s.literalKeyAlternatives(alternatives, start, end-start), start, end-start, false)
 		return
 	}
@@ -1846,7 +1713,6 @@ func (s *Session) commit() string {
 		s.refresh()
 	} // 神經模式提交已顯示路徑；Enter 不啟動推論或接受其他欄位的模型更新。
 	text := s.snapshot().Text() // 未完成注音可能在句中，依畫面位置提交。
-	pins := s.readingPins(text)
 	// 沒打聲調的音節換回詞庫讀音再學（#150）；換不回來的詞不學（同近音），但包在裡面的手選用自己的讀音學。
 	syls, _ := s.resolvedSyllables()
 	ev := personal.Commit{Syls: s.lockReadings(syls), Rejected: s.rejectedReadings()}
@@ -1879,7 +1745,6 @@ func (s *Session) commit() string {
 	if s.mixedInput() && learn && !s.localBlocked {
 		s.model.LearnZhuyinKeys(s.zhuyinKeyCommits())
 	}
-	shown := text
 	text = s.punctuate(text)
 	tail := s.committedTail()
 	neural := s.neuralCommitContext(text)
@@ -1892,70 +1757,7 @@ func (s *Session) commit() string {
 		s.pendingNeural = neural
 		s.pendingContextID = uint64(s.rev + 1)
 	}
-	return s.output(shown, text, pins) // 學習與前文都用上面的繁體
-}
-
-// readingPins 找出提交文字中讀音能決定簡體寫法的字（zhconv.Pin），以 text 的字元位置為鍵。
-// 只在 text 正好是路徑上各詞依序接起來時才找（未打完的注音夾在句中等情況位置對不上，交給 OpenCC）。
-func (s *Session) readingPins(text string) map[int]string {
-	if s.Simplified == nil || len(s.path) == 0 {
-		return nil
-	}
-	var pins map[int]string
-	var joined strings.Builder
-	at := 0
-	resolved, _ := s.resolvedSyllables() // 沒打聲調的音節用詞庫讀音（#150）；關閉時就是 s.syls
-	for _, g := range s.path {
-		runes := []rune(g.Word)
-		joined.WriteString(g.Word)
-		reading := resolved[g.Start:min(g.End, len(resolved))]
-		if g.Matched != "" {
-			reading = zhuyin.ParseReading(g.Matched) // 近音到達的詞，用詞庫的讀音
-		}
-		if !s.literals[g.Start] && len(reading) == len(runes) {
-			for k, c := range runes {
-				if out, ok := zhconv.Pin(c, string(reading[k])); ok {
-					if pins == nil {
-						pins = map[int]string{}
-					}
-					pins[at+k] = out
-				}
-			}
-		}
-		at += len(runes)
-	}
-	if joined.String() != text {
-		return nil
-	}
-	return pins
-}
-
-// output 是真正送出的文字：開啟「輸出簡體字」時轉成簡體。shown 是補標點前的文字（pins 的位置以它為準），
-// text 是補過標點的文字；補標點只在兩個漢字之間插入，原本的字在 text 裡依序都還在。
-func (s *Session) output(shown, text string, pins map[int]string) string {
-	if s.Simplified == nil || text == "" {
-		return text
-	}
-	if len(pins) > 0 && shown != text {
-		moved := map[int]string{}
-		a, b := []rune(shown), []rune(text)
-		j := 0
-		for i := range a {
-			for j < len(b) && b[j] != a[i] {
-				j++
-			}
-			if j == len(b) {
-				moved = nil
-				break
-			}
-			if p, ok := pins[i]; ok {
-				moved[j] = p
-			}
-			j++
-		}
-		pins = moved
-	}
-	return s.Simplified.ConvertPinned(text, pins)
+	return text
 }
 
 // punctuate 在提交時補標點。學習已依原路徑完成，插入的標點只影響送出的文字與之後的前文。
@@ -1986,7 +1788,6 @@ func (s *Session) reset() {
 	s.mixedOrigins = nil
 	s.pendingToneKey, s.literalKeys = nil, nil
 	s.toneKeyDone = ""
-	s.toneRefused, s.toneRetry = nil, nil
 	s.clearDocumentContext()
 	s.rerankCache = nil
 	s.rerankMemo = nil

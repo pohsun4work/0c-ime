@@ -94,7 +94,7 @@ func TestRescoreDoesNotAdoptLaterLearning(t *testing.T) {
 	if s.Rescore() || s.View().Text() != stat {
 		t.Fatalf("模型變過後不該重排：%q", s.View().Text())
 	}
-	if got := typeSyl(s, "ㄉㄜ˙").Text(); !strings.HasPrefix(got, "我井") {
+	if got := symbolSyl(s, "ㄉㄜ˙").Text(); !strings.HasPrefix(got, "我井") {
 		t.Fatalf("下次改音節應照常採用評分：%q", got)
 	}
 }

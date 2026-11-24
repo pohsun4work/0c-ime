@@ -12,7 +12,6 @@ import (
 
 func mixedTyped(seq string) (*Session, proto.Snapshot) {
 	s := newSession()
-	s.MixedInput = true
 	var snap proto.Snapshot
 	for _, r := range seq {
 		snap = key(s, string(r))
@@ -62,7 +61,6 @@ func numberSession() *Session {
 		sys.SetUni(e.w, 1e-3)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	return s
 }
 

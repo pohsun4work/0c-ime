@@ -33,7 +33,6 @@ func zhuyinHabitModel() *personal.Model {
 
 func zhuyinHabitSession(m *personal.Model) *Session {
 	s := New(m)
-	s.MixedInput = true
 	return s
 }
 

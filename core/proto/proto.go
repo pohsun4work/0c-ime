@@ -32,16 +32,6 @@ const (
 	Mode       = "mode"       // On：設定中英模式（true 為英文）；外殼重連後用它還原模式
 	Toggle     = "toggle"     // 中英模式切換（單按 Shift）；Restore 見 Request
 	Display    = "display"    // 外殼可呈現的欄數；1 表示原生直排。
-	// CapsLock（#173）：On 為按鍵事件帶的 Caps Lock 鎖定狀態。設定「Caps Lock 開著時直接打英文」開著時，
-	// 開啟先送出組字、暫時切到英文，關閉回到原本的模式；設定關閉時回 handled=false、什麼都不改。
-	// 外殼只在引擎回報 caps_lock_english=true、而且狀態跟快照的 CapsLock 不同時送（Windows、Linux）。
-	CapsLock = "caps_lock"
-	// OutputSimplified（#169）：On 為「輸出簡體字」要開或關。輸入法選單的開關送這個請求，引擎立即改變之後送出的
-	// 文字（所有輸入框，包括已經在組字區、還沒送出的字），並寫進設定檔；組字不變、不重啟引擎。快照的 Notices
-	// 帶「已切換為輸出簡體字／繁體字」，OutputSimplified 是切換後的狀態。外殼只在 health／open 回報
-	// output_simplified_live=true 時送；引擎不支援即時切換時回 handled=false、什麼都不改。
-	// 這是全域設定，不屬於組字：外殼不把它記進斷線重播的紀錄。
-	OutputSimplified = "output_simplified"
 	// NineReading（注音九宮格，觸控）：To、Word。把一個九宮格音節固定成讀音 Word（快照 nine_readings.readings 的一項），
 	// 移除其他讀音（左欄「注音選擇」）。To 是快照 nine_readings.at：pending 時（To 等於游標、還有沒完成的鍵）固定的是那串鍵
 	// 的拼法，之後照常按聲調鍵完成；否則是第 To 個已完成的音節，蓋到它的手選解除、重新解碼。Word 不是那個位置的讀音時
@@ -269,22 +259,7 @@ type Snapshot struct {
 	Candidates          *CandidateList  `json:"candidates,omitempty"` //
 	Notices             []string        `json:"notices,omitempty"`    //
 	Mode                string          `json:"mode"`                 // zhuyin 或 english
-	// CapsLock（#173）：核心記得的 Caps Lock 狀態（最近一次 caps_lock 請求；切換模式的 mode 請求會清掉）。
-	// 外殼看到按鍵的鎖定狀態跟它不同時才送 caps_lock，換欄位、重開 session 後自然重新同步。
-	CapsLock bool `json:"caps_lock,omitempty"`
-	// CapsEnglish（#173）：目前的英文模式是 Caps Lock 帶來的，關掉 Caps Lock 會回到注音。外殼自己記中英模式時
-	// （Windows 每個程式各自記住）記的是這一項以外的模式，重開 session 時不把它當成使用者切的英文。
-	CapsEnglish bool         `json:"caps_english,omitempty"`
-	ReadingHint *ReadingHint `json:"reading_hint,omitempty"`
-	// OutputSimplified（#169）：送出的文字目前會轉成簡體（設定「輸出簡體字」）。外殼據此在狀態顯示標出簡體，
-	// 從設定程式或別的輸入框切換後，下一個快照就跟上。只有回報 output_simplified_live 的引擎才有這一項，
-	// 舊引擎沒有時外殼不能當成「繁體」，要看 health 的 output_simplified。
-	OutputSimplified bool `json:"output_simplified,omitempty"`
-	// Bell（#300）：這一鍵被擋下，外殼要提示使用者。目前只有「打錯注音時提示」：按了聲調但讀音沒有字，聲調不收，
-	// 注音停在組字區（style pending 的那一段）等使用者修改。Windows 用 MessageBeep、macOS 用 NSBeep；Fcitx5、IBus
-	// 沒有統一的提示音，把這個快照裡 pending 的那一段畫成醒目樣式。只出現在擋下按鍵的那一次請求的快照，下一個快照
-	// 就沒有。舊外殼不認得這一項時不提示，聲調照樣被擋（注音停住，再按一次同一個聲調照舊收下）。
-	Bell bool `json:"bell,omitempty"`
+	ReadingHint         *ReadingHint    `json:"reading_hint,omitempty"`
 	// NineReadings（注音九宮格）：左欄「注音選擇」要畫的讀音；沒有九宮格的鍵或音節時省略。
 	NineReadings *NineReadings `json:"nine_readings,omitempty"`
 }

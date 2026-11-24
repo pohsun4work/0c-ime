@@ -19,7 +19,7 @@ func TestCommitRequestDropsPendingZhuyin(t *testing.T) {
 		"兩個注音符號":   {"ji3vu", "我"},
 	} {
 		s := newSession()
-		typeKeys(s, tc.keys)
+		mixedType(s, tc.keys)
 		snap := s.Handle(proto.Request{Type: proto.Commit})
 		if snap.Commit != tc.commit || snap.Text() != "" || s.Composing() {
 			t.Fatalf("%s：外殼結束組字只送出已組好的字 %q：%+v", name, tc.commit, snap)
@@ -29,7 +29,7 @@ func TestCommitRequestDropsPendingZhuyin(t *testing.T) {
 
 func TestEnterStillCommitsPendingZhuyinLiterally(t *testing.T) {
 	s := newSession()
-	typeKeys(s, "ji3vu;3g")
+	mixedType(s, "ji3vu;3g")
 	if snap := key(s, proto.KeyEnter); snap.Commit != "我想ㄕ" {
 		t.Fatalf("使用者按 Enter 照畫面原樣送出：%+v", snap)
 	}
@@ -37,8 +37,8 @@ func TestEnterStillCommitsPendingZhuyinLiterally(t *testing.T) {
 
 func TestCommitRequestWithPendingCandidatesOpen(t *testing.T) {
 	s := newSession()
-	typeKeys(s, "ji3t") // 我 + 未打完的 ㄔ
-	if snap := key(s, proto.KeyDown); snap.Candidates == nil || s.cand == nil || !s.cand.pending {
+	mixedType(s, "ji3t") // 我 + 未打完的 ㄔ（混打的暫存按鍵）
+	if snap := key(s, proto.KeyDown); snap.Candidates == nil {
 		t.Fatalf("前置：未打完注音的候選應開啟：%+v", snap)
 	}
 	if snap := s.Handle(proto.Request{Type: proto.Commit}); snap.Commit != "我" || snap.Candidates != nil || s.Composing() {
@@ -47,7 +47,7 @@ func TestCommitRequestWithPendingCandidatesOpen(t *testing.T) {
 }
 
 func TestCommitRequestKeepsMixedEnglishLiteral(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	if snap := mixedType(s, "hel"); snap.Text() != "我hel" {
 		t.Fatalf("前置：暫存按鍵顯示成英文：%+v", snap)
@@ -56,7 +56,7 @@ func TestCommitRequestKeepsMixedEnglishLiteral(t *testing.T) {
 	if snap := s.Handle(proto.Request{Type: proto.Commit}); snap.Commit != "我hel" {
 		t.Fatalf("顯示成英文的暫存按鍵照舊送出：%+v", snap)
 	}
-	s = mixedSession()
+	s = newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	if snap := mixedType(s, "xu"); snap.Text() != "我ㄌㄧ" {
 		t.Fatalf("前置：暫存按鍵顯示成注音：%+v", snap)
@@ -69,26 +69,9 @@ func TestCommitRequestKeepsMixedEnglishLiteral(t *testing.T) {
 func TestCommitRequestTonelessFinishesSyllable(t *testing.T) {
 	// 聲調選填（#150）：已是完整音節的注音照解碼送出，跟 Shift 切英文（setMode）一樣。
 	s := newTonelessSession(true)
-	typeKeys(s, "ji3g")
+	mixedType(s, "ji3g")
 	if snap := s.Handle(proto.Request{Type: proto.Commit}); len([]rune(snap.Commit)) != 2 {
 		t.Fatalf("聲調選填時完整音節照常送出：%+v", snap)
-	}
-}
-
-func TestCapsLockDropsPendingZhuyin(t *testing.T) {
-	s := capsSession()
-	typeKeys(s, "ji3vu;3g")
-	snap := caps(s, true)
-	if snap.Commit != "我想" || snap.Text() != "" || snap.Mode != proto.ModeEnglish {
-		t.Fatalf("開 Caps Lock 切英文只送已組好的字：%+v", snap)
-	}
-	s = capsSession()
-	key(s, "g")
-	if snap := caps(s, true); snap.Commit != "" || s.Composing() || snap.Mode != proto.ModeEnglish {
-		t.Fatalf("只有未打完的注音時什麼都不送：%+v", snap)
-	}
-	if snap := key(s, "a"); snap.Handled {
-		t.Fatalf("接著打英文直接交給應用程式：%+v", snap)
 	}
 }
 
@@ -109,7 +92,7 @@ func unfinishedFree(snap proto.Snapshot) (kept, unfinished string) {
 // 留在文件外。標出來的範圍必須剛好是 commit 請求不送的部分，否則文件與學到的字不一致。
 func TestUnfinishedSegmentsMatchCommitRequest(t *testing.T) {
 	type step func(*Session) proto.Snapshot
-	keys := func(k string) step { return func(s *Session) proto.Snapshot { return typeKeys(s, k) } }
+	keys := func(k string) step { return func(s *Session) proto.Snapshot { return mixedType(s, k) } }
 	named := func(k string) step { return func(s *Session) proto.Snapshot { return key(s, k) } }
 	mixed := func(k string) step { return func(s *Session) proto.Snapshot { return mixedType(s, k) } }
 	syl := func(y string) step { return func(s *Session) proto.Snapshot { return typeSyl(s, y) } }
@@ -124,8 +107,8 @@ func TestUnfinishedSegmentsMatchCommitRequest(t *testing.T) {
 		"句中的未打完注音":     {newSession, []step{keys("ji3"), named(proto.KeyLeft), keys("g")}, "我", "ㄕ"},
 		"候選開著":         {newSession, []step{keys("ji3t"), named(proto.KeyDown)}, "我", "ㄔ"},
 		"只有組好的字":       {newSession, []step{keys("ji3vu;3")}, "我想", ""},
-		"混打顯示成英文":      {mixedSession, []step{syl("ㄨㄛˇ"), mixed("hel")}, "我hel", ""},
-		"混打顯示成注音":      {mixedSession, []step{syl("ㄨㄛˇ"), mixed("xu")}, "我", "ㄌㄧ"},
+		"混打顯示成英文":      {newSession, []step{syl("ㄨㄛˇ"), mixed("hel")}, "我hel", ""},
+		"混打顯示成注音":      {newSession, []step{syl("ㄨㄛˇ"), mixed("xu")}, "我", "ㄌㄧ"},
 	} {
 		s := tc.session()
 		var snap proto.Snapshot
@@ -144,7 +127,7 @@ func TestUnfinishedSegmentsMatchCommitRequest(t *testing.T) {
 func TestUnfinishedTonelessSyllable(t *testing.T) {
 	// 聲調選填（#150）：完整音節在 commit 請求時換成解碼的字，畫面上的注音不能照樣送進文件，也標 Unfinished。
 	s := newTonelessSession(true)
-	if kept, unfinished := unfinishedFree(typeKeys(s, "ji3g")); kept != "我" || unfinished != "ㄕ" {
+	if kept, unfinished := unfinishedFree(mixedType(s, "ji3g")); kept != "我" || unfinished != "ㄕ" {
 		t.Fatalf("聲調選填時未打聲調的注音也不照畫面送出：%q %q", kept, unfinished)
 	}
 }

@@ -29,7 +29,7 @@ import (
 
 // toneless 回報聲調選填是否生效：只在標準排列。倚天 41 鍵的 ' 是 ㄘ（沒有分隔鍵），許氏一個鍵兼聲母、韻母與聲調，
 // 「接不上就開新音節」的規則在那裡不成立；設定保留，切回標準排列就照舊（同混打，#83、#183）。
-func (s *Session) toneless() bool { return s.Toneless && s.layout == layout.Standard }
+func (s *Session) toneless() bool { return s.Toneless }
 
 // abbreviation 回報簡拼是否生效：只在聲調選填生效時。
 func (s *Session) abbreviation() bool { return s.Abbreviation && s.toneless() }
@@ -211,8 +211,8 @@ func (s *Session) untonedEnglish(run *untonedRun, k string) bool {
 		return false
 	}
 	rs := []rune(k)
-	_, phonetic := s.layout.Symbol(rs[0])
-	_, punct := s.layout.Punct(rs[0])
+	_, phonetic := layout.Standard.Symbol(rs[0])
+	_, punct := layout.Standard.Punct(rs[0])
 	if k != " " && k != proto.KeyEnter && !(len(rs) == 1 && punct && !phonetic) {
 		return false
 	}

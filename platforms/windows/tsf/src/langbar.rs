@@ -39,7 +39,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_NULL, WS_POPUP,
 };
 use windows_core::{implement, w, AsImpl, Interface, Ref, BSTR, GUID, PCWSTR};
-use zuin_win_common::menu::{menu_items, needs_attention, opens_window, parse_status, simplified_target, MenuItem, MenuRequest, UpdateStatus};
+use zuin_win_common::menu::{menu_items, needs_attention, opens_window, parse_status, MenuItem, MenuRequest, UpdateStatus};
 use zuin_win_common::{frame, menu_pipe, wide, MAX_FRAME};
 
 use crate::guids::{CLSID_ZUIN, DESCRIPTION};
@@ -425,22 +425,14 @@ fn text_icon(text: &str) -> Option<HICON> {
     }
 }
 
-/// 輸入指示器的字（#169）：英文「英」；中文「中」，送出時轉成簡體的話是「简」（簡體字形，一眼看得出是簡體輸出）。
-pub fn indicator_text(english: bool, simplified: bool) -> &'static str {
-    match (english, simplified) {
-        (true, _) => "英",
-        (false, true) => "简",
-        (false, false) => "中",
-    }
+/// 輸入指示器的字：英文「英」、中文「中」。
+pub fn indicator_text(english: bool) -> &'static str {
+    if english { "英" } else { "中" }
 }
 
 /// 滑鼠停在輸入指示器上的說明。
-pub fn tooltip_text(english: bool, simplified: bool, attention: bool) -> String {
-    let mode = match (english, simplified) {
-        (true, _) => "英文",
-        (false, true) => "中・簡體輸出",
-        (false, false) => "中文",
-    };
+pub fn tooltip_text(english: bool, attention: bool) -> String {
+    let mode = if english { "英文" } else { "中文" };
     if attention {
         format!("靈犀注音（{mode}）：有待辦，按右鍵查看")
     } else {
@@ -451,39 +443,24 @@ pub fn tooltip_text(english: bool, simplified: bool, attention: bool) -> String 
 #[implement(ITfLangBarItemButton, ITfLangBarItem, ITfSource)]
 pub struct LangBarButton {
     english: Cell<bool>,
-    /// 「輸出簡體字」（#169）：引擎能即時切換時是它目前的值（Some），否則 None（選單看 0c-update 的狀態）。
-    simplified: Cell<Option<bool>>,
     status: Arc<Mutex<UpdateStatus>>,
     sink: RefCell<Option<ITfLangBarItemSink>>,
     toggle: Box<dyn Fn()>,
-    /// 選單的「輸出簡體字」：請引擎即時切換，回傳是否成功（不成功時改請 0c-ui 執行 0c-update）。
-    simplify: Box<dyn Fn(bool) -> bool>,
-    /// 開選單前向引擎重新確認「輸出簡體字」（設定程式剛改過時，這個程式還沒有新的快照）；結果經 set_state 回到按鈕。
-    recheck: Box<dyn Fn()>,
     /// 最近一次交給系統的選單項目。選取時依它找 id：狀態在背景更新，「我的詞彙…」出現或消失會讓之後的 id 位移，
     /// 不能拿最新狀態重算（#125）。
     shown: RefCell<Vec<MenuItem>>,
 }
 
 impl LangBarButton {
-    pub fn create(
-        english: bool,
-        simplified: Option<bool>,
-        toggle: Box<dyn Fn()>,
-        simplify: Box<dyn Fn(bool) -> bool>,
-        recheck: Box<dyn Fn()>,
-    ) -> ITfLangBarItemButton {
+    pub fn create(english: bool, toggle: Box<dyn Fn()>) -> ITfLangBarItemButton {
         crate::object_created();
         let status = Arc::new(Mutex::new(UpdateStatus::default()));
         let _ = refresh(status.clone(), false);
         LangBarButton {
             english: Cell::new(english),
-            simplified: Cell::new(simplified),
             status,
             sink: RefCell::new(None),
             toggle,
-            simplify,
-            recheck,
             shown: RefCell::new(Vec::new()),
         }
         .into()
@@ -496,14 +473,10 @@ impl Drop for LangBarButton {
     }
 }
 
-/// 中英狀態或「輸出簡體字」改變時更新圖示與文字（「中」／「简」／「英」，#169）。
-pub fn set_state(button: &ITfLangBarItemButton, english: bool, simplified: Option<bool>) {
+/// 中英狀態改變時更新圖示與文字（「中」／「英」）。
+pub fn set_state(button: &ITfLangBarItemButton, english: bool) {
     let this = unsafe { button.as_impl() };
-    let shown = |e: bool, s: Option<bool>| (e, e || s.unwrap_or(false));
-    let before = shown(this.english.get(), this.simplified.get());
-    this.english.set(english);
-    this.simplified.set(simplified);
-    if before != shown(english, simplified) {
+    if this.english.replace(english) != english {
         // 先取出再通知：OnUpdate 期間宿主可能回頭呼叫 AdviseSink／UnadviseSink。
         let sink = this.sink.try_borrow().ok().and_then(|s| s.clone());
         if let Some(sink) = sink {
@@ -520,13 +493,7 @@ impl LangBarButton_Impl {
         // 開選單前等一下新狀態，等不到才用快取；0c-ui 有 15 秒快取，通常立刻回來，只有快取過期時要多跑一次 0c-update。
         // 開選單是使用者的操作：0c-ui 不在就帶起來，接著按的項目不必再等它，下次開選單的狀態也是新的。
         let _ = refresh(self.status.clone(), true).recv_timeout(MENU_STATUS_WAIT);
-        (self.recheck)(); // 本機管道一次 health（不啟動引擎），設定程式剛改過也打對勾
-        let mut status = lock(&self.status).clone();
-        // 引擎能即時切換時，「輸出簡體字」的勾選照引擎目前的值（比 0c-ui 快取 15 秒的狀態新）。
-        if let Some(on) = self.simplified.get() {
-            status.output_simplified = Some(on);
-        }
-        let items = menu_items(&status);
+        let items = menu_items(&lock(&self.status));
         if let Ok(mut shown) = self.shown.try_borrow_mut() {
             *shown = items.clone();
         }
@@ -539,13 +506,6 @@ impl LangBarButton_Impl {
             _ => menu_items(&lock(&self.status)),
         };
         if let Some(item) = items.into_iter().find(|i| i.id == id && !i.separator) {
-            // 「輸出簡體字」（#169）：DLL 直接請引擎切換（同一條連線，沙箱宿主也可以），提示顯示在游標旁、
-            // 指示器立刻換成「简」／「中」；舊引擎或引擎沒回應時才請 0c-ui 執行 0c-update（寫設定、套用、送通知）。
-            if let Some(on) = simplified_target(&item.args) {
-                if (self.simplify)(on) {
-                    return;
-                }
-            }
             run(self.status.clone(), item.args);
         }
     }
@@ -631,8 +591,7 @@ impl ITfLangBarItem_Impl for LangBarButton_Impl {
     fn GetTooltipString(&self) -> windows_core::Result<BSTR> {
         crate::guarded("LangBar.GetTooltipString", || {
             let attention = needs_attention(&lock(&self.status));
-            let simplified = self.simplified.get().unwrap_or(false);
-            Ok(BSTR::from(tooltip_text(self.english.get(), simplified, attention)))
+            Ok(BSTR::from(tooltip_text(self.english.get(), attention)))
         })
     }
 }
@@ -669,12 +628,12 @@ impl ITfLangBarItemButton_Impl for LangBarButton_Impl {
     }
     fn GetIcon(&self) -> windows_core::Result<HICON> {
         crate::guarded("LangBar.GetIcon", || {
-            text_icon(indicator_text(self.english.get(), self.simplified.get().unwrap_or(false))).ok_or_else(windows_core::Error::from_win32)
+            text_icon(indicator_text(self.english.get())).ok_or_else(windows_core::Error::from_win32)
         })
     }
     fn GetText(&self) -> windows_core::Result<BSTR> {
         crate::guarded("LangBar.GetText", || {
-            Ok(BSTR::from(indicator_text(self.english.get(), self.simplified.get().unwrap_or(false))))
+            Ok(BSTR::from(indicator_text(self.english.get())))
         })
     }
 }
@@ -842,14 +801,12 @@ mod tests {
     }
 
     #[test]
-    fn indicator_marks_simplified_output() {
-        assert_eq!(indicator_text(false, false), "中");
-        assert_eq!(indicator_text(false, true), "简");
-        assert_eq!(indicator_text(true, true), "英", "英文模式維持「英」");
-        assert_eq!(tooltip_text(false, true, false), "靈犀注音（中・簡體輸出）");
-        assert_eq!(tooltip_text(false, false, false), "靈犀注音（中文）");
-        assert_eq!(tooltip_text(true, true, false), "靈犀注音（英文）");
-        assert_eq!(tooltip_text(false, true, true), "靈犀注音（中・簡體輸出）：有待辦，按右鍵查看");
+    fn indicator_shows_the_mode() {
+        assert_eq!(indicator_text(false), "中");
+        assert_eq!(indicator_text(true), "英");
+        assert_eq!(tooltip_text(false, false), "靈犀注音（中文）");
+        assert_eq!(tooltip_text(true, false), "靈犀注音（英文）");
+        assert_eq!(tooltip_text(false, true), "靈犀注音（中文）：有待辦，按右鍵查看");
     }
 
     #[test]

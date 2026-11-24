@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/0c-biggo/0c-ime/bridge/ipc"
-	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/session"
@@ -148,16 +147,10 @@ func serve() string {
 	eng.DocumentContextOff = !config.DocumentContext
 	eng.Fuzzy = config.FuzzyConfig()
 	eng.InputStyle = config.Rules()
-	eng.InputStyle.Version = inputstyle.Version
-	eng.InputStyle.Punctuation, eng.InputStyle.Up, eng.InputStyle.ShiftLetter, eng.InputStyle.CapsLetter = "microsoft", "cycle", "inline", "platform"
-	eng.MixedInput = true
 	eng.EnglishAutocomplete = config.EnglishAutocomplete
 	eng.CandidateBeforeCursor = config.CandidateCursor == "before"
 	eng.EscKeepComposition = !config.EscClear
 	eng.AdvanceAfterSelect = config.AdvanceAfterSelect
-	eng.CtrlPunct = true
-	eng.ShiftSymbolHalfwidth, eng.AllSymbolsHalfwidth = true, true
-	eng.EmojiShortcut = "off" // = 直接打 =；Emoji 到 P11 搬進符號表
 	eng.NoLearning = !config.PersonalLearning // #297
 	eng.SelectionKeys = config.SelectionKeys  // #112
 	// 0.2.0 正式開放（#128）：引擎的欄位留著，零值給測試確認關閉時行為不變。
@@ -413,15 +406,11 @@ func serve() string {
 		"preview_0_2": fmt.Sprint(eng.Preview02), "vocab_state": vocabState,
 		// #123：外殼據此決定要不要把組字中的 Shift＋←／→、候選窗的 Shift＋Delete／⌫ 送給引擎。
 		"vocab_keys": fmt.Sprint(eng.Preview02 && vocabDisabled == ""),
-		// #135：沒在組字時的聲調鍵要交給核心（單按＋空白是聲調符號）；Windows 外殼在 TestKeyDown 依此決定。
-		"tone_mark_keys": fmt.Sprint(eng.ToneMarkKeys()),
 		// #183：沒在組字時引擎會處理的可見 ASCII 按鍵；Windows 外殼的 TestKeyDown 依此決定。
 		"idle_keys": eng.IdleKeys(),
 		// #278：全形（Shift＋空白）時沒在組字引擎會處理的可見 ASCII 按鍵（@ # * + 等打全形）。外殼在快照的 full_width
 		// 為 true 時照這一項。
 		"idle_keys_full_width": eng.IdleKeysFullWidth(),
-		// #168：外殼在這一項是 true、又在中文模式時送 Ctrl＋標點。
-		"ctrl_punctuation": fmt.Sprint(eng.CtrlPunct),
 		// #231：引擎認得的 Ctrl＋標點鍵；外殼送 Ctrl+: ( ) 前要看到這一項列了那個字元。
 		"ctrl_punctuation_keys": proto.CtrlPunctKeys}
 	// 啟動時載入的設定：外殼讀其中幾項（中英切換鍵、Shift＋空白、開始時的模式…），0c-update 拿它跟設定檔比較。

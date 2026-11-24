@@ -5,14 +5,14 @@
 
   const tauri = window.__TAURI__;
   const invoke = (command, args) => tauri.core.invoke(command, args);
-  const PAGES = ['overview', 'styles', 'mode', 'candidates', 'keyboard', 'output', 'vocab', 'models', 'update', 'troubleshoot', 'about'];
+  const PAGES = ['overview', 'mode', 'candidates', 'keyboard', 'vocab', 'models', 'update', 'troubleshoot', 'about'];
   // 0.2.5 以前的「輸入設定」（#207 拆成三頁）：舊的 0c-update、捷徑與說明寫的 --page input 導到側欄的第一頁「中英切換」。
   const PAGE_ALIAS = { input: 'mode' };
   const pageName = (name) => PAGE_ALIAS[name] || (PAGES.includes(name) ? name : 'overview');
 
   const state = {
     info: null, status: null, settings: null, error: null,
-    busy: new Set(), profileBusy: false, checking: false, updating: null, repairAsk: false, exporting: false, summary: null,
+    busy: new Set(), checking: false, updating: null, repairAsk: false, exporting: false, summary: null,
   };
   let page = 'overview';
   let toastTimer = null;
@@ -22,7 +22,6 @@
     ? !!((state.settings && state.settings.features && state.settings.features.vocab) || (state.status && state.status.features && state.status.features.vocab))
     : null);
   let vocab = null;
-  let styles = null;
   let models = null; // 「模型」頁（#180，models.js）
 
   // ---- DOM ----
@@ -120,7 +119,7 @@
   const SHELL_RETIRING_HELP = '新版已安裝，鎖定螢幕或離開電腦時換上，不必登出；在那之前照常可以打字。';
   const SHELL_RETIRING_NOTE = '不必登出，在那之前照常可以打字。';
   const OLD_SHELL_HELP = '新版已安裝，但系統仍開著更新前留下的舊版輸入法。請先儲存工作，登出再登入一次就會改用新版；如果之後仍看到這則訊息，請到「問題排解」匯出狀態摘要回報。';
-  const VALUE = { neural: '神經選字', statistical: '統計引擎', off: '關閉', select: '僅供選字', auto: '自動修正（實驗）', vertical: '直排', grid: '多排', before: '游標前方', after: '游標後方', standard: '標準', eten: '倚天 41 鍵', hsu: '許氏' };
+  const VALUE = { neural: '神經選字', statistical: '統計引擎', off: '關閉', select: '僅供選字', auto: '自動修正（實驗）', vertical: '直排', grid: '多排', before: '游標前方', after: '游標後方' };
   const ERROR = {
     read_only: '設定檔來自較新版本的靈犀注音，這個版本只能查看，不能修改。',
     corrupt: '設定檔無法解析。可到「總覽」修復。',
@@ -203,21 +202,16 @@
     return changePairs([[key, value]]);
   }
 
-  // note：成功時接在套用結果前面的說明（複製成自訂後再改一項時，#275、#318）；failNote：接在失敗原因前面
-  // （#318：已複製成自訂、這一項卻沒改成時說明）。
-  async function changePairs(pairs, note, failNote) {
+  async function changePairs(pairs) {
     const focused = document.activeElement?.dataset?.focus;
     for (const [key] of pairs) state.busy.add(key);
     render();
     try {
       const result = await invoke('set_settings', { pairs, apply: true, repair: false });
-      if (!result.ok) toast((failNote || '') + errorText(result.error), 'error');
-      else {
-        const [text, tone] = applyText(result.apply);
-        toast((note || '') + text, tone);
-      }
+      if (!result.ok) toast(errorText(result.error), 'error');
+      else toast(...applyText(result.apply));
     } catch (error) {
-      toast((failNote || '') + String(error), 'error');
+      toast(String(error), 'error');
     }
     for (const [key] of pairs) state.busy.delete(key);
     await refresh();
@@ -392,122 +386,67 @@
     }
   }
 
-  // 被內建風格鎖住的項目的滑鼠提示（#318）。
-  const LOCKED_TITLE = '修改時會自動複製成你自己的輸入習慣';
-
-  function control(item, locked) {
+  function control(item, busy) {
     const values = item.values || [];
-    // item.disabled：另一個設定讓這一項不起作用（倚天 41 鍵時的混打與 Emoji，#83；許氏時的混打，#183；不用 Shift 時的開始模式，#184）。開關顯示實際狀態（關閉），
-    // 設定檔中的值不動，條件解除後照舊。
-    const view = window.ZcInputStylesLogic.controlState(item, locked || state.profileBusy || state.busy.has(item.key));
-    // 被內建風格鎖住（#275）：外觀淡一些、標著由哪個風格決定，但按得到；按了直接複製成自訂並改這一項（#318）。
-    const ask = view.copyToChange ? (value) => copyAndChange(item.key, value) : null;
-    const disabled = view.disabled && !ask;
+    const toggle = values.length === 2 && values.includes('off');
+    // item.disabled：另一個設定讓這一項不起作用（不用 Shift 切換時的單按時限，#319），畫成不能改；設定檔中的值不動，條件解除後照舊。
+    const value = item.disabled && toggle ? 'off' : item.value;
+    const disabled = !!(busy || item.disabled);
     const labelId = 'label-' + item.key;
-    if (values.length === 2 && values.includes('off')) {
+    if (toggle) {
       const on = values.find((v) => v !== 'off');
-      const checked = view.checked;
+      const checked = value === on;
       return h('button', {
-        type: 'button', class: ask ? 'switch locked' : 'switch', role: 'switch', 'aria-checked': String(checked), 'aria-labelledby': labelId,
-        title: ask ? LOCKED_TITLE : null, 'data-focus': item.key, disabled,
-        onclick: () => (ask ? ask(checked ? 'off' : on) : change(item.key, checked ? 'off' : on)),
+        type: 'button', class: 'switch', role: 'switch', 'aria-checked': String(checked), 'aria-labelledby': labelId,
+        'data-focus': item.key, disabled, onclick: () => change(item.key, checked ? 'off' : on),
       });
     }
-    // 選項也畫實際使用的值：不用 Shift 時開始模式固定為注音（#184，item.effective），設定檔裡的英文保留到改回 Shift。
-    const shown = view.value;
     return h('fieldset', { class: 'choices', 'aria-labelledby': labelId, disabled },
-      ...values.map((value) => h('label', {},
+      ...values.map((v) => h('label', {},
         h('input', {
-          type: 'radio', name: item.key, value, checked: shown === value, 'data-focus': item.key + ':' + value,
-          class: ask ? 'locked' : null, title: ask ? LOCKED_TITLE : null,
-          onclick: ask ? (event) => { event.preventDefault(); if (value !== shown) ask(value); } : null,
-          onchange: () => (ask ? ask(value) : change(item.key, value)),
-        }), (item.value_labels && item.value_labels[value]) || VALUE[value] || value)));
-  }
-
-  // 改被內建風格鎖住的項目（#318）：先把目前的內建風格複製成自訂並套用（與「輸入習慣」頁的「建立並套用」相同），
-  // 成功後才改這一項，只用一則提示說已改用哪個自訂習慣。複製失敗時什麼都沒改，提示原因；複製成功但這一項沒改成時，
-  // 提示已換成自訂、這一項為什麼沒改，使用者可以直接再按一次（這時已是自訂，不再複製）。
-  async function copyAndChange(key, value) {
-    if (state.profileBusy) return;
-    const target = window.ZcInputStylesLogic.copyTarget(state.settings?.profiles);
-    if (!target) return change(key, value);
-    state.profileBusy = true;
-    state.busy.add(key);
-    render();
-    let copied = false;
-    try {
-      const result = await invoke('profile_command', { action: 'copy', id: target.id, name: target.name });
-      copied = !!result.ok;
-      if (!copied) toast('沒有改成：' + errorText(result.error), 'error');
-    } catch (error) {
-      toast('沒有改成：' + String(error), 'error');
-    }
-    state.profileBusy = false;
-    state.busy.delete(key);
-    if (copied) await changePairs([[key, value]], target.done, target.failed);
-    else await refresh();
-    // 複製期間這一項停用，焦點掉到頁面上；鍵盤操作的人接著在原處繼續（開關，或單選裡選中的那一項）。
-    if (document.activeElement === document.body) {
-      const section = document.getElementById('page-' + page);
-      const control = section && (section.querySelector('input[name="' + key + '"]:checked') ||
-        Array.from(section.querySelectorAll('[data-focus]')).find((node) => node.dataset.focus === key));
-      if (control && !control.disabled) control.focus();
-    }
-  }
-
-  function profileLockLabel() {
-    const profiles = state.settings?.profiles;
-    const active = profiles?.items?.find((profile) => profile.id === profiles.active);
-    return active ? '由「' + active.name + '」風格決定' : '由目前的輸入習慣決定';
+          type: 'radio', name: item.key, value: v, checked: value === v, 'data-focus': item.key + ':' + v,
+          onchange: () => change(item.key, v),
+        }), (item.value_labels && item.value_labels[v]) || VALUE[v] || v)));
   }
 
   function itemRow(item, locked) {
     const name = h('span', {}, item.label || item.key);
-    if (item.locked) name.append(h('span', { class: 'badge muted-badge', title: LOCKED_TITLE }, profileLockLabel()));
     if (item.disabled && item.disabled_reason) name.append(h('span', { class: 'badge muted-badge' }, item.disabled_reason));
     else if (item.pending) name.append(h('span', { class: 'badge' }, '已儲存，尚未套用'));
     return row(
       h('div', {}, h('div', { class: 'label', id: 'label-' + item.key }, name), item.description ? h('div', { class: 'desc' }, item.description) : null,
         causeLink(item)),
-      control(item, locked));
+      control(item, locked || state.busy.has(item.key)));
   }
 
-  // ---- 中英切換、選字、鍵盤與符號（#207：原本的「輸入設定」一頁 19 項，拆成三頁、不摺疊） ----
+  // ---- 中英切換、選字、鍵盤與符號（#207） ----
   // 各頁依這裡的順序畫（也是 Tab 順序）。不在任何一頁的新項目（較新的 0c-update 才有的設定）放在「選字」最後，
-  // 所以契約新增設定時畫面不必先改；要放別頁再加進 keys。輸出設定的兩項在 output()。
+  // 所以契約新增設定時畫面不必先改；要放別頁再加進 keys。
   const SAVE_NOTE = '改動會立即儲存，並在沒有組字時讓輸入法套用。';
   const INPUT_PAGES = {
     mode: {
-      title: '中英切換', lead: '用哪個鍵切換注音和英文、換程式後回到哪個模式，以及在注音中直接打英文。',
+      title: '中英切換', lead: '用哪個鍵切換注音和英文、換程式後回到哪個模式，以及英文模式的補全。',
       // shift-tap-ms（#319，單按 Shift 的時限）是中英切換鍵的細節，接在它下面。
-      keys: ['toggle-key', 'shift-tap-ms', 'start-mode', 'mode-memory', 'mixed-input', 'english-autocomplete', 'caps-lock-english', 'style-shift-letter', 'style-caps-letter'],
+      keys: ['toggle-key', 'shift-tap-ms', 'start-mode', 'mode-memory', 'english-autocomplete'],
     },
     candidates: {
       title: '選字', lead: '候選字怎麼排、怎麼選，以及要不要列出近音的字（模糊音）。',
-      // zhuyin-error-hint（#300，打錯注音時提示）跟不打聲調一樣是按聲調時的規則，接在它後面。
-      // personal-learning（#297，記住我選的字詞）是個人偏好，排在選字項目最後、輸入習慣的規則之前。
-      keys: ['selection', 'document-context', 'space-selects', 'candidate-cursor', 'advance-after-select', 'candidate-layout', 'selection-keys', 'esc-clear', 'toneless', 'zhuyin-error-hint', 'personal-learning', 'style-tab', 'style-up', 'style-candidate-tab', 'style-candidate-space', 'style-candidate-enter', 'style-page-size', 'style-candidate-navigation'],
+      // personal-learning（#297，記住我選的字詞）是個人偏好，排在選字項目最後、按鍵規則之前。
+      keys: ['selection', 'document-context', 'candidate-cursor', 'advance-after-select', 'candidate-layout', 'page-size', 'selection-keys', 'esc-clear', 'personal-learning', 'tab', 'candidate-tab', 'candidate-space', 'candidate-enter', 'candidate-navigation'],
     },
     keyboard: {
-      title: '鍵盤與符號', lead: '注音的鍵盤排列，以及標點符號和 Emoji 怎麼打。',
-      // emoji-equals-first 是 Emoji 選單的子選項，畫在它下面。
-      // shift-symbol-halfwidth（標點寬度，#258、#282 三選一）跟 Ctrl＋標點是一對（半形與全形），排在它下面；
-      // cjk-latin-space（#273，中英文之間自動加空格）也是半形排版，接在後面。
-      keys: ['keyboard-layout', 'ctrl-punctuation', 'shift-symbol-halfwidth', 'cjk-latin-space', 'punctuation', 'emoji-shortcut', 'emoji-equals-first', 'style-punctuation', 'style-shift-space', 'style-shift-delete'],
+      title: '鍵盤與符號', lead: '提交時補標點，以及 Shift＋空白、Shift＋Delete 的作用。',
+      keys: ['punctuation', 'shift-space', 'shift-delete'],
     },
   };
-  const OUTPUT_KEYS = ['output-simplified', 'simplified-hotkey'];
   const pageTitle = (name) => (INPUT_PAGES[name] ? INPUT_PAGES[name].title : '輸入設定');
   function pageOfKey(key) {
-    if (OUTPUT_KEYS.includes(key)) return 'output';
     if (key.startsWith('fuzzy-')) return 'candidates';
     for (const [name, spec] of Object.entries(INPUT_PAGES)) if (spec.keys.includes(key)) return name;
     return 'candidates';
   }
 
-  // 停用的原因在另一頁時（許氏時的中英混打在「中英切換」、鍵盤排列在「鍵盤與符號」），說明要去哪裡改，按了就過去。
-  // 原因在同一頁（不用 Shift 時的開始模式就在中英切換鍵下面）不必另外寫。
+  // 停用的原因在另一頁時，說明要去哪裡改，按了就過去；原因在同一頁（單按時限就在中英切換鍵下面）不必另外寫。
   function causeLink(item) {
     if (!item.disabled || !item.disabled_by) return null;
     const target = pageOfKey(item.disabled_by);
@@ -536,23 +475,9 @@
     root.append(...fileNotices(settings));
     const locked = settings.file.read_only;
     const items = settings.items || [];
-    if (items.some((item) => item.locked && pageOfKey(item.key) === name)) {
-      root.append(h('div', { class: 'notice info' }, h('p', {}, '部分設定' + profileLockLabel() + '。直接修改這些項目時，會自動複製一份成為你自己的輸入習慣再修改，其他設定維持原樣；不相容的功能仍會停用。'),
-        h('button', { type: 'button', class: 'secondary', 'data-focus': 'style-settings', onclick: () => show('styles') }, '選用風格／複製成自訂')));
-    }
-    const emoji = items.find((item) => item.key === 'emoji-shortcut');
-    const equalsFirst = items.find((item) => item.key === 'emoji-equals-first');
     const order = (item) => (spec.keys.includes(item.key) ? spec.keys.indexOf(item.key) : spec.keys.length);
-    const mine = items.filter((item) => pageOfKey(item.key) === name && !item.key.startsWith('fuzzy-') && !(emoji && item === equalsFirst))
-      .map((item, i) => [order(item), i, item]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(([, , item]) => item);
-    const rows = mine.map((item) => {
-      const parent = itemRow(item, locked ||
-        (item.key === 'emoji-shortcut' && state.busy.has('emoji-equals-first')));
-      if (item.key !== 'emoji-shortcut' || !equalsFirst) return parent;
-      const child = itemRow(equalsFirst, locked || item.value !== 'equals' || !!item.disabled || state.busy.has(item.key));
-      child.classList.add('suboption');
-      return h('div', { class: 'setting-group', role: 'group', 'aria-labelledby': 'label-' + item.key }, parent, child);
-    });
+    const rows = items.filter((item) => pageOfKey(item.key) === name && !item.key.startsWith('fuzzy-'))
+      .map((item, i) => [order(item), i, item]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(([, , item]) => itemRow(item, locked));
     if (rows.length) root.append(h('div', { class: 'card' }, ...rows));
     const fuzzy = name === 'candidates' ? items.filter((item) => item.key.startsWith('fuzzy-')) : [];
     if (fuzzy.length) {
@@ -686,29 +611,15 @@
     vocab.render(root);
   }
 
-  // 輸出設定：送出的文字怎麼轉換（#118 簡體字），跟打字、選字分開，左側獨立一頁。
-  function output(root) {
-    root.append(h('h1', {}, '輸出設定'), h('p', { class: 'lead' }, '決定送到應用程式的文字；組字和候選照常顯示繁體。改動會立即儲存並馬上套用，正在組字的字送出時也照新的設定；也可以從輸入法選單的「輸出簡體字」切換。'));
-    if (problem(root)) return;
-    const settings = state.settings;
-    root.append(...fileNotices(settings));
-    // 「用快捷鍵切換簡體字」（#192）排在「輸出簡體字」下面；說明由 0c-update 依平台寫出快捷鍵。
-    const items = ['output-simplified', 'simplified-hotkey'].map((key) => (settings.items || []).find((item) => item.key === key)).filter(Boolean);
-    if (items.length) root.append(h('div', { class: 'card' }, ...items.map((item) => itemRow(item, settings.file.read_only))));
-  }
-
   const RENDER = {
-    overview, output, styles: (root) => { if (!problem(root)) styles.render(root); }, vocab: vocabPage, models: (root) => models.render(root), update, troubleshoot, about,
+    overview, vocab: vocabPage, models: (root) => models.render(root), update, troubleshoot, about,
     mode: (root) => settingsPage('mode', root), candidates: (root) => settingsPage('candidates', root), keyboard: (root) => settingsPage('keyboard', root),
   };
 
   function render() {
-    // 名稱輸入仍在組字時保留原欄位；背景 refresh 的結果等 compositionend 再畫。
-    if (page === 'styles' && styles?.composing()) return;
     const main = document.querySelector('main');
     const scroll = { top: main.scrollTop, left: main.scrollLeft };
     const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focus : null;
-    const selection = focused === 'style-name' ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     const vocabOn = vocabEnabled();
     if (page === 'vocab' && vocabOn === false) { page = 'overview'; vocab.setActive(false); }
     document.querySelectorAll('.nav').forEach((button) => {
@@ -727,15 +638,12 @@
     // 還原焦點也不能把畫面拉回舊控制項（#268）。
     // 先還原捲動再還原焦點：設定 scrollTop 會先排版，新控制項這時才有 renderer。WebKit（WebKitGTK、
     // WKWebView）的 <input> 若在還沒排版前就取得焦點，排版時會另排一個工作把它捲進畫面，
-    // 不理 preventScroll；點過的選項（radio）、風格名稱欄位都是 <input>。
+    // 不理 preventScroll；點過的選項（radio）是 <input>。
     main.scrollTop = scroll.top;
     main.scrollLeft = scroll.left;
     if (focused) {
       const again = Array.from(document.querySelectorAll('[data-focus]')).find((node) => node.dataset.focus === focused);
-      if (again && !again.disabled) {
-        again.focus({ preventScroll: true });
-        if (selection && typeof again.setSelectionRange === 'function') again.setSelectionRange(...selection);
-      }
+      if (again && !again.disabled) again.focus({ preventScroll: true });
     }
   }
 
@@ -762,20 +670,6 @@
       engineRunning: () => (state.status && state.status.runtime ? state.status.runtime.state === 'running' : null),
       personalReset,
       personalResetEnabled: () => !!(state.settings && state.settings.features && state.settings.features.personal_reset),
-    });
-    styles = window.ZcInputStyles({
-      h, render, settings: () => state.settings, showKeyboard: () => show('keyboard'),
-      valueLabel: (item, value) => window.ZcInputStylesLogic.valueLabel(item, value, VALUE),
-      mutate: async (action, id, name) => {
-        state.profileBusy = true;
-        try {
-          const result = await invoke('profile_command', { action, id, name });
-          if (result.ok) toast(...(result.apply ? applyText(result.apply) : ['已儲存。', 'ok']));
-          else toast(errorText(result.error), 'error');
-          await refresh();
-          return result;
-        } finally { state.profileBusy = false; }
-      },
     });
     models = window.ZcModels({
       h, invoke, toast, copyText, modelLabel, render,

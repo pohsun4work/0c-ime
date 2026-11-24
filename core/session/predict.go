@@ -165,7 +165,7 @@ func (s *Session) commitPrediction(words []string, left string, id int) (string,
 		s.pendingNeural = neural
 		s.pendingContextID = uint64(s.rev + 1)
 	}
-	return s.output(w, w, nil), true
+	return w, true
 }
 
 func predictionList(words []string, left string) *proto.CandidateList {

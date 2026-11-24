@@ -40,8 +40,8 @@ func TestShiftDeleteForgetsLearnedEnglish(t *testing.T) {
 		start func() *Session
 		k     string
 	}{
-		{"混打 Tab 提示 Shift＋Delete", func() *Session { s := mixedSession(); s.Preview02 = true; return s }, proto.KeyShiftDelete},
-		{"混打 Tab 提示 Shift＋⌫", func() *Session { s := mixedSession(); s.Preview02 = true; return s }, proto.KeyShiftBackspace},
+		{"混打 Tab 提示 Shift＋Delete", func() *Session { s := newSession(); s.Preview02 = true; return s }, proto.KeyShiftDelete},
+		{"混打 Tab 提示 Shift＋⌫", func() *Session { s := newSession(); s.Preview02 = true; return s }, proto.KeyShiftBackspace},
 		{"英文模式候選 Shift＋Delete", func() *Session { s := autocompleteSession(); s.Preview02 = true; return s }, proto.KeyShiftDelete},
 		{"英文模式候選 Shift＋⌫", func() *Session { s := autocompleteSession(); s.Preview02 = true; return s }, proto.KeyShiftBackspace},
 	} {
@@ -95,7 +95,7 @@ func TestShiftDeleteForgetsLearnedEnglish(t *testing.T) {
 
 // 混打按 ↓ 開的候選裡，反白學到的英文詞按 Shift＋Delete 也忘記，候選原地重開。
 func TestShiftDeleteForgetsLearnedEnglishInMixedCandidates(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	s.Preview02 = true
 	learnInSentence(t, s, "zuinfake2026")
 	mixedType(s, "zuin")
@@ -122,7 +122,7 @@ func TestShiftDeleteLeavesBuiltinEnglishAlone(t *testing.T) {
 	if snap := key(s, proto.KeyShiftBackspace); snap.Forgot || snap.Text() != "he" || len(s.model.Store.Tombstones) != 0 {
 		t.Fatalf("英文模式字典候選上的 Shift＋⌫ 要照舊刪字：%+v", snap)
 	}
-	m := mixedSession()
+	m := newSession()
 	m.Preview02 = true
 	m.English = s.English
 	snap := mixedType(m, "hel")
@@ -136,7 +136,7 @@ func TestShiftDeleteLeavesBuiltinEnglishAlone(t *testing.T) {
 
 // 私人欄位不顯示個人英文，也不在那裡忘記。
 func TestShiftDeleteEnglishNotInPrivateField(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	s.Preview02 = true
 	learnInSentence(t, s, "zuinfake2026")
 	s.Handle(proto.Request{Type: proto.Key, Key: "z", Private: true})

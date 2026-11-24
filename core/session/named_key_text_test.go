@@ -30,7 +30,7 @@ func containsKeyName(text string) string {
 func namedKeySessions() map[string]func() *Session {
 	return map[string]func() *Session{
 		"zhuyin": newSession,
-		"mixed":  mixedSession,
+		"mixed":  newSession,
 		"english": func() *Session {
 			s := newSession()
 			s.Handle(proto.Request{Type: proto.Mode, On: true})
@@ -39,12 +39,10 @@ func namedKeySessions() map[string]func() *Session {
 		"autocomplete": autocompleteSession,
 		"palette": func() *Session {
 			s := paletteSession()
-			s.MixedInput = true
 			return s
 		},
 		"everything": func() *Session {
 			s := paletteSession()
-			s.MixedInput = true
 			s.EnglishAutocomplete = true
 			s.English = english.New([]english.Word{{Text: "hello", Weight: 100}, {Text: "help", Weight: 50}})
 			s.EscKeepComposition = true

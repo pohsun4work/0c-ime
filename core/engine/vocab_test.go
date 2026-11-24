@@ -290,7 +290,7 @@ func TestVocabEnglishWords(t *testing.T) {
 	e := vocabEngine()
 	e.Model.Lex.(*lexicon.Mem).Add(lexicon.Entry{Surface: "孬", Reading: zhuyin.ParseReading("ㄋㄠ"), PRW: 1})
 	e.Model.LM.(*lm.Mem).SetUni("孬", 1e-5)
-	e.MixedInput, e.Preview02 = true, true
+	e.Preview02 = true
 	typeKeys := func(keys string) string {
 		id := e.OpenSession()
 		for _, k := range keys {

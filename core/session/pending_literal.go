@@ -1,6 +1,7 @@
 package session
 
 import (
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"slices"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
@@ -119,7 +120,7 @@ func (s *Session) retypeSyllableLiteral(key rune) bool {
 	if !ok || p.prefix || p.end()+p.mark() != s.cursor {
 		return false
 	}
-	comp, sym, ok := s.layout.Press(p.composer, key)
+	comp, sym, ok := layout.Standard.Press(p.composer, key)
 	cl := zhuyin.ClassOf(sym)
 	if !ok || cl != zhuyin.Medial && cl != zhuyin.Final {
 		return false

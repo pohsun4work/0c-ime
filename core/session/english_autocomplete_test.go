@@ -199,13 +199,12 @@ func TestEnglishAutocompleteCandidateRequestsStayEnglish(t *testing.T) {
 }
 
 func TestEnglishAutocompleteSwitchIsIndependentOfMixedInput(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	s.Handle(proto.Request{Type: proto.Mode, On: true})
 	if snap := key(s, "h"); snap.Handled {
 		t.Fatal("mixed input enabled English capture without its own switch", snap)
 	}
 	s = autocompleteSession()
-	s.MixedInput = true
 	s.model.AdvanceTime(100 * englishDay)
 	mixedType(s, "hel")
 	key(s, proto.KeyTab)
@@ -233,7 +232,6 @@ func TestEnglishAutocompletePauseFinishesWordBeforePassthrough(t *testing.T) {
 func TestEnglishAutocompleteEditedCompletionDoesNotConfirm(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		s := autocompleteSession()
-		s.MixedInput = true
 		s.model.AdvanceTime(100 * englishDay)
 		if existing {
 			s.model.LearnEnglish([]personal.EnglishCommit{{Text: "hellos"}})
@@ -264,7 +262,6 @@ func TestEnglishAutocompleteTokenPrefixesLeaveNoLearning(t *testing.T) {
 	for _, raw := range []string{"acmex@example.com", "myname_abc", "myname123", "https://example.com", "filepath.txt", "folder/file", "name-value", strings.Repeat("a", 80)} {
 		t.Run(raw, func(t *testing.T) {
 			s := autocompleteSession()
-			s.MixedInput = true
 			s.model.AdvanceTime(100 * englishDay)
 			var app strings.Builder
 			for _, r := range raw + " " {
@@ -287,7 +284,6 @@ func TestEnglishAutocompleteTokenPrefixesLeaveNoLearning(t *testing.T) {
 
 func TestEnglishAutocompleteAssistedCharactersSurviveMaterialization(t *testing.T) {
 	s := autocompleteSession()
-	s.MixedInput = true
 	s.model.AdvanceTime(100 * englishDay)
 	mixedType(s, "hel")
 	key(s, proto.KeyTab)
@@ -318,7 +314,6 @@ func TestEnglishAutocompleteAssistedCharactersSurviveMaterialization(t *testing.
 func TestEnglishAutocompleteWordConfirmsOnlyBeforeMoreText(t *testing.T) {
 	for _, boundary := range []string{" ", proto.KeyEnter, proto.KeyTab, ",", "!", ";"} {
 		s := autocompleteSession()
-		s.MixedInput = true
 		s.model.AdvanceTime(100 * englishDay)
 		mixedType(s, "brandnew")
 		snap := key(s, boundary)
@@ -423,7 +418,6 @@ func TestEnglishAutocompleteKnownSpellingIsProtected(t *testing.T) {
 func TestEnglishAutocompleteCorrectionDoesNotConfirmLearning(t *testing.T) {
 	s := autocompleteSession()
 	s.English = english.Prototype()
-	s.MixedInput = true
 	s.model.AdvanceTime(100 * englishDay)
 	mixedType(s, "recieve")
 	key(s, proto.KeyTab)

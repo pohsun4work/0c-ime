@@ -31,7 +31,6 @@ func alnumTokenSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	var words []english.Word
 	for _, w := range []string{"a", "hello", "win", "top", "java"} {
 		words = append(words, english.Word{Text: w, Weight: 65})

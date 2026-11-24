@@ -7,12 +7,8 @@ import (
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
-func TestMixedToggleAndByteProtocol(t *testing.T) {
+func TestMixedPendingBlocksHandoffAndByteProtocol(t *testing.T) {
 	e := testEngine()
-	if e.Session(e.OpenSession()).MixedInput {
-		t.Fatal("default must preserve manual switching")
-	}
-	e.MixedInput = true
 	id := e.OpenSession()
 	e.Do(id, proto.Request{Type: proto.Key, Key: "h"})
 	if _, composing := e.Sessions(); composing != 1 {
@@ -31,10 +27,5 @@ func TestMixedToggleAndByteProtocol(t *testing.T) {
 	var snap proto.Snapshot
 	if err := json.Unmarshal(out, &snap); err != nil || snap.Commit != "hello吃" {
 		t.Fatalf("%s %v", out, err)
-	}
-	e.MixedInput = false
-	next := e.OpenSession()
-	if e.Session(next).MixedInput || !e.Session(id).MixedInput {
-		t.Fatal("new sessions must get configured toggle")
 	}
 }

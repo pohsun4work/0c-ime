@@ -90,11 +90,14 @@ func (s *Session) gridMove(key string) {
 	}
 }
 
-// Candidate positions count syllables, whereas an undecoded syllable can show
-// several phonetic runes. Read the displayed spans rather than slicing preedit
-// with a syllable offset; unfinished input at the caret is not in this range.
 func (s *Session) candidateText() string {
-	start, length := s.cand.span(s.cand.cursor)
+	return s.spanText(s.cand.span(s.cand.cursor))
+}
+
+// spanText 是組字區 [start, start+length) 目前顯示的文字。Candidate positions count syllables,
+// whereas an undecoded syllable can show several phonetic runes. Read the displayed spans rather
+// than slicing preedit with a syllable offset; unfinished input at the caret is not in this range.
+func (s *Session) spanText(start, length int) string {
 	end := start + length
 	var text strings.Builder
 	if len(s.path) == 0 {
@@ -172,7 +175,7 @@ func (s *Session) openEmoji(kind string) {
 		return
 	}
 	items := emoji.Palette(kind, s.model.Store.EmojiRecent)
-	if kind == "emoji" && s.EmojiEqualsFirst {
+	if kind == "emoji" && s.equalsPalette {
 		items = append([]string{"="}, items...)
 	}
 	s.openSymbols(items, s.cursor, 0, false)

@@ -62,7 +62,6 @@ func TestMixedMeasureAfterLiteralNumber(t *testing.T) {
 		{"hello 15 jo4", "hello 15 位"},
 	} {
 		s := numberContextSession()
-		s.MixedInput = true
 		if snap := mixedType(s, tc.keys); snap.Text() != tc.want {
 			t.Errorf("%q 顯示 %q，要 %q", tc.keys, snap.Text(), tc.want)
 		}
@@ -85,7 +84,6 @@ func TestMixedNumberContextLeavesOtherTextAlone(t *testing.T) {
 		{"A4 jo4", "A4 為"}, // 字母開頭的型號（A4、mp3）不當數量
 	} {
 		s := numberContextSession()
-		s.MixedInput = true
 		if snap := mixedType(s, tc.keys); snap.Text() != tc.want {
 			t.Errorf("%q 顯示 %q，要 %q", tc.keys, snap.Text(), tc.want)
 		}
@@ -102,23 +100,11 @@ func TestKeypadNumberThenMeasure(t *testing.T) {
 	if snap := typeSyl(s, "ㄍㄜˋ"); snap.Text() != "我有20個" {
 		t.Fatalf("數字鍵盤的 20 後面接 ㄍㄜˋ：%q", snap.Text())
 	}
-	// 關閉「空白鍵選字」時，數字後面可以先打一個空白。
-	s = numberContextSession()
-	s.SpaceInsertsSpace = true
-	typeSyl(s, "ㄨㄛˇ")
-	typeSyl(s, "ㄧㄡˇ")
-	key(s, "KP2")
-	key(s, "KP0")
-	key(s, " ")
-	if snap := typeSyl(s, "ㄨㄟˋ"); snap.Text() != "我有20 位" {
-		t.Fatalf("數字＋空白後面接 ㄨㄟˋ：%q", snap.Text())
-	}
 }
 
 // 候選視窗與畫面同一個語境：數字後面開 ㄨㄟˋ 的候選，第一個是「位」。
 func TestNumberContextOrdersCandidates(t *testing.T) {
 	s := numberContextSession()
-	s.MixedInput = true
 	mixedType(s, "15 jo4")
 	snap := key(s, proto.KeyDown)
 	if snap.Candidates == nil || len(snap.Candidates.Items) == 0 || snap.Candidates.Items[0].Text != "位" {
@@ -129,7 +115,6 @@ func TestNumberContextOrdersCandidates(t *testing.T) {
 // 數字語境只用在解碼，不寫進學習：提交「15 位」後，學到的左鄰不是任何中文數詞。
 func TestNumberContextIsNotLearned(t *testing.T) {
 	s := numberContextSession()
-	s.MixedInput = true
 	mixedType(s, "15 jo4")
 	key(s, proto.KeyEnter)
 	for _, left := range numberLefts {
@@ -143,7 +128,6 @@ func TestNumberContextIsNotLearned(t *testing.T) {
 func TestNeuralSeesNumberSegment(t *testing.T) {
 	var got []rerank.Request
 	s := numberContextSession()
-	s.MixedInput = true
 	s.Opt.PrefixAware = false
 	s.Handle(proto.Request{Type: proto.Context, ContextEnabled: true})
 	s.Rerank = rerank.Options{Weight: 1, TextWeight: 2, TextMargin: 1, ContextRunes: rerank.MaxContextRunes, Scorer: rankFunc(func(r rerank.Request) ([]float64, error) {

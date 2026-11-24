@@ -34,7 +34,6 @@ func englishBoundarySession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	var words []english.Word
 	for _, w := range []string{"hello", "hellos", "test", "tests", "app", "apps", "line", "zoom", "world", "step", "page", "user", "name", "win", "kevin", "is", "hell", "zoo", "st", "use", "api"} {
 		words = append(words, english.Word{Text: w, Weight: 65})
