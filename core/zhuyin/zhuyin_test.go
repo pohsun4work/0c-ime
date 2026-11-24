@@ -51,17 +51,15 @@ func TestComposer(t *testing.T) {
 	}
 }
 
-// 許氏（#183）的組音操作：Replace 換符號不改輸入順序、Remove 移除一類，兩者與 Add、Backspace 都清掉按鍵記錄；
-// Clone 的複本與原本不共用輸入順序。
-func TestComposerEditsForDynamicLayouts(t *testing.T) {
+// Replace 換符號不改輸入順序、Remove 移除一類；Clone 的複本與原本不共用輸入順序。
+func TestComposerReplaceRemoveClone(t *testing.T) {
 	var c Composer
 	c.Add('ㄓ')
 	c.Add('ㄧ')
-	c.SetKeys("je")
 	d := c.Clone()
 	d.Replace(Initial, 'ㄐ')
-	if d.String() != "ㄐㄧ" || c.String() != "ㄓㄧ" || d.Keys() != "" || c.Keys() != "je" {
-		t.Fatalf("Replace：%q %q keys=%q %q", d.String(), c.String(), d.Keys(), c.Keys())
+	if d.String() != "ㄐㄧ" || c.String() != "ㄓㄧ" {
+		t.Fatalf("Replace：%q %q", d.String(), c.String())
 	}
 	d.Backspace()
 	if d.String() != "ㄐ" || c.String() != "ㄓㄧ" {

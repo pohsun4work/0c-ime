@@ -366,7 +366,6 @@ const shellCtrlKeys = ",.';?!:()[]"
 type shell struct {
 	handle      func(proto.Request) (proto.Snapshot, int64, error)
 	idle        string
-	idleFull    string
 	ctrlKeys    string
 	shiftSpace  string
 	snap        proto.Snapshot
@@ -377,7 +376,7 @@ type shell struct {
 }
 
 func newShell(info map[string]string, handle func(proto.Request) (proto.Snapshot, int64, error)) *shell {
-	return &shell{handle: handle, idle: info["idle_keys"], idleFull: info["idle_keys_full_width"],
+	return &shell{handle: handle, idle: info["idle_keys"],
 		ctrlKeys: info["ctrl_punctuation_keys"], shiftSpace: info["shift_space"], snap: proto.Snapshot{Mode: proto.ModeZhuyin}}
 }
 
@@ -417,9 +416,6 @@ func (s *shell) wants(key string) bool {
 	}
 	if key == " " || namedKeys[key] {
 		return false
-	}
-	if s.snap.FullWidth {
-		return strings.Contains(s.idleFull, key)
 	}
 	return strings.Contains(s.idle, key)
 }

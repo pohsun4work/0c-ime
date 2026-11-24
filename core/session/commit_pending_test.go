@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/proto"
@@ -75,22 +76,8 @@ func TestCommitRequestTonelessFinishesSyllable(t *testing.T) {
 	}
 }
 
-// unfinishedFree 是快照裡不標 Unfinished 的組字：應用程式或框架自己把組字送進文件時（Fcitx5 的用戶端組字）
-// 會送出的文字。
-func unfinishedFree(snap proto.Snapshot) (kept, unfinished string) {
-	for _, g := range snap.Preedit {
-		if g.Unfinished {
-			unfinished += g.Text
-		} else {
-			kept += g.Text
-		}
-	}
-	return kept, unfinished
-}
-
-// #322 的 Linux 外殼：Fcitx5 失焦時由用戶端照畫面送出組字，外殼只能靠 Unfinished（DontCommit）把未打完的注音
-// 留在文件外。標出來的範圍必須剛好是 commit 請求不送的部分，否則文件與學到的字不一致。
-func TestUnfinishedSegmentsMatchCommitRequest(t *testing.T) {
+// #322：外殼替使用者結束組字（commit 請求）時，未打完的注音（含混打顯示成注音的暫存按鍵）丟掉，其餘照畫面送出。
+func TestCommitRequestDropsUnfinishedZhuyin(t *testing.T) {
 	type step func(*Session) proto.Snapshot
 	keys := func(k string) step { return func(s *Session) proto.Snapshot { return mixedType(s, k) } }
 	named := func(k string) step { return func(s *Session) proto.Snapshot { return key(s, k) } }
@@ -115,19 +102,11 @@ func TestUnfinishedSegmentsMatchCommitRequest(t *testing.T) {
 		for _, st := range tc.steps {
 			snap = st(s)
 		}
-		if kept, unfinished := unfinishedFree(snap); kept != tc.kept || unfinished != tc.unfinished {
-			t.Fatalf("%s：未打完的注音應標成 %q、其餘 %q：%+v", name, tc.unfinished, tc.kept, snap.Preedit)
+		if !strings.Contains(snap.Text(), tc.unfinished) {
+			t.Fatalf("%s：畫面 %q 要有未打完的 %q", name, snap.Text(), tc.unfinished)
 		}
 		if got := s.Handle(proto.Request{Type: proto.Commit}); got.Commit != tc.kept {
-			t.Fatalf("%s：commit 請求送出 %q，應與畫面上不標 Unfinished 的 %q 相同", name, got.Commit, tc.kept)
+			t.Fatalf("%s：commit 請求送出 %q，要 %q（丟掉 %q）", name, got.Commit, tc.kept, tc.unfinished)
 		}
-	}
-}
-
-func TestUnfinishedTonelessSyllable(t *testing.T) {
-	// 聲調選填（#150）：完整音節在 commit 請求時換成解碼的字，畫面上的注音不能照樣送進文件，也標 Unfinished。
-	s := newTonelessSession(true)
-	if kept, unfinished := unfinishedFree(mixedType(s, "ji3g")); kept != "我" || unfinished != "ㄕ" {
-		t.Fatalf("聲調選填時未打聲調的注音也不照畫面送出：%q %q", kept, unfinished)
 	}
 }

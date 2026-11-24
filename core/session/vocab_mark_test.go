@@ -98,6 +98,11 @@ func TestMarkCancelAndOtherKeys(t *testing.T) {
 	if snap := key(s, proto.KeyLeft); hasMarked(snap) || snap.Cursor.Rune != 0 {
 		t.Fatalf("其他按鍵取消標示後照常處理：%+v", snap)
 	}
+	key(s, proto.KeyEnd)
+	key(s, proto.KeyShiftLeft)
+	if snap := key(s, proto.KeyUp); hasMarked(snap) || s.mark != nil {
+		t.Fatalf("↑ 換字也取消標示：%+v", snap)
+	}
 	if s.model.Vocab != nil && s.model.Vocab.Len() != 0 {
 		t.Fatal("取消不加詞")
 	}

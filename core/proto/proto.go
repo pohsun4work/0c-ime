@@ -66,7 +66,7 @@ const (
 	KeyShiftLeft      = "ShiftLeft"      // 組字中往左標示要加入詞庫的範圍
 	KeyShiftRight     = "ShiftRight"     // 組字中往右標示
 	KeyShiftDelete    = "ShiftDelete"    // 候選窗的反悔鍵：刪除自訂詞或忘記學到的詞
-	KeyShiftBackspace = "ShiftBackspace" // 同上（Mac 筆電沒有獨立的 Delete 鍵）
+	KeyShiftBackspace = "ShiftBackspace" // 同上（Shift＋Backspace）
 )
 
 // Ctrl＋標點（#168）：中文模式按 Ctrl＋, 打「，」等全形標點。Key 為 CtrlPrefix 加上不按 Ctrl 時這一鍵產生的字元
@@ -172,11 +172,6 @@ const (
 type Segment struct {
 	Text  string `json:"text"`
 	Style string `json:"style"`
-	// Unfinished 標出外殼替使用者結束組字（commit 請求：失焦、切到別的輸入法）時不照畫面送出的那段：
-	// 未打完的注音（含中英混打顯示成注音的暫存按鍵）會丟掉，聲調選填／九宮格已是完整音節的會換成解碼的字（#322）。
-	// 由應用程式或框架自己把畫面上的組字送進文件的平台（Fcitx5 的用戶端組字、IBus 的 COMMIT 模式）
-	// 靠它不把這段帶進文件。同樣是 pending 樣式、照畫面送出的保底注音與英文暫存按鍵不標。舊核心沒有這一項。
-	Unfinished bool `json:"unfinished,omitempty"`
 }
 
 // CursorPos 同時以兩種單位給出游標在組字區文字中的位置，外殼不自行換算。

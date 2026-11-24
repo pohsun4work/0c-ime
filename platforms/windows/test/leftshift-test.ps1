@@ -1,8 +1,8 @@
 ﻿# 左 Shift 切換中英驗收（#65、#206、#217）：Windows 的中英切換鍵預設左右 Shift（#206），單按左 Shift 切換，按住超過 0.3 秒、
-# 按著 Shift 點滑鼠（Shift＋點選延伸選取）不切換；切換時 Shift 放開跟按下一樣交給應用程式（#217，同系統注音）；以 0c-update set left-shift off -apply 關掉後左 Shift 照系統原本的用途、
-# 放開事件交給應用程式；再以 set left-shift on -apply 開啟後，單按左 Shift 像右 Shift 一樣切換並保留組字，
+# 按著 Shift 點滑鼠（Shift＋點選延伸選取）不切換；切換時 Shift 放開跟按下一樣交給應用程式（#217，同系統注音）；以 0c-update set toggle-key right -apply 改成只用右 Shift 後左 Shift 照系統原本的用途、
+# 放開事件交給應用程式；再以 set toggle-key both -apply 改回左右 Shift 後，單按左 Shift 像右 Shift 一樣切換並保留組字，
 # Shift＋字母、左右同按、Ctrl／Alt＋Shift 不切換，放開後 Shift 不會卡住；Edge、Chrome 一般與無痕視窗同樣可切換；
-# 關回 off 後恢復系統行為。左 Shift 一律以 VK_LSHIFT（0xA0）與掃描碼 0x2A 送出。
+# 改回 right 後恢復系統行為。左 Shift 一律以 VK_LSHIFT（0xA0）與掃描碼 0x2A 送出。
 # 本測試自己管理隔離引擎：LOCALAPPDATA 指到結果目錄內的沙盒，0c-update 寫入的設定就是重啟後引擎讀的那份。
 param([Parameter(Mandatory=$true)][string]$ResultDir, [Parameter(Mandatory=$true)][string]$ExpectedDLL)
 $ErrorActionPreference='Stop'
@@ -89,12 +89,11 @@ public static class LeftShiftProbe {
   Start-Sleep -Seconds 2
   if($script:server.HasExited){throw "engine ($tag) failed to start"}
  }
- function SetLeftShift([string]$value){
-  $out=& "$installed\0c-update.exe" set left-shift $value -apply 2>&1|Out-String
+ function SetToggleKey([string]$value){
+  $out=& "$installed\0c-update.exe" set toggle-key $value -apply 2>&1|Out-String
   $report.cli[$value]=@{exit=$LASTEXITCODE;output=$out.Trim();settings=[IO.File]::ReadAllText("$la\Zuin\settings.json")}
-  if($LASTEXITCODE -ne 0){throw "0c-update set left-shift $value failed: $out"}
-  $want=if($value -eq 'on'){'"left_shift": true'}else{'"left_shift": false'}
-  Check ((Get-Content "$la\Zuin\settings.json" -Raw).Contains($want)) "cli_set_left_shift_$value" $report.cli[$value].settings
+  if($LASTEXITCODE -ne 0){throw "0c-update set toggle-key $value failed: $out"}
+  Check ((Get-Content "$la\Zuin\settings.json" -Raw).Contains('"toggle_key": "'+$value+'"')) "cli_set_toggle_key_$value" $report.cli[$value].settings
   # -apply 讓引擎閒置後結束；以新設定重新啟動（沙盒沒有安裝收據，0c-update 不會自己啟動引擎）。
   StopServers;StartServer $value
  }
@@ -168,8 +167,8 @@ public static class LeftShiftProbe {
  ClearBox;NativeFocus;Send 'su3{ENTER}';LChord 0x25;Send 'su3{ENTER}';Expect '你' 'default_shift_arrow_select_no_toggle'
  ClearBox
 
- # ---- 1. 關閉左 Shift（只剩右 Shift）----
- SetLeftShift 'off';NativeFocus;Warmup
+ # ---- 1. 只用右 Shift（toggle-key right）----
+ SetToggleKey 'right';NativeFocus;Warmup
  $n=$script:shiftUps;NativeFocus;LTap
  Check ($script:shiftUps -eq $n+1) 'off_left_shift_up_reaches_app' "app saw $($script:shiftUps-$n) Shift key-ups"
  Check (-not [LeftShiftProbe]::ShiftDown()) 'off_shift_not_stuck' 'Shift still down'
@@ -178,8 +177,8 @@ public static class LeftShiftProbe {
  ClearBox;NativeFocus;Send 'su3';LTap;Send 'cl3{ENTER}';Expect '你好' 'off_tap_keeps_zhuyin_composition'
  ClearBox;SystemHotkey 0xA2 0x1D 'off_ctrl_shift';SystemHotkey 0xA4 0x38 'off_alt_shift'
 
- # ---- 2. 開啟 ----
- SetLeftShift 'on';NativeFocus;Warmup
+ # ---- 2. 改回左右 Shift（toggle-key both）----
+ SetToggleKey 'both';NativeFocus;Warmup
  $n=$script:shiftUps;NativeFocus;LTap
  Check ($script:shiftUps -eq $n+1) 'on_left_shift_up_reaches_app' "app saw $($script:shiftUps-$n) Shift key-ups"
  Check (-not [LeftShiftProbe]::ShiftDown()) 'on_shift_not_stuck' 'Shift still down after toggling key-up'
@@ -195,7 +194,7 @@ public static class LeftShiftProbe {
  NativeFocus;LTap;ClearBox
  $form.Hide();Pump 300
 
- # ---- 3. 瀏覽器（開啟狀態）：Edge、Chrome 一般與無痕 ----
+ # ---- 3. 瀏覽器（左右 Shift）：Edge、Chrome 一般與無痕 ----
  $marker='0clshift'+[guid]::NewGuid().ToString('N').Substring(0,6)
  $html=@"
 <html><head><meta charset="utf-8"><title>$marker</title></head><body>
@@ -256,8 +255,8 @@ document.addEventListener('keydown',e=>{if(e.key==='F4'){e.preventDefault();t.va
   $script:hwnd=[IntPtr]::Zero;Pump 1500
  }
 
- # ---- 4. 關回 off：回到系統行為 ----
- SetLeftShift 'off'
+ # ---- 4. 改回 right：左 Shift 回到系統行為 ----
+ SetToggleKey 'right'
  $form.Show();Pump 300;NativeFocus;Warmup
  $n=$script:shiftUps;NativeFocus;LTap
  Check ($script:shiftUps -eq $n+1) 'off_again_left_shift_up_reaches_app' "app saw $($script:shiftUps-$n) Shift key-ups"

@@ -26,7 +26,7 @@ func (s *Session) explicitSymbol(k string) bool {
 }
 
 // hoshiSymbolKey 排在官方的符號處理（allSymbolsKey、styleKey）之前：` 與全形時的符號。
-// 微軟參考的標點全形時照微軟：符號鍵都打全形（' ^ ` 是 ’ ︿ ‵，fullWidthText），留在組字區；其他風格照官方。
+// 全形時照微軟：符號鍵都打全形（' ^ ` 是 ’ ︿ ‵，fullWidthText），留在組字區。
 func (s *Session) hoshiSymbolKey(k string) bool {
 	if s.cand != nil || !s.explicitSymbol(k) || s.fullWidthMixedKey(rune(k[0])) {
 		return false

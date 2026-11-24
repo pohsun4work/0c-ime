@@ -168,7 +168,7 @@ pub struct UiMessage {
 pub const WM_SELECT_CANDIDATE: u32 = 0x8000 + 55;
 
 /// 候選之前的列：提示（notice）、讀音提示（reading）、補全提示（suggestion）、標題（title），依此順序。
-/// 提示優先（同 Linux 外殼）：有提示時取代標題，下一個快照沒有提示（或提示到時收起）標題就回來。
+/// 提示優先：有提示時取代標題，下一個快照沒有提示（或提示到時收起）標題就回來。
 /// 讀音提示只在沒有候選時出現（核心開候選時不送）。
 pub fn header_lines(m: &UiMessage) -> Vec<&str> {
     let title = if m.notice.is_empty() { m.title.as_str() } else { "" };

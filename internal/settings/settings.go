@@ -369,7 +369,7 @@ func fields() []field {
 		choiceField("candidate-layout", "選字排列", "直排，或每排五個的多排選字（選字鍵 1234qweras 時每排四個）",
 			"vertical", []string{"vertical", "grid", "horizontal"}, map[string]string{"vertical": "直排", "grid": "多排", "horizontal": "橫排"},
 			func(s *Settings) *string { return &s.CandidateLayout }),
-		choiceField("selection-keys", "選字鍵", "候選窗用哪一排鍵選第 1 到第 10 個字；換成字母鍵時，數字鍵仍可照位置選字",
+		choiceField("selection-keys", "選字鍵", "候選窗用哪一排鍵選字（每頁 9 個時用前 9 個鍵）；換成字母鍵時，數字鍵仍可照位置選字",
 			SelectDigits, []string{SelectDigits, SelectQwer, SelectHome},
 			map[string]string{SelectDigits: "1 2 3 4 5 6 7 8 9 0", SelectQwer: "1 2 3 4 q w e r a s", SelectHome: "a s d f g h j k l ;"},
 			func(s *Settings) *string { return &s.SelectionKeys }),

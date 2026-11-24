@@ -6,7 +6,7 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
 
-// buildVersion 由打包工具以 -ldflags "-X main.buildVersion=<版本>" 寫入（package_windows.py、package_release.py）；
+// buildVersion 由打包工具以 -ldflags "-X main.buildVersion=<版本>" 寫入（package_windows.py）；
 // 開發建置為 dev。
 var buildVersion = "dev"
 

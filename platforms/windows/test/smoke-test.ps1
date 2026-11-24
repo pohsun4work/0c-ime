@@ -85,19 +85,16 @@ public static class TSFProbe {
     $stream = [IO.File]::Create((Join-Path $ResultDir $Name))
     try { $encoder.Save($stream) } finally { $stream.Dispose() }
     }
-    # 空白欄位直接按 = 必須顯示候選；第二次 = 只輸出一個等號。
+    # 空白欄位按 = 打等號、留在組字區（Esc 取消得掉），Enter 才送出；== 是兩個等號。
     Send '='
-    Expect '' 'emoji_empty_preedit'
-    $emojiWindow = [TSFProbe]::FindWindow('ZuinCandidateWindow', 'Zuin')
-    if ($emojiWindow -eq [IntPtr]::Zero -or -not [TSFProbe]::IsWindowVisible($emojiWindow)) { throw 'emoji palette did not open from an empty field' }
-    $report.checks += 'emoji_opens_from_empty_field'
-    Send '='
-    Expect '=' 'emoji_double_equals_literal'
+    Expect '=' 'equals_empty_preedit'
+    Send '{ESC}'
+    Expect '' 'equals_stays_in_composition'
+    Send '={ENTER}'
+    Expect '=' 'equals_commit'
     $box.Clear(); Pump 200
-    Send '={TAB}{ESC}'
-    Expect '' 'kaomoji_open_switch_cancel'
-    Send '={RIGHT}{ENTER}{ENTER}'
-    Expect ([char]::ConvertFromUtf32(0x1F600)) 'emoji_keyboard_commit'
+    Send '=={ENTER}'
+    Expect '==' 'double_equals_literal'
     $box.Clear(); Pump 200
     Send 'su3cl3'
     Expect '你好' 'compose_nihao'

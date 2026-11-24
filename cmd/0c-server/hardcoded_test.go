@@ -13,7 +13,7 @@ import (
 )
 
 // P4.5：符號寬度、Ctrl＋標點、混打寫死。舊設定檔裡關掉它們（或打開不打聲調）的欄位照常載入但不起作用，
-// health 也不再回報；沒在組字時打的符號留在組字區，英文照混打送出。
+// health 也不再回報（Ctrl＋標點照舊回報 true 給更新前的 DLL）；沒在組字時打的符號留在組字區，英文照混打送出。
 func TestRetiredSymbolSettingsDoNotApplyInServer(t *testing.T) {
 	binary := buildServer(t)
 	dir := t.TempDir()
@@ -44,12 +44,12 @@ func TestRetiredSymbolSettingsDoNotApplyInServer(t *testing.T) {
 		return r
 	}
 	info := call(ipc.Envelope{Op: ipc.OpHealth}).Info
-	for _, retired := range []string{"all_symbols_halfwidth", "shift_symbol_halfwidth", "ctrl_punctuation", "toneless", "mixed_input"} {
+	for _, retired := range []string{"all_symbols_halfwidth", "shift_symbol_halfwidth", "toneless", "mixed_input"} {
 		if _, ok := info[retired]; ok {
 			t.Fatalf("health 還回報 %s：%+v", retired, info)
 		}
 	}
-	if info["ctrl_punctuation_keys"] != ",.';?!:()[]" || !strings.Contains(info["idle_keys"], "[") || !strings.Contains(info["idle_keys"], "(") {
+	if info["ctrl_punctuation"] != "true" || info["ctrl_punctuation_keys"] != ",.';?!:()[]" || !strings.Contains(info["idle_keys"], "[") || !strings.Contains(info["idle_keys"], "(") {
 		t.Fatalf("health：%+v", info)
 	}
 	for _, tc := range []struct {

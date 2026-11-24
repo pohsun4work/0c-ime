@@ -26,9 +26,9 @@ func (s *Session) selectionKeys() string {
 
 // selectionKeyColumns 是多排候選（含 Emoji）每排最多幾個（#112）：選字鍵分在鍵盤幾排，候選就照著排。
 // 1234qweras 每排 4 個，1234／qwer／as 對上鍵盤三排；1234567890、asdfghjkl; 在同一排，維持 5 個。
-// 一頁照舊 10 個（4／4／2），翻頁不變；顏文字（2 個）與片語（直排）本來就比較少，不受影響。
+// 每頁 9 個時排成 4／4／1（10 個時 4／4／2），翻頁不變；顏文字（2 個）與片語（直排）本來就比較少，不受影響。
 func (s *Session) selectionKeyColumns() int {
-	if s.selectionKeys() == "1234qweras" {
+	if keys := s.selectionKeys(); keys == "1234qweras"[:len(keys)] {
 		return 4
 	}
 	return 5
@@ -50,7 +50,7 @@ func (s *Session) selectionIndex(k string) int {
 		if n := (int(k[0]-'0') + 9) % 10; n < s.pageSize() {
 			return n
 		}
-		return -1 // // 1..9,0 → 第 0..9 項
+		return -1
 	}
 	return -1
 }

@@ -112,7 +112,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\platforms\windows\test
 
 新版互動測試腳本（明確的測試機操作，不列入一般建置）：
 
-- `test/smoke-test.ps1`：空白欄位開 Emoji、`==` 輸入等號、Tab 切顏文字、WPF 組字、Tab 補全及閒置放行、中英切換、混合組字、滑鼠候選、PasswordBox 與回到普通欄位。
+- `test/smoke-test.ps1`：空白欄位的 `=` 留在組字區、Enter 送出、`==` 輸入兩個等號、WPF 組字、Tab 補全及閒置放行、中英切換、混合組字、滑鼠候選、PasswordBox 與回到普通欄位。
 - `test/candidate-test.ps1`：直接檢查候選窗與彩色 Emoji 的亮／暗主題像素、工作區邊界與跨宿主隱藏訊息；暫時切換 AppsUseLightTheme，完成後還原原值與型別，總控工具逾時時亦會還原。高對比模式的系統色與縮放／負座標由 Rust 測試覆蓋，尚非實際高對比／多螢幕驗收。
 - `test/migration-test.ps1 -LegacyBundleDir <zuin-* 舊版解壓目錄> -BundleDir <0c-* 新版解壓目錄> -ResultDir <新目錄>`：以舊版工具安裝舊版、確認舊工具安全拒絕新包、以新工具升級（舊 DLL 取消註冊、舊版目錄保留、TSF profile 仍在）、以隔離管道核對新 server 同時服務新舊名稱且不與執行中的舊 server 並存，再回復到舊版並回到新版；`finally` 還原原註冊與收據並核對個人詞庫。執行前須結束日常引擎與候選窗。
 - `test/settings-test.ps1 -Setup <新版EXE>`（#47 設定程式）：在**沒有任何安裝**的測試機以靜默模式安裝新版，驗證收據記錄的設定程式雜湊、開始功能表「靈犀注音設定（0c）」（以 conhost --headless 執行穩定的 0c-update、圖示檔與標記檔）、`0c-update open-settings`（只有一個行程）、從捷徑與 TSF 輸入指示器選單的第一項「設定…」（經 menu-probe，由 `0c-ui` 轉給 0c-update）啟動、選單第二項是「我的詞彙…」且選了開到「我的詞彙」頁（#125）、設定程式被改一個位元組時拒絕並說明，再解除安裝並確認捷徑與標記檔一併移除；視窗以 PrintWindow 只擷取設定程式自己的視窗。測試前備份更新狀態檔，結束時逐位元組還原，新增的版本目錄、備份與穩定副本一併移除並回報是否完全還原。已有 EXE 安裝、收據或引擎指標時拒絕執行。

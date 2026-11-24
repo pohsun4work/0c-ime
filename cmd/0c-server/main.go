@@ -17,7 +17,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -277,10 +276,8 @@ func main() {
 	}
 
 	var listeners []net.Listener
-	var stopping atomic.Bool // 已決定結束（closeAll）：不再提醒或交接
 	stopAPI, apiInfo := func() {}, func() map[string]string { return map[string]string{"api_state": "off"} }
 	closeAll := func() {
-		stopping.Store(true)
 		stopAPI() // 交接時先放開 API 的埠，新引擎接手
 		for _, l := range listeners {
 			l.Close()
@@ -362,16 +359,16 @@ func main() {
 		"preview_0_2": fmt.Sprint(eng.Preview02), "vocab_state": vocabState,
 		// #123：外殼據此決定要不要把組字中的 Shift＋←／→、候選窗的 Shift＋Delete／⌫ 送給引擎。
 		"vocab_keys": fmt.Sprint(eng.Preview02 && vocabDisabled == ""),
-		// #183：沒在組字時引擎會處理的可見 ASCII 按鍵；Windows 外殼的 TestKeyDown 依此決定。
+		// #183：沒在組字時引擎會處理的可見 ASCII 按鍵（半形全形相同）；Windows 外殼的 TestKeyDown 依此決定。
 		"idle_keys": eng.IdleKeys(),
-		// #278：全形（Shift＋空白）時沒在組字引擎會處理的可見 ASCII 按鍵（@ # * + 等打全形）。外殼在快照的 full_width
-		// 為 true 時照這一項。
-		"idle_keys_full_width": eng.IdleKeysFullWidth(),
 		// #231：引擎認得的 Ctrl＋標點鍵；外殼送 Ctrl+: ( ) 前要看到這一項列了那個字元。
-		"ctrl_punctuation_keys": proto.CtrlPunctKeys}
+		"ctrl_punctuation_keys": proto.CtrlPunctKeys,
+		// 更新後已開著的程式還是 P4.5 以前的 DLL，它照舊鍵名判斷：Ctrl＋標點要 ctrl_punctuation=true，Shift＋空白看
+		// input_style_shift_space。
+		"ctrl_punctuation": "true", "input_style_shift_space": config.ShiftSpace}
 	// 啟動時載入的設定：外殼讀其中幾項（中英切換鍵、Shift＋空白、開始時的模式…），0c-update 拿它跟設定檔比較。
 	maps.Copy(srv.Info, config.HealthInfo())
-	// #181：模型從哪裡來（bundled：安裝包內建；user：個人目錄），推論用哪個 Python（bundled、system、custom、missing）。
+	// #181：模型從哪裡來（bundled：安裝包內建；user：個人目錄），推論用哪個 Python（bundled、custom、missing）。
 	srv.Info["neural_python"] = pythonSource
 	if selectionSource != "" {
 		srv.Info["selection_source"] = selectionSource

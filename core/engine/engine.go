@@ -58,7 +58,7 @@ type Engine struct {
 	sharedEnglish bool              // SharedMode 時大家共用的模式
 	modeGen       uint64            // sharedEnglish 每次改變時加一
 	modeSeen      map[uint64]uint64 // session → 它跟上的 modeGen
-	modeLocal     map[uint64]bool   // 「設成英文」帶來、只屬於這個輸入框的英文（macOS 的 Caps Lock）；設成中文或切換時結束
+	modeLocal     map[uint64]bool   // 「設成英文」帶來、只屬於這個輸入框的英文；設成中文或切換時結束
 
 	learnedUndo []learnedUndo // 「靈犀學到的」頁最近幾次移除、不再學、恢復學習的復原複本（learned.go），只在記憶體
 	undoSerial  uint64
@@ -74,10 +74,6 @@ func New(lex lexicon.Source, sys lm.System) *Engine {
 // IdleKeys 回報沒在組字、注音模式時輸入法會處理的可見 ASCII 按鍵（session.IdleKeys）。
 // 給自己過濾閒置按鍵的外殼（Windows 的 TestKeyDown）查詢。
 func (e *Engine) IdleKeys() string { return session.IdleKeys() }
-
-// IdleKeysFullWidth 回報全形（Shift＋空白，#278）時沒在組字、注音模式會處理的可見 ASCII 按鍵（session.FullWidthIdleKeys）。
-// Windows 外殼的 TestKeyDown 在快照的 full_width 為 true 時照這份決定。
-func (e *Engine) IdleKeysFullWidth() string { return session.FullWidthIdleKeys() }
 
 func (e *Engine) OpenSession() uint64 {
 	e.mu.Lock()
@@ -206,13 +202,9 @@ func (e *Engine) Do(id uint64, req proto.Request) (proto.Snapshot, error) {
 	if !e.SharedMode {
 		return s.Handle(req), nil
 	}
-	// 全部共用（#115）：只有使用者的切換（Toggle）改變共用的模式。外殼的「設成中文」（Fcitx5／IBus 換輸入框時的
-	// 重設、macOS 關掉 Caps Lock）改成回到共用的模式；「設成英文」（macOS 開 Caps Lock）只影響這個輸入框。
-	// Windows／Linux 的 caps_lock（#173）同理：開啟只影響這個輸入框，關閉回到共用的模式。
-	// 舊外殼不必改。
+	// 全部共用（#115）：只有使用者的切換（Toggle）改變共用的模式。外殼的「設成中文」改成回到共用的模式，
+	// 「設成英文」只影響這個輸入框，期間不跟上別的輸入框切回的注音。
 	e.initShared()
-	// 暫時的英文（Caps Lock 開著：#173 的 caps_lock、macOS 的「設成英文」）期間不跟上別的輸入框切回的注音，
-	// 不然 Caps Lock 還開著，下一個字母就打成注音；關掉 Caps Lock 時才回到共用的模式（下面與「設成中文」）。
 	// 共用的模式已經是英文時的「設成英文」（Windows 重開 session 還原共用的英文）不算暫時的，照常跟上。
 	temporary := !e.sharedEnglish && e.modeLocal[id]
 	switch {

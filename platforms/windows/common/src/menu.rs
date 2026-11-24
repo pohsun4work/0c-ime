@@ -137,7 +137,7 @@ pub fn model_fallback(s: &UpdateStatus) -> bool {
     s.selection_state == "fallback" || s.punctuation_state == "fallback"
 }
 
-/// 選單第一列：目前版本或待辦（與 Linux 選單相同）。
+/// 選單第一列：目前版本或待辦。
 pub fn status_label(s: &UpdateStatus) -> String {
     if !s.ok {
         return "靈犀注音：無法讀取更新狀態".into();

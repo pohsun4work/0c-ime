@@ -1,5 +1,5 @@
 //! 一個輸入欄位在 0c-server 上的 session：請求、重連後的重播、快照的解讀。
-//! 與 Fcitx 5 外殼的 session.cpp 對應；不依賴 TSF，可單獨測試。
+//! 不依賴 TSF，可單獨測試。
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -268,18 +268,16 @@ impl Session {
             && self.client.connected()
             && self.idle_generation == self.client.generation()
             && self.client.alive();
-        // 字寬是 session 的狀態（Shift＋空白，#278），跟著最近一次快照；換欄位清掉 english_state 時引擎也開新的半形 session。
-        let full_width = self.english_state.full_width;
         if !fresh {
             match self.client.call(&json!({"op": "health"})).filter(|r| r["ok"] == true) {
                 Some(reply) => {
                     self.idle_info = Some(reply["info"].clone());
                     self.idle_generation = self.client.generation();
                 }
-                None => return idle_key_from(self.idle_info.as_ref().unwrap_or(&Value::Null), key, full_width),
+                None => return idle_key_from(self.idle_info.as_ref().unwrap_or(&Value::Null), key),
             }
         }
-        self.idle_info.as_ref().is_some_and(|info| idle_key_from(info, key, full_width))
+        self.idle_info.as_ref().is_some_and(|info| idle_key_from(info, key))
     }
 
     /// 引擎是否認得 Ctrl＋標點的鍵名 `key`（health 的 ctrl_punctuation_keys，#168、#231）。
@@ -748,12 +746,10 @@ mod parse_tests {
     }
 }
 
-/// 沒在組字時這個鍵要不要交給引擎，照 health 回報的 idle_keys（core/session.IdleKeys，測試逐鍵比對實際處理結果）；
-/// 全形（`full_width`，Shift＋空白，#278）時照 idle_keys_full_width（core/session.FullWidthIdleKeys），@ # * + 等也打全形。
-/// 從沒問到過引擎（`info` 是 Null）時照 keys::starts_composition 的固定集合。
-fn idle_key_from(info: &Value, key: &str, full_width: bool) -> bool {
-    let reported = if full_width { &info["idle_keys_full_width"] } else { &info["idle_keys"] };
-    match reported.as_str() {
+/// 沒在組字時這個鍵要不要交給引擎，照 health 回報的 idle_keys（core/session.IdleKeys，半形全形相同，測試逐鍵比對
+/// 實際處理結果）。從沒問到過引擎（`info` 是 Null）時照 keys::starts_composition 的固定集合。
+fn idle_key_from(info: &Value, key: &str) -> bool {
+    match info["idle_keys"].as_str() {
         Some(keys) => key.chars().count() == 1 && keys.contains(key),
         None => crate::keys::starts_composition(key),
     }
@@ -764,29 +760,16 @@ mod idle_key_tests {
     use super::*;
 
     #[test]
-    fn full_width_idle_keys_follow_the_engine_report() {
-        // #278：客戶的設定（標準排列、Shift＋空白切全形）。半形時 @ # * + 交還宿主，全形時由引擎打成全形。
-        let info = json!({
-            "idle_keys": "!\"&'(),-./0123456789:;<=>?[\\]^_`abcdefghijklmnopqrstuvwxyz{}~",
-            "idle_keys_full_width": "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
-        });
-        for key in ["@", "#", "$", "%", "*", "+", "|", "A"] {
-            assert!(!idle_key_from(&info, key, false), "半形 {key}");
-            assert!(idle_key_from(&info, key, true), "全形 {key}");
-        }
-        for key in ["j", "3", ",", "["] {
-            assert!(idle_key_from(&info, key, false) && idle_key_from(&info, key, true), "{key}");
-        }
-        assert!(!idle_key_from(&info, "KP1", true), "數字鍵盤不在清單，由 wants_key 看字寬");
-        // 引擎的全形清單沒列的鍵（例如以後的排列把某個可見字元當一聲）全形時照樣交還宿主，不能吃了又不處理。
-        let partial = json!({"idle_keys": "abc", "idle_keys_full_width": "abc@"});
-        assert!(idle_key_from(&partial, "@", true));
-        assert!(!idle_key_from(&partial, "#", true));
-        // 從沒問到過引擎：可見 ASCII 都交給引擎，數字鍵盤照舊由 wants_key 看字寬。
+    fn idle_keys_follow_the_engine_report() {
+        let partial = json!({"idle_keys": "abc@"});
+        assert!(idle_key_from(&partial, "@"));
+        assert!(!idle_key_from(&partial, "#"), "引擎沒列的鍵交還宿主，不能吃了又不處理");
+        assert!(!idle_key_from(&partial, "KP1"), "數字鍵盤不在清單，由 wants_key 看字寬");
+        // 從沒問到過引擎：可見 ASCII 都交給引擎。
         for key in ["a", ",", "@", "3"] {
-            assert!(idle_key_from(&Value::Null, key, false) && idle_key_from(&Value::Null, key, true), "{key}");
+            assert!(idle_key_from(&Value::Null, key), "{key}");
         }
-        assert!(!idle_key_from(&Value::Null, "KP1", false));
+        assert!(!idle_key_from(&Value::Null, "KP1"));
     }
 }
 
@@ -939,7 +922,7 @@ mod tests {
 
     // #278：Shift＋空白切全形後，TestKeyDown 的預檢（idle_key、full_width_keypad）要跟引擎實際的處理一致：
     // 說要吃卻回未處理，WPF 會掉鍵；說不吃，@ # * 就交給應用程式打成半形。ZUIN_TEST_FULL_WIDTH_PIPE 是
-    // settings.json 有 style-shift-space=fullwidth 的獨立引擎（例如「我的原有設定」改 Shift＋空白切換全半形）。
+    // settings.json 有 shift_space=fullwidth 的獨立引擎。
     #[test]
     fn full_width_preflight_matches_the_engine() {
         let Ok(pipe) = std::env::var("ZUIN_TEST_FULL_WIDTH_PIPE") else {
@@ -1194,7 +1177,7 @@ mod tests {
         let mut s = Session::with_client(Client::with_pipe(&server.name));
         assert!(s.idle_key("a"), "從沒問到過：字母交給引擎（同 0.2.4）");
         assert!(s.client.restart_pending(), "引擎回了「引擎正在切換」");
-        // 上一次在舊連線上問到的答案（許氏：數字交還宿主、字母交給引擎）照樣適用，不因交接把數字也吃掉。
+        // 上一次在舊連線上問到的答案（這裡沒列數字與 q）照樣適用，不因交接把沒列的鍵也吃掉。
         s.idle_info = Some(json!({"idle_keys": "!\"&'(),.:;<=>?[\\]^_`abcdefghijklmnoprstuvwxyz{}~"}));
         assert!(s.idle_key("a") && s.idle_key("j"));
         assert!(!s.idle_key("1") && !s.idle_key("q"));

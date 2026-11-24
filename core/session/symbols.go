@@ -1,12 +1,12 @@
 package session
 
 import (
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/suggest"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
@@ -187,13 +187,13 @@ func (s *Session) insertPairedBracket(k string) bool {
 // insertPunctKey 在游標處插入標點鍵 k 打出的全形標點 p。中英混打時 Shift＋, Shift＋. 的「，」「。」記下原按鍵，
 // ↓ 第二項是半形 < >（#190）：混打的注音鍵、數字鍵出字後 ↓ 第二項都是原按鍵（#162、#175、#187），這兩個鍵比照辦理，
 // 不切英文也打得出大於、小於。只限這兩個鍵在混打下；一般注音模式與其他標點維持全形（#177），Ctrl＋標點（#168）也不附。
-// 混打的閉括號跟著配對的開括號（#232，insertPairedBracket）。設定「Shift＋符號打半形」開著時 Shift 符號打半形的 k（#258）。
+// 混打的閉括號跟著配對的開括號（#232，insertPairedBracket）。
 func (s *Session) insertPunctKey(k, p string) {
 	if s.insertPairedBracket(k) {
 		return
 	}
 	s.insertLiteral(p)
-	if s.mixedInput() && (k == "<" || k == ">") || s.halfwidthAlternative(k, p) {
+	if s.mixedInput() && (k == "<" || k == ">") {
 		s.setLiteralKey(s.cursor-1, k)
 	}
 }

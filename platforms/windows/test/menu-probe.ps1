@@ -128,14 +128,13 @@ if(`$menu){ [W.U]::PostMessage([IntPtr]`$menu.Current.NativeWindowHandle, 0x0100
             $b = [Windows.Forms.Screen]::PrimaryScreen.Bounds; $m = New-Object Drawing.Bitmap $b.Width, $b.Height
             [Drawing.Graphics]::FromImage($m).CopyFromScreen($b.Location, [Drawing.Point]::Empty, $b.Size); $m.Save($Out + '.select.png')
         }
-        # 「輸出簡體字」等會改變指示器的項目（#169）：選了之後的字與說明。
         $result.text_after_select = [MenuProbe]::Text()
         $result.tooltip_after_select = [MenuProbe]::Tooltip()
         $result.menu_after_select = @([MenuProbe]::Items())
     }
     if ($ThenSet) {
-        # 像設定程式一樣在別的行程改設定（例如 -ThenSet 'output-simplified off'），這個視窗沒有按鍵、沒換焦點，
-        # 再開一次選單：勾選與指示器要跟上（#169）。
+        # 像設定程式一樣在別的行程改設定（例如 -ThenSet 'document-context off'），這個視窗沒有按鍵、沒換焦點，
+        # 再開一次選單：勾選要跟上（#169）。
         $updater = Join-Path $env:LOCALAPPDATA 'Zuin\bin\0c-update.exe'
         $p = Start-Process $updater -ArgumentList (@('set') + ($ThenSet -split ' ') + @('-apply')) -PassThru -WindowStyle Hidden; $p.WaitForExit()
         Pump 500

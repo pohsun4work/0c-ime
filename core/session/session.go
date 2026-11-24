@@ -459,7 +459,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 	return snap
 }
 
-// View 回傳目前的畫面，不改任何狀態（不算一次操作、Revision 不變）。給不屬於組字的全域切換用（#169 輸出簡體字）。
+// View 回傳目前的畫面，不改任何狀態（不算一次操作、Revision 不變）。
 func (s *Session) View() proto.Snapshot {
 	snap := s.snapshot()
 	snap.Handled = true
@@ -478,7 +478,7 @@ func (s *Session) status(snap *proto.Snapshot) {
 	}
 }
 
-// setMode 切換中英模式（單按 Shift、外殼設定模式、Caps Lock）。切到英文清掉未打完的注音（#90），已組好的字與游標保留；
+// setMode 切換中英模式（單按 Shift、外殼設定模式）。切到英文清掉未打完的注音（#90），已組好的字與游標保留；
 // 切換本身也關閉候選。restore 是外殼確認中間沒有任何操作就立即切回注音：把剛清掉的注音放回原處（防誤觸）。
 func (s *Session) setMode(english, restore bool, stash *pendingStash) {
 	if english && !s.english {
@@ -843,8 +843,7 @@ func (s *Session) ctrlPunct(p string) bool {
 	return true
 }
 
-// pressKey 依鍵盤排列解讀注音鍵（#183）：許氏同一鍵依目前的注音暫存代表不同符號，所以先接回暫存的注音再解讀。
-// 一般符號由排列加進暫存；聲調鍵（含空白的一聲）照 symbol 完成音節，暫存是空的時候回傳 false（落單的聲調鍵，#135）。
+// pressKey 照標準排列解讀注音鍵：一般符號加進暫存；聲調鍵（含空白的一聲）照 symbol 完成音節，暫存是空的時候回傳 false（落單的聲調鍵，#135）。
 func (s *Session) pressKey(key rune) bool {
 	s.restorePendingLiteral()
 	next, sym, ok := layout.Standard.Press(s.comp, key)
@@ -859,7 +858,6 @@ func (s *Session) pressKey(key rune) bool {
 		if s.comp.Empty() {
 			return false
 		}
-		s.comp = next // 許氏的收尾修正：只打 ㄇ 就按聲調是 ㄢ
 		return s.symbol(sym)
 	}
 	s.comp = next
@@ -1000,7 +998,7 @@ func (s *Session) backspace() bool {
 	}
 	s.restorePendingLiteral()
 	if !s.comp.Empty() {
-		s.comp = layout.Standard.Backspace(s.comp) // 許氏退掉最後一鍵，那一鍵順便改掉的聲母一起還原（#183）
+		s.comp = layout.Standard.Backspace(s.comp)
 		return true
 	}
 	if s.cursor == 0 {
@@ -1696,7 +1694,7 @@ func (s *Session) accept() bool {
 }
 
 // commitComposed 是外殼替使用者結束組字（commit 請求：失焦、切到別的輸入法、App 結束組字、交給 App 的快捷鍵）
-// 與開 Caps Lock 切英文時的送出：已組好的字照常送出，未打完的注音丟掉，不當成文字留在文件裡（#322，
+// 的送出：已組好的字照常送出，未打完的注音丟掉，不當成文字留在文件裡（#322，
 // 同單按 Shift 切英文的 #90）。聲調選填時已是完整音節的注音照解碼送出（#150）；中英混打顯示成英文的暫存按鍵照畫面送出。
 // 使用者自己按 Enter 仍照畫面原樣送出（commit）。
 func (s *Session) commitComposed() string {
@@ -1738,7 +1736,7 @@ func (s *Session) commit() string {
 	if learn && len(ev.Path) > 0 {
 		s.lastLearn = s.model.Undoable(func() { s.model.Learn(ev) })
 	}
-	// 英文學習跟著混打或英文模式自動補字走（#247）：許氏、倚天、聲調選填不支援混打，英文模式一樣要學得到。
+	// 英文學習跟著混打或英文模式自動補字走（#247）。
 	if (s.mixedInput() || s.EnglishAutocomplete) && learn && !s.localBlocked {
 		s.model.LearnEnglish(s.contextualEnglish())
 	}
@@ -1820,16 +1818,6 @@ func (s *Session) snapshot() proto.Snapshot {
 		pending = s.ninePendingText() // 九宮格：目前最可能的拼法
 	}
 	split := pending != ""
-	// commitComposed 不照畫面送出的未打完注音（#322）：見 proto.Segment.Unfinished。
-	unfinished := false
-	switch {
-	case s.ninePending():
-		unfinished = true
-	case s.mixed.raw != "":
-		_, unfinished = s.mixedPending(pending)
-	default:
-		unfinished = !s.comp.Empty()
-	}
 	// 中英混打照字面顯示、按空白會組成中文的數字按鍵（#162）：那段組字以 StyleReading 畫，另附讀音提示。
 	hintAt, hintSyl, hinted := s.mixedSpaceReading()
 	if s.mixed.raw != "" && s.fullWidth && !s.english && !hinted {
@@ -1837,13 +1825,13 @@ func (s *Session) snapshot() proto.Snapshot {
 	}
 	pendingSegments := func() []proto.Segment {
 		if !hinted {
-			return []proto.Segment{{Text: pending, Style: proto.StylePending, Unfinished: unfinished}}
+			return []proto.Segment{{Text: pending, Style: proto.StylePending}}
 		}
 		var out []proto.Segment
 		if hintAt > 0 {
-			out = append(out, proto.Segment{Text: pending[:hintAt], Style: proto.StylePending, Unfinished: unfinished})
+			out = append(out, proto.Segment{Text: pending[:hintAt], Style: proto.StylePending})
 		}
-		return append(out, proto.Segment{Text: pending[hintAt:], Style: proto.StyleReading, Unfinished: unfinished})
+		return append(out, proto.Segment{Text: pending[hintAt:], Style: proto.StyleReading})
 	}
 	for _, g := range s.path {
 		style := proto.StyleNormal

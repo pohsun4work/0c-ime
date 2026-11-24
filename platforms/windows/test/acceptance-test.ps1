@@ -5,7 +5,7 @@ param(
     # explorer、winui（#105）不在預設組：explorer 在共用的 explorer.exe 開自己的視窗，winui 需要 Windows App SDK 版的「相片」。
     # onenote（#163）不在預設組：需要已安裝並開過一次的 OneNote 桌面版，測試在結果目錄建立自己的本機筆記本。
     # excel（#189）不在預設組：需要已安裝的 Excel 桌面版，測試以 COM 開自己的空白活頁簿、不存檔。
-    # leftshift（#65）不在預設組：它自己以 0c-update set left-shift on／off -apply 重啟隔離引擎，需要 Edge 與 Chrome。
+    # leftshift（#65）不在預設組：它自己以 0c-update set toggle-key both／right -apply 重啟隔離引擎，需要 Edge 與 Chrome。
     # native32、wpf32（#112）：同一份原生 EDIT 與 WPF 測試改在 32 位元 PowerShell（SysWOW64）裡跑，宿主載入 x86\0c_tsf.dll。
     # webview2（#144）：WinForms 裡的 WebView2（新版 Teams 的視窗結構）；第一次執行從 NuGet 下載固定版本的 WebView2 SDK，
     # 離線或沒有 WebView2 執行階段時標為 skipped（列在結果裡，不算失敗）。

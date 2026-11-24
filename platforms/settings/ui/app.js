@@ -83,8 +83,7 @@
       case 'fallback': return '模型無法使用，已退回' + fallback;
       case 'disabled_by_setting': return '依設定關閉';
       case 'not_installed': return '未附模型，使用' + fallback;
-      // #181：只有 Linux 的系統安裝用系統的 python3，才提示 Debian 套件名；macOS、Windows 的推論元件內附在安裝包裡。
-      case 'runtime_missing': return '缺少推論元件' + (/^linux\//.test(state.info?.platform || '') ? '（請安裝 python3-numpy、python3-onnxruntime）' : '') + '，使用' + fallback;
+      case 'runtime_missing': return '缺少推論元件，使用' + fallback;
       case 'closed': return '已停止，使用' + fallback;
       default: return '未知（引擎未提供即時狀態）';
     }
@@ -93,11 +92,7 @@
   const MODEL_REASON = {
     missing_runtime: '（缺少系統元件：Visual C++ 執行階段）', timeout: '（模型載入逾時）', failed: '（模型程式無法啟動）',
   };
-  const updateMode = () => window.ZcUpdateMode(state.status?.mode, state.info?.platform);
-  // 由系統套件管理員更新（#181，Linux 發行版的套件）：0c-update 不檢查、不下載、不安裝，這裡也不提供這些按鈕。
-  const packageManaged = () => state.status?.updates === 'package-manager';
-  const PACKAGE_MANAGED = '由系統套件管理員更新';
-  const INSTALL_KIND = { personal: '官網安裝（家目錄）', system: '系統套件' };
+  const updateMode = () => window.ZcUpdateMode(state.status?.mode);
   const REASON = {
     rollout: '分批發布還沒輪到這台電腦', no_asset: '沒有這個平台的安裝包',
     withdrawn: '該版本已撤回', failed: '該版本在這台電腦上檢查失敗過，已暫停',
@@ -110,15 +105,6 @@
     needs_consent: '等待你確認安裝', engine_busy: '正在組字，閒置時才會更新', needs_relogin: '重新登入後生效',
     install_failed: '安裝沒有完成', health_failed: '新版檢查失敗，已回復原版',
   };
-  // 與 internal/autoupdate 的 OldShellDetail 相同：重新登入後系統仍開著更新前留下的舊版輸入法（#98）。只有 macOS 會出現。
-  const OLD_SHELL = '已安裝，但系統仍開著更新前留下的舊版輸入法；登出再登入後改用新版';
-  // 與 internal/autoupdate 的 ShellRetiringDetail 相同：macOS 新版已裝好，舊的輸入法程式等使用者離開電腦時才換（#170、#178）。
-  // 第二個是 0.2.1／0.2.2 寫進狀態檔的舊說明。
-  const SHELL_RETIRING = ['已安裝，離開電腦（螢幕鎖定或關閉）時自動換成新版，不必登出', '已安裝，停止打字後自動換成新版，不必登出'];
-  const retiringDetail = (detail) => SHELL_RETIRING.includes(detail);
-  const SHELL_RETIRING_HELP = '新版已安裝，鎖定螢幕或離開電腦時換上，不必登出；在那之前照常可以打字。';
-  const SHELL_RETIRING_NOTE = '不必登出，在那之前照常可以打字。';
-  const OLD_SHELL_HELP = '新版已安裝，但系統仍開著更新前留下的舊版輸入法。請先儲存工作，登出再登入一次就會改用新版；如果之後仍看到這則訊息，請到「問題排解」匯出狀態摘要回報。';
   const VALUE = { neural: '神經選字', statistical: '統計引擎', off: '關閉', select: '僅供選字', auto: '自動修正（實驗）', vertical: '直排', grid: '多排', before: '游標前方', after: '游標後方' };
   const ERROR = {
     read_only: '設定檔來自較新版本的靈犀注音，這個版本只能查看，不能修改。',
@@ -142,19 +128,15 @@
     }
   }
 
-  // Windows 外殼裝好不等重新登入（#253）：待完成只會是新引擎還沒接手，說明由 0c-update 照實給（ShellEngine*Detail）。
-  const isWindows = () => /^windows\//.test(state.info?.platform || '');
-  const WINDOWS_REOPEN_NOTE = '之後開啟的應用程式直接使用新版；已經開著的要重新開啟才會換成新版。';
+  // 外殼裝好不等重新登入（#253）：待完成只會是新引擎還沒接手，說明由 0c-update 照實給（ShellEngine*Detail）。
+  const REOPEN_NOTE = '之後開啟的應用程式直接使用新版；已經開著的要重新開啟才會換成新版。';
 
   function updateSummary(update) {
     if (!update) return { text: '尚無更新資訊。', tone: 'muted' };
     if (update.operation) return { text: operationText(update.operation), tone: 'warn' };
     if (update.stage === 'pending' && update.target) {
       if (update.target.kind !== 'shell') return { text: '正在確認新版引擎是否可用。', tone: 'warn' };
-      if (isWindows()) return { text: update.target.version + '：' + (update.blocked?.detail || '已安裝，正在確認新版引擎') + '。', tone: 'warn' };
-      if (update.blocked?.detail === OLD_SHELL) return { text: update.target.version + ' 已安裝，仍在使用舊版輸入法。', tone: 'warn' };
-      if (retiringDetail(update.blocked?.detail)) return { text: update.target.version + ' 已安裝，鎖定螢幕或離開電腦時換上。', tone: 'warn' };
-      return { text: update.target.version + ' 等待重新登入後生效。', tone: 'warn' };
+      return { text: update.target.version + '：' + (update.blocked?.detail || '已安裝，正在確認新版引擎') + '。', tone: 'warn' };
     }
     switch (update.state) {
       case 'never_checked': return { text: '尚未檢查更新。', tone: 'muted' };
@@ -174,7 +156,7 @@
   function applyText(apply) {
     switch (apply && apply.state) {
       case 'applied': return ['已儲存，下一個按鍵起生效。', 'ok'];
-      // 引擎沒在執行：外殼在下一個按鍵啟動引擎（macOS、Windows 由 0c-update 先叫起常駐引擎），啟動時讀新設定。
+      // 引擎沒在執行：外殼在下一個按鍵啟動引擎（由 0c-update 先叫起常駐引擎），啟動時讀新設定。
       case 'engine_not_running': return ['已儲存，下一個按鍵起生效。', 'ok'];
       case 'deferred_composing': return ['已儲存。你正在組字，完成後會在輸入法下次重新啟動時生效。', 'warn'];
       case 'timeout': return ['已儲存，但等候套用逾時，尚未生效。', 'warn'];
@@ -258,9 +240,7 @@
       if (!result.ok) toast(errorText(result.error), result.error?.code === 'in_progress' ? 'warn' : 'error');
       else if (result.update?.blocked && result.update.stage !== 'pending' && !(kind === 'download' && result.update.stage === 'prepared')) toast(result.update.blocked.detail || '更新尚未完成，請再試一次。', 'warn');
       else if (kind === 'download') toast(result.update?.operation ? '已開始下載，進度見下方。' : result.update?.stage === 'pending' ? updateSummary(result.update).text : '下載完成，可按「立即安裝」。', 'ok');
-      else toast(result.update?.stage === 'pending'
-        ? (retiringDetail(result.update.blocked?.detail) ? SHELL_RETIRING_HELP : '請先儲存工作，登出再登入以完成更新。')
-        : '更新作業已完成。', 'ok');
+      else toast(result.update?.stage === 'pending' ? updateSummary(result.update).text + REOPEN_NOTE : '更新作業已完成。', 'ok');
     } catch (error) {
       toast(String(error), 'error');
     } finally {
@@ -332,7 +312,7 @@
     const status = state.status;
     const settings = state.settings;
     // 版本、是否仍在跑舊版的判斷在 engine-state.js：核心更新後以引擎指標為準，不只看外殼的收據。
-    const engine = window.ZcEngineState(status, state.info?.platform);
+    const engine = window.ZcEngineState(status);
     root.append(h('p', { class: 'lead' }, '已安裝版本 ' + (engine.expected || '（尚無版本收據）')));
     root.append(...fileNotices(settings));
     if (settings.pending_restart) {
@@ -344,22 +324,16 @@
         h('div', { class: 'actions' }, h('button', { type: 'button', class: 'secondary', onclick: () => show(target) }, '查看「' + pageTitle(target) + '」'))));
     }
     const runtime = status.runtime || {};
-    const deferredInstall = engine.pendingDetail === '登出再登入時自動完成安裝';
-    const oldShell = engine.pendingDetail === OLD_SHELL;
-    if (oldShell) {
-      root.append(h('div', { class: 'notice' }, h('p', {}, OLD_SHELL_HELP)));
-    } else if (engine.retiring) {
-      root.append(h('div', { class: 'notice' }, h('p', {}, SHELL_RETIRING_HELP)));
-    } else if (engine.engineWaiting) {
+    if (engine.engineWaiting) {
       root.append(h('div', { class: 'notice' },
         h('p', {}, engine.runningOld ? '已安裝 ' + engine.expected + '，目前輸入引擎使用 ' + engine.running + '。' : '已安裝 ' + engine.expected + '，正在確認輸入引擎。'),
         engine.runningOld ? h('p', {}, '完成組字後，閒置時會自動換上這一版的引擎，不必登出；這段時間照常可以打字。') : null,
         h('p', {}, '已經開著的應用程式要重新開啟才會換成這一版。')));
-    } else if (engine.shellPending || engine.runningOld) {
+    } else if (engine.runningOld) {
       root.append(h('div', { class: 'notice' },
-        h('p', {}, deferredInstall ? '套件已下載，等待重新登入時安裝。' : '新版已安裝；目前執行的輸入法仍未全部切換。'),
-        engine.runningOld ? h('p', {}, '已安裝 ' + engine.expected + '，目前輸入引擎使用 ' + engine.running + '。') : null,
-        h('p', {}, engine.relogin ? '請先儲存工作，登出再登入，讓所有應用程式載入新版輸入法。' : '請先完成組字，等待輸入引擎重新啟動以載入新版。')));
+        h('p', {}, '新版已安裝；目前執行的輸入法仍未全部切換。'),
+        h('p', {}, '已安裝 ' + engine.expected + '，目前輸入引擎使用 ' + engine.running + '。'),
+        h('p', {}, '請先完成組字，等待輸入引擎重新啟動以載入新版。')));
     }
     const rows = [
       row(labelBlock('目前執行的輸入引擎'), h('div', { class: 'value' }, (ENGINE[runtime.state] || '未知') + (runtime.version ? '（' + runtime.version + '）' : ''))),
@@ -370,13 +344,12 @@
           h('button', { type: 'button', class: 'secondary', 'data-focus': 'models-card', onclick: () => show('models') }, '查看'))),
         row(labelBlock('補標點（Beta）'), h('div', { class: 'value' }, modelLabel(runtime.punctuation_state, '原文提交') + (MODEL_REASON[runtime.punctuation_reason] || ''))));
     }
-    const managed = packageManaged();
-    const summary = managed ? { text: PACKAGE_MANAGED, tone: 'muted' } : updateSummary(status.update);
+    const summary = updateSummary(status.update);
     rows.push(
       row(labelBlock('更新'), h('div', { class: 'value' },
         h('span', { class: summary.tone === 'ok' ? 'status-ok' : summary.tone === 'warn' ? 'status-warn' : 'muted' }, summary.text), ' ',
         h('button', { type: 'button', class: 'secondary', onclick: () => show('update') }, '查看'))),
-      row(labelBlock('更新方式'), h('div', { class: 'value' }, managed ? '系統套件管理員' : updateMode().label)));
+      row(labelBlock('更新方式'), h('div', { class: 'value' }, updateMode().label)));
     root.append(h('div', { class: 'card' }, ...rows));
     if (vocabEnabled()) {
       const text = vocab.overviewText();
@@ -502,25 +475,15 @@
     root.append(h('h1', {}, '更新'));
     if (problem(root)) return;
     const status = state.status;
-    if (packageManaged()) {
-      root.append(h('p', { class: 'lead' }, '目前版本 ' + (status.installed || '未知')),
-        h('div', { class: 'notice info' },
-          h('p', {}, PACKAGE_MANAGED + '。'),
-          h('p', {}, '這份靈犀注音是用系統的套件管理員（例如 apt）安裝的，更新與移除也請用套件管理員；這裡不會檢查、下載或安裝更新。')));
-      return;
-    }
     const view = status.update || {};
     const op = view.operation;
     const blocked = view.blocked || status.blocked;
     const summary = updateSummary(view);
-    root.append(h('p', { class: 'lead' }, '目前版本 ' + (window.ZcEngineState(status, state.info?.platform).expected || '未知')));
+    root.append(h('p', { class: 'lead' }, '目前版本 ' + (window.ZcEngineState(status).expected || '未知')));
     // 進行中的作業由下面的進度列顯示同一句話，狀態框就不再出現（#330）。
     if (!op) root.append(h('div', { class: 'notice' + (summary.tone === 'warn' ? '' : ' info') },
       h('p', {}, summary.text),
-      view.target && !op ? h('p', {}, view.stage === 'pending' && view.target.kind === 'shell'
-        ? (isWindows() ? WINDOWS_REOPEN_NOTE : blocked?.detail === '登出再登入時自動完成安裝' ? '套件已下載，儲存工作後登出再登入，會完成安裝。'
-          : blocked?.detail === OLD_SHELL ? OLD_SHELL_HELP : retiringDetail(blocked?.detail) ? SHELL_RETIRING_NOTE
-          : '新版已安裝；請儲存工作後登出再登入，讓應用程式載入新版輸入法。')
+      view.target && !op ? h('p', {}, view.stage === 'pending' && view.target.kind === 'shell' ? REOPEN_NOTE
         : view.stage === 'pending' ? '正在確認新版引擎是否可用。' : (view.stage === 'found' && !updateMode().background(status.paused_until) ? '可立即下載' : STAGE[view.stage] || ('進度：' + view.stage)) + '。') : null,
       blocked && !op && view.stage !== 'pending' && !(view.stage === 'found' && ['needs_relogin', 'needs_consent'].includes(blocked.reason))
         ? h('p', {}, blocked.detail || BLOCKED[blocked.reason] || '更新暫時受阻。') : null));
@@ -551,8 +514,8 @@
     facts.push(['更新方式', mode.label]);
     root.append(h('h2', {}, '詳細資訊'), h('div', { class: 'card' }, h('dl', { class: 'facts' }, ...facts.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))));
     if (mode.note) root.append(h('p', { class: 'muted', id: 'update-mode-note' }, mode.note));
-    // Windows「自動」的說明已經寫了裝好不必登出，其他方式才在這裡補。
-    const elevation = isWindows() ? '，可能要求系統管理員確認' + (/重新開啟/.test(mode.note) ? '' : '；裝好不必登出，已經開著的應用程式要重新開啟才會換成新版') : '';
+    // 「自動」的說明已經寫了裝好不必登出，其他方式才在這裡補。
+    const elevation = '，可能要求系統管理員確認' + (/重新開啟/.test(mode.note) ? '' : '；裝好不必登出，已經開著的應用程式要重新開啟才會換成新版');
     root.append(h('p', { class: 'muted' }, '「檢查更新」查詢新版；「立即下載」現在下載並核對套件。完成後可按「立即安裝」' + elevation + '。'));
   }
 
@@ -571,20 +534,9 @@
         h('p', {}, '已匯出到：'), h('p', {}, h('code', {}, state.summary)),
         h('p', {}, '寫信到 ', email(), '，附上這個檔案，並描述發生了什麼。')));
     }
-    // 同一個帳號有官網安裝與系統套件時（#181），外殼用官網安裝（使用者自己裝的通常比較新）；兩份都列出來。
-    const installs = Array.isArray(state.status?.installs) ? state.status.installs : [];
-    const active = installs.find((item) => item.active);
-    if (installs.length > 1 || active?.kind === 'system') {
-      root.append(h('h2', {}, '使用中的安裝'), h('div', { class: 'card' }, ...installs.map((item) => row(
-        h('div', {}, h('div', { class: 'label' }, INSTALL_KIND[item.kind] || item.kind),
-          h('div', { class: 'desc paths' }, '引擎 ' + item.server + '\n字典 ' + item.data)),
-        h('div', { class: 'value' }, h('span', { class: item.active ? 'status-ok' : 'muted' }, item.active ? '使用中' : '未使用（官網安裝優先）'))))));
-    }
-    // 系統套件的 0c-update 不在 PATH 上，命令列範例寫完整路徑。
-    const cli = active?.kind === 'system' && active.updater ? active.updater : '0c-update';
     root.append(h('h2', {}, '命令列'),
       h('p', { class: 'muted' }, '設定程式打不開、或你偏好終端機時，同樣的設定可以這樣查看與修改：'),
-      h('pre', { class: 'cmd' }, cli + ' settings\n' + cli + ' set punctuation off -apply'));
+      h('pre', { class: 'cmd' }, '0c-update settings\n0c-update set punctuation off -apply'));
   }
 
   function about(root) {
@@ -636,9 +588,6 @@
     else if (page !== 'vocab' && vocabActive) { vocabActive = false; vocab.setActive(false); }
     // 背景更新（每 15 秒、視窗重新取得焦點）會重建控制項。區段暫時清空時被歸零的捲動位置要還原，
     // 還原焦點也不能把畫面拉回舊控制項（#268）。
-    // 先還原捲動再還原焦點：設定 scrollTop 會先排版，新控制項這時才有 renderer。WebKit（WebKitGTK、
-    // WKWebView）的 <input> 若在還沒排版前就取得焦點，排版時會另排一個工作把它捲進畫面，
-    // 不理 preventScroll；點過的選項（radio）是 <input>。
     main.scrollTop = scroll.top;
     main.scrollLeft = scroll.left;
     if (focused) {
@@ -663,7 +612,6 @@
     const personalReset = window.ZcPersonalReset({ h, clear, invoke, toast, onDone: () => vocab.afterReset() });
     vocab = window.ZcVocab({
       h, clear, invoke, toast,
-      platform: () => (state.info && state.info.platform) || '',
       mcpPath: () => state.info && state.info.mcp_path,
       mcpPresent: () => !!(state.info && state.info.mcp_present),
       // 引擎是否在執行（status 的 runtime）；還不知道時 null。

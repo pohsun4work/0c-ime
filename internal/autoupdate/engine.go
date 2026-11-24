@@ -315,9 +315,6 @@ func Drain(ctx context.Context, dial Dialer, wait time.Duration) error {
 	}
 }
 
-// ErrNotLive：引擎不能即時切換這項設定（舊版引擎），要交接重啟才會套用。
-var ErrNotLive = errors.New("引擎不支援即時切換")
-
 // DeferSettings keeps the apply request armed until every composition finishes.
 func DeferSettings(dial Dialer) error {
 	_, err := call(dial, ipc.OpApplySettings)

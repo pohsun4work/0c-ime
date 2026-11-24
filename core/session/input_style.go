@@ -20,7 +20,7 @@ func (s *Session) insertStyleLiteral(text string) {
 	s.insertLiteral(text)
 }
 
-// fullWidthText 逐字轉全形（混打的英數整段轉：don't 的 ' 也照風格）。
+// fullWidthText 逐字轉全形（混打的英數整段轉：don't 的 ' 也轉）。
 func (s *Session) fullWidthText(text string) string {
 	if utf8.RuneCountInString(text) == 1 {
 		return s.fullWidthKey(text)
@@ -126,7 +126,6 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		}
 		return false, "", false
 	}
-	// Apple calls the backward-delete key Delete; accept both physical variants.
 	if (k == proto.KeyShiftDelete || k == proto.KeyShiftBackspace) && !s.english && s.InputStyle.ShiftDelete == "tone" {
 		if !s.comp.Empty() {
 			s.comp = layout.Standard.Backspace(s.comp)
@@ -148,6 +147,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		if !s.composing() {
 			return false, "", true
 		}
+		s.mark = nil // 跟其他按鍵一樣取消加詞標示（vocabKey 輪不到這一鍵）
 		if s.comp.Empty() {
 			d := 1
 			if k == proto.KeyBackTab {
@@ -168,7 +168,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	if len(r) != 1 || !unicode.IsPrint(r[0]) {
 		return false, "", false
 	}
-	if s.microsoftRaw(k) {
+	if microsoftRawPunctuation(k) {
 		if s.mixedKeepsPunctuation(k) {
 			return true, "", true
 		}
@@ -182,8 +182,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 			return true, "", true
 		}
 		if s.englishWord {
-			// A pending autocomplete word treats raw punctuation like the 0c
-			// style does: deliver the word, then the key (#233).
+			// A pending autocomplete word delivers the word, then the key (#233).
 			return false, "", false
 		}
 		if !s.english && !s.comp.Empty() {
@@ -286,10 +285,22 @@ func (s *Session) cycleStyleCandidate(delta int) {
 	id := ids[(max(at, 0)+delta+len(ids))%len(ids)]
 	c.cursor = id
 	s.cand, s.styleCycle = c, c
-	cursor, advance := s.cursor, s.AdvanceAfterSelect
+	start, length := c.span(id)
+	cursor, advance, before := s.cursor, s.AdvanceAfterSelect, len(s.syls)
 	s.AdvanceAfterSelect = false
 	s.selectCandidate(s.candidateID(id))
-	s.AdvanceAfterSelect, s.cursor = advance, cursor
+	s.AdvanceAfterSelect = advance
+	// 全形符號的字數不一定一樣（——／—、……／…）：之後的輪換與游標照換上去的長度。
+	grown := len(s.syls) - before
+	if c.split == 0 || id < c.split {
+		c.length += grown
+	}
+	if cursor >= start+length {
+		cursor += grown
+	} else if cursor > start {
+		cursor = min(cursor, start+length+grown)
+	}
+	s.cursor = cursor
 }
 
 // cycleChoices 列出 items[lo:hi] 裡 ↑ 輪得到的項目，以及目前顯示的那一項在其中的位置（不在其中時是 -1）。
@@ -331,6 +342,3 @@ func microsoftRawPunctuation(k string) bool {
 	}
 	return false
 }
-
-// microsoftRaw：照微軟打半形原字元的鍵。
-func (s *Session) microsoftRaw(k string) bool { return microsoftRawPunctuation(k) }

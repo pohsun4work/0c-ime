@@ -127,7 +127,7 @@ public static class WordProbe {
     Send 'su3';Send '{ESC}';Expect '' 'word_cancel'
     Send 'su3';Send '{ENTER}';Send 'su3';Send '{ENTER}';Expect '你你' 'word_consecutive_commits'
     ClearDocument
-    Send '==';Expect '=' 'word_empty_emoji_double_equals'
+    Send '==';Send '{ENTER}';Expect '==' 'word_double_equals_literal'
     ClearDocument
     # 系統的輸入法開關熱鍵 Ctrl＋Space：Word 收到熱鍵當下不給同步鎖，0.2.0 沒有切換、還清掉組字狀態（#164）。
     Send 'su3';Send '{ENTER}';Send '^{SPACE}';Send 'ab';Expect '你ab' 'word_ctrl_space_english'

@@ -1,7 +1,6 @@
 package session
 
 import (
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"math"
 	"slices"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/input"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"

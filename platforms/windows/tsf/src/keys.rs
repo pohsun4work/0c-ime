@@ -1,4 +1,4 @@
-//! 把 Windows 的按鍵事件轉成協定的 Key（與 Fcitx 5 外殼的 toKey 對應）。
+//! 把 Windows 的按鍵事件轉成協定的 Key。
 //! 排列由核心解讀：只把可見的 ASCII 交給核心；具名鍵用協定名稱；帶 Ctrl／Alt 的組合鍵交還應用程式，
 //! 只有中文模式的 Ctrl＋標點（#168，見 [`ctrl_punct`]）例外。
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -318,7 +318,7 @@ pub fn ctrl_punct_name(c: &str) -> Option<&'static str> {
     })
 }
 
-/// 引擎認得這個 Ctrl＋標點鍵名（#231）：最早的六個鍵（#168）只要引擎回報 ctrl_punctuation；Ctrl+: ( ) 要引擎的
+/// 引擎認得這個 Ctrl＋標點鍵名（#231）：最早的六個鍵（#168）一律認得；Ctrl+: ( ) 要引擎的
 /// ctrl_punctuation_keys（`engine_keys`）列了那個字元，舊引擎沒有這一項，照舊交給應用程式。
 pub fn ctrl_punct_known(key: &str, engine_keys: &str) -> bool {
     match key.strip_prefix("Ctrl+") {

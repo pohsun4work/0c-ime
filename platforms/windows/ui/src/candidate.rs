@@ -504,7 +504,7 @@ unsafe fn draw_grid(m: &UiMessage, hdc: HDC, width: i32, t: &Theme) {
             };
         let label_height = text_height(hdc, grid_font(m, t), &text, rect.right - rect.left);
         DrawTextW(hdc, &mut text, &mut rect, flags);
-        // 附註畫在候選下方、小字提示色（選取時跟候選同色），像 macOS 多排一樣在格子裡折行，不撐寬格子（#230）。
+        // 附註畫在候選下方、小字提示色（選取時跟候選同色），在格子裡折行，不撐寬格子（#230）。
         if let Some(note) = note {
             rect.top += label_height;
             let mut note = note_text(hdc, t.small, note, rect.right - rect.left);

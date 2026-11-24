@@ -1,10 +1,10 @@
 package session
 
 import (
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"slices"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )

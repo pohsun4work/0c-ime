@@ -19,9 +19,9 @@ import (
 )
 
 var (
-	simSeeds = flag.Int("sim.seeds", 10, "模擬情境數（make test-sim 跑 300）")
+	simSeeds = flag.Int("sim.seeds", 10, "模擬情境數（完整模擬跑 300）")
 	simSeed  = flag.Int64("sim.seed", 0, "只跑這個種子（重現用）")
-	simDays  = flag.Int("sim.days", 10, "每個情境的混亂期（虛擬天數；make test-sim 跑 21）")
+	simDays  = flag.Int("sim.days", 10, "每個情境的混亂期（虛擬天數；完整模擬跑 21）")
 )
 
 // crash 模擬行程在平台操作中途被殺：協調器不會存檔，下一次喚起從磁碟上的狀態繼續。

@@ -68,16 +68,10 @@ h2 { font-size: 16px; margin: 28px 0 10px; }
   padding: 13px 0; border-bottom: 1px solid var(--line);
 }
 .row:last-child { border-bottom: 0; }
-.setting-group { border-bottom: 1px solid var(--line); }
-.setting-group:last-child { border-bottom: 0; }
-.setting-group > .row { border-bottom: 0; }
-.setting-group > .suboption { padding-top: 0; padding-inline-start: 24px; }
-.suboption .label { font-size: 14px; font-weight: 500; }
 .row > :first-child { flex: 1 1 auto; min-width: 0; }
 .row > :last-child { flex: none; }
 .row .label { font-weight: 600; }
 .row .desc { color: var(--muted); font-size: 13px; }
-.row .desc.paths { white-space: pre-line; overflow-wrap: anywhere; }
 .row .value { text-align: right; }
 .muted { color: var(--muted); }
 .badge {
@@ -112,8 +106,6 @@ button:disabled { opacity: .55; cursor: default; }
 .switch[aria-checked="true"] { background: var(--accent); }
 .switch[aria-checked="true"]::after { transform: translateX(20px); }
 .switch:disabled { opacity: .5; cursor: default; }
-/* 被內建風格鎖住（#275）：淡一些，但按得到，按了直接複製成自訂再改（#318） */
-.switch.locked, fieldset.choices input.locked { opacity: .5; }
 fieldset.choices { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 fieldset.choices label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .toast {
@@ -307,15 +299,4 @@ input.port { width: 8em; }
 .model-card button.link.ext { padding: 0 4px; margin-left: -4px; text-align: left; overflow-wrap: anywhere; }
 .download-note { margin: 0 0 4px; }
 .model-actions { margin-bottom: 18px; }
-
-/* 輸入習慣：預覽整份差異後套用，內建唯讀值仍維持開關的實際狀態。 */
-.style-card { padding: 16px 18px; }
-.style-card h2 { margin: 0 0 8px; }
-.style-card h3 { font-size: 15px; margin: 18px 0 8px; }
-.style-card p { margin: 8px 0; }
-.style-select, .style-name { display: block; width: 100%; margin-top: 8px; padding: 9px 10px; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.style-summary { padding-left: 1.5em; margin: 10px 0; }
-.style-diff { list-style: none; padding: 0; margin: 0; }
-.style-diff li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 20px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.style-diff li:last-child { border-bottom: 0; }
 .side { overflow-y: auto; }

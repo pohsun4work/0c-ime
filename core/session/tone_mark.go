@@ -1,15 +1,15 @@
 package session
 
 import (
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"slices"
 	"strings"
 	"unicode"
 
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
-// 聲調符號（#135）：沒開中英混打時，注音暫存是空的、單按聲調鍵（標準排列 3 4 6 7、倚天 1 2 3 4）
+// 聲調符號（#135）：沒開中英混打時，注音暫存是空的、單按聲調鍵（3 4 6 7）
 // 再按空白，輸出這個聲調符號 ˇ ˋ ˊ ˙。
 //
 // 新酷音（libchewing zhuyin_layout/standard.rs、et.rs）讓注音暫存只放一個聲調，空白（一聲）完成後

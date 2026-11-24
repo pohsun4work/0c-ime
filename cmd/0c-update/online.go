@@ -11,7 +11,7 @@ import (
 )
 
 // installOnline 是一行安裝（#19）的後半段：讀已簽章索引、下載並核對本平台套件，完整安裝後建立
-// 自動更新排程並設定輸入法框架。已安裝相同或較新版本時不重裝，只修復排程與輸入法設定。
+// 自動更新排程並加入輸入法清單。已安裝相同或較新版本時不重裝，只修復排程與輸入法清單。
 func installOnline(feed, channel string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()

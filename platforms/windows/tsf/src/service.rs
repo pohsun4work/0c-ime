@@ -863,7 +863,7 @@ impl TextService_Impl {
 
     /// OnTestKeyDown 已經說要吃、OnKeyDown 卻沒吃成的鍵（#216）：WPF 等宿主看 TestKeyDown 的答案就不再自己處理，
     /// 不補送就整個不見。只在沒在組字的注音模式發生：引擎正在重啟（改設定套用、更新交接、當掉後）而且等到期限仍連不上，
-    /// 或新引擎以新設定不處理這個鍵（例如剛改成許氏的數字）。以沒有輸入法時會打出的字送進文件（照 Shift 與 Caps Lock）；
+    /// 或新引擎以新設定不處理這個鍵。以沒有輸入法時會打出的字送進文件（照 Shift 與 Caps Lock）；
     /// 轉不成可見字元或按著 Ctrl／Alt 時照舊交還宿主。
     fn type_literal(&self, ctx: Option<&ITfContext>, vk: u32, lparam: isize) -> bool {
         if keys::modifier_down() {
@@ -1047,7 +1047,7 @@ impl TextService_Impl {
         }
     }
 
-    /// 換欄位：把進行中的組字提交到原欄位（與 Fcitx 5 外殼的 deactivate 相同），清掉候選與這個欄位的狀態。
+    /// 換欄位：把進行中的組字提交到原欄位，清掉候選與這個欄位的狀態。
     fn leave_document(&self, previous: Option<&ITfContext>) {
         self.finish(previous, "commit");
         self.forget_candidates();
@@ -1299,7 +1299,7 @@ impl TextService_Impl {
     }
 
     fn wants_key(&self, vk: u32, lparam: isize) -> bool {
-        // Ctrl＋標點（#168）：中文模式而且引擎回報 ctrl_punctuation 時吃，組字中或沒在組字都一樣；核心插進組字區。
+        // Ctrl＋標點（#168）組字中或沒在組字都吃；核心插進組字區。
         if keys::modifier_down() && self.state.borrow_mut().ctrl_punct_key(vk, lparam).is_some() {
             return true;
         }
@@ -1338,7 +1338,6 @@ impl TextService_Impl {
         }
         keys::printable(vk, lparam, false) // 中文模式不理 Caps Lock（#168）
             .map(|key| {
-                // 排列、風格與字寬（Shift＋空白的全形，#278）都可能改變閒置時攔哪些字元；包含 Shift 字母及標點。
                 // idle_keys 依連線快取，不會每鍵往返。
                 st.session.idle_key(&key)
             })

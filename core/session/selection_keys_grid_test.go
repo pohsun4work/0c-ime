@@ -29,6 +29,17 @@ func TestSelectionKeysGridColumnsFollowKeyboardRows(t *testing.T) {
 	}
 }
 
+// 每頁 9 個（預設）時只用前 9 個鍵 1234qwera，照樣每排 4 個。
+func TestSelectionKeysGridFourColumnsWithNinePerPage(t *testing.T) {
+	s := manySession("1234qweras")
+	s.CandidateColumns = 5
+	s.InputStyle.CandidatePageSize = 9
+	typeSyl(s, "ㄕˋ")
+	if snap := key(s, proto.KeyDown); snap.Candidates == nil || snap.Candidates.Columns != 4 || itemKeys(snap) != "1234qwera" {
+		t.Fatalf("每頁 9 個：%+v", snap.Candidates)
+	}
+}
+
 // 一頁照舊 10 個，排成 4／4／2；方向鍵照格子位置移動，最後一排只有 a、s。
 func TestSelectionKeysGridFourColumnsNavigation(t *testing.T) {
 	s := manySession("1234qweras")
