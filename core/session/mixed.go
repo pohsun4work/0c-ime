@@ -151,6 +151,27 @@ func (s *Session) mixedPending(text string) (zhuyin.Composer, bool) {
 	return c, !s.englishWord && ok && s.mixed.accepted == "" && text == c.String()
 }
 
+// mixedEraseAt 回傳退格要刪的待定按鍵位置。顯示成注音時跟一般注音一樣照畫面順序刪最後一個符號（#309：
+// i j 畫面 ㄨㄛ，退格剩 ㄨ），照字面顯示時刪最後按的。asTyped：這次退格才收回、畫面上還是原按鍵（mn ← → 退格剩 m）。
+func (s *Session) mixedEraseAt(asTyped bool) int {
+	raw := s.mixed.raw
+	at := len(raw) - 1
+	if asTyped {
+		return at
+	}
+	if _, phonetic := s.mixedPending(s.mixedText()); !phonetic {
+		return at
+	}
+	last := zhuyin.None
+	for i, k := range raw {
+		sym, _ := layout.Standard.Symbol(k)
+		if cl := zhuyin.ClassOf(sym); cl > last {
+			at, last = i, cl
+		}
+	}
+	return at
+}
+
 // flushMixed 讓待定按鍵照畫面定案；顯示成還沒打完的注音時照原按鍵留下（insertPendingKeys），↓ 選過注音的照注音。
 func (s *Session) flushMixed() { s.settleMixed(false) }
 

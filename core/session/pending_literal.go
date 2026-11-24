@@ -85,9 +85,10 @@ func (s *Session) shiftPendingLiterals(at, delta int) {
 func (s *Session) restorePendingLiteral() { s.restorePending(false) }
 
 // restorePending：keys 時也收回照原按鍵留下的混打待定按鍵（混打的按鍵、退格用）；英文模式、切換過字寬時不收。
-func (s *Session) restorePending(keys bool) {
+// 回報是否收回了照原按鍵留下的。
+func (s *Session) restorePending(keys bool) bool {
 	if !s.comp.Empty() || s.mixed.raw != "" {
-		return
+		return false
 	}
 	for i, p := range s.pendingLiterals {
 		if p.tone != 0 || p.end() != s.cursor || p.keys != "" && (!keys || s.english || p.fullWidth != s.fullWidth) {
@@ -97,14 +98,15 @@ func (s *Session) restorePending(keys bool) {
 		for s.cursor > p.start {
 			s.eraseBeforeCursor()
 		}
-		if p.keys != "" {
-			s.mixed.raw = p.keys
-			s.refresh() // 同一鍵可能接著定案（ji→ 再打 <），keepMixedDisplay 要拿刪掉之後的分詞
-		} else {
+		if p.keys == "" {
 			s.comp = p.composer
+			return false
 		}
-		return
+		s.mixed.raw = p.keys
+		s.refresh() // 同一鍵可能接著定案（ji→ 再打 <），keepMixedDisplay 要拿刪掉之後的分詞
+		return true
 	}
+	return false
 }
 
 // insertPendingKeys：顯示成還沒打完的注音的待定按鍵定案時（符號、數字鍵盤、移動游標，Enter 見 settleMixed）照原按鍵留下，

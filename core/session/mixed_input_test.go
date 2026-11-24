@@ -83,7 +83,7 @@ func TestPendingLiteralRestorationDoesNotUndoEdits(t *testing.T) {
 	}
 }
 
-// 撤銷英數插入後回到插入前的待定按鍵，接下來的退格跟沒按數字鍵盤時一樣（先 ㄛ 再 ㄨ，刪最後打的 ㄨ）。
+// 撤銷英數插入後回到插入前的待定按鍵，接下來的退格跟沒按數字鍵盤時一樣（先 ㄛ 再 ㄨ，畫面 ㄨㄛ，退格剩 ㄨ）。
 func TestPendingLiteralKeepsOriginalBackspaceOrder(t *testing.T) {
 	typed := func(keys ...string) string {
 		s := newSession()
@@ -95,6 +95,31 @@ func TestPendingLiteralKeepsOriginalBackspaceOrder(t *testing.T) {
 	}
 	if got, plain := typed("i", "j", "KP1", proto.KeyBackspace, proto.KeyBackspace), typed("i", "j", proto.KeyBackspace); got != plain {
 		t.Fatalf("撤銷英數插入後退格 %q，沒插入時 %q", got, plain)
+	}
+}
+
+// 混打顯示成注音的待定按鍵，退格跟一般注音一樣照畫面順序刪（#309）；照字面顯示的刪最後按的。
+func TestMixedBackspaceFollowsDisplayOrder(t *testing.T) {
+	for _, tc := range []struct {
+		keys string
+		want []string // 每按一次退格的畫面
+	}{
+		{"ij", []string{"ㄨ", ""}},
+		{"ix", []string{"ㄌ", ""}},
+		{"ulv", []string{"ㄒㄧ", "ㄒ", ""}},
+		{"hello", []string{"hell"}},
+		// 移動游標照原按鍵留下（畫面 mn），退格回到後面時刪畫面最後的 n，剩下的 m 收回成 ㄩ
+		{"mn\tLeft\t\tRight\t", []string{"ㄩ", ""}},
+	} {
+		s := newSession()
+		for _, k := range splitProbeKeys(tc.keys) {
+			key(s, k)
+		}
+		for i, want := range tc.want {
+			if got := key(s, proto.KeyBackspace).Text(); got != want {
+				t.Fatalf("%q 退格 %d 次是 %q，要 %q", tc.keys, i+1, got, want)
+			}
+		}
 	}
 }
 

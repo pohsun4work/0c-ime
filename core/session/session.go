@@ -945,13 +945,14 @@ func (s *Session) backspace() bool {
 			return true
 		}
 	}
-	s.restorePending(true)
+	asTyped := s.restorePending(true)
 	if s.mixed.raw != "" {
 		if s.mixed.accepted != "" {
 			s.mixed.accepted = ""
 		} else {
-			s.mixed.raw = s.mixed.raw[:len(s.mixed.raw)-1]
-			s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, len(s.mixed.raw))
+			at := s.mixedEraseAt(asTyped)
+			s.mixed.raw = s.mixed.raw[:at] + s.mixed.raw[at+1:]
+			s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, at)
 			if s.mixed.raw == "" {
 				s.clearMixed()
 			}
