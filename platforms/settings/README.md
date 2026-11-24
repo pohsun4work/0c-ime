@@ -10,9 +10,8 @@
 | `src/main.rs` | 指令白名單、視窗、單一實例 |
 | `src/watch.rs` | 「我的詞彙」的即時同步：常駐 `0c-update vocab watch`、轉成 `vocab-changed` 事件、意外結束時重新連上 |
 | `ui/` | `index.html`、`app.css`、`app.js`；設定項目依契約動態產生。`vocab.js` 是「我的詞彙」頁，`models.js` 是「模型」頁，`personal-reset.js` 是「我的詞彙」頁「靈犀學到的」底下的「清除學習紀錄」，`input-styles.js` 是「輸入習慣」頁，`update-mode.js` 是更新方式的顯示名稱與說明 |
-| `test/` | `smoke.sh`（容器 Xvfb 冒煙測試）、`vocab.sh`（我的詞彙）、`models.sh`（模型）、`styles.sh`（輸入習慣）、`scroll.sh`（背景更新保留捲動位置，#268）、`personal.sh`（清除學習紀錄，#301）、`fake-update.py`（測試用的 0c-update 替身，只模擬 vocab、api 與 models）、`*_test.js`（`node --test`，不碰畫面的判斷）、`scroll_position_test.py`（Playwright 在 Chromium 與 WebKit 跑真的頁面，各缺一個就跳過） |
+| `test/` | `*_test.js`（`node --test`，不碰畫面的判斷）、`scroll_position_test.py`（Playwright 在 Chromium 跑真的頁面，背景更新保留捲動位置，#268；沒有 Chromium 就跳過）、`settings-update-test.ps1`（更新視窗驗收） |
 | `build.rs`、`capabilities/main.json` | 只有 `build.rs` 列出的指令能被前端呼叫，capability 只授權這些指令與事件監聽 |
-| `tauri.linux.conf.json` | Linux 的 identifier 改為 `com.biggo.zc.settings`：外掛用它組 D-Bus 服務名，而服務名的每一段不能以數字開頭，`com.biggo.0c.settings` 會讓程式一啟動就 panic。macOS 與 Windows 維持 `com.biggo.0c.settings` |
 | `tauri.conf.json` | CSP：`default-src 'none'; script-src 'self'; style-src 'self'`；不載入任何遠端內容 |
 
 ## 輸入習慣（#225）
@@ -21,7 +20,7 @@
 
 「複製成自訂」輸入名稱後呼叫 `profile copy`，建立並啟用副本，相關設定恢復可編輯。自訂可重新命名，非使用中的自訂可確認後刪除。中文名稱組字期間背景更新不重建輸入框；後端回報 pending 時提示完成目前輸入後套用。
 
-Rust 的 `profile_command(action,id,name)` 只允許 `select`、`copy`、`rename`、`delete`；名稱作為單一參數交給 `0c-update profile`，select／copy 固定附 `-apply`。實際驗證、持久化及引擎交接由 Go 負責。`test/input_styles_test.js` 驗證預覽與提交、唯讀值、命名管理及失敗恢復；`test/styles.sh` 在真正 WebView 操作後核對 Go 契約。
+Rust 的 `profile_command(action,id,name)` 只允許 `select`、`copy`、`rename`、`delete`；名稱作為單一參數交給 `0c-update profile`，select／copy 固定附 `-apply`。實際驗證、持久化及引擎交接由 Go 負責。`test/input_styles_test.js` 驗證預覽與提交、唯讀值、命名管理及失敗恢復。
 
 ## 中英切換、選字、鍵盤與符號（輸入設定，#207）
 
@@ -52,9 +51,7 @@ Emoji 選單以一個開關控制（`emoji-shortcut`：off／equals），預設�
 - 引擎沒有執行時只能查看：新增列停用、刪除與復原鈕藏起來，頁首說明。
 - 這一頁的 DOM 只建一次，新增列與搜尋框在頁面存在期間不重建（組字中重建會打斷輸入法）；各區塊重畫時以 `data-k` 找回原本的鍵盤焦點，刪除後焦點交給底部提示的「復原」。
 
-`0c-mcp` 三平台的套件都內附，放在不隨版本變動的位置：Linux `~/.local/bin/0c-mcp`、Windows `%LOCALAPPDATA%\Zuin\bin\0c-mcp.exe`（版本目錄那份的穩定副本）、macOS 輸入法 App 的 `Contents/MacOS/0c-mcp`。那個位置沒有檔案（較舊的版本）時範例下方註明「這個版本還沒附 0c-mcp」。
-
-UI 測試：`python3 scripts/test_settings_ui.py --settings <輸出>/0c-settings [--only vocab]`。前半用 `test/fake-update.py` 模擬詞彙與 AI 助手的回應（其他命令轉給真的 `0c-update`；`--init … old` 模擬沒有 `features.vocab` 的舊版，入口要藏起來），檢查畫面送出的指令與結果；後半用真的 `0c-update`＋`0c-server`（`testdata/toy`）從畫面加詞、命令列以 AI 助手身分加詞後畫面跟上，以及強制結束設定程式後 watch 跟著結束。
+`0c-mcp` 隨套件內附，放在不隨版本變動的位置 `%LOCALAPPDATA%\Zuin\bin\0c-mcp.exe`（版本目錄那份的穩定副本）。那個位置沒有檔案（較舊的版本）時範例下方註明「這個版本還沒附 0c-mcp」。
 
 ## 模型（#180）
 
@@ -69,9 +66,7 @@ UI 測試：`python3 scripts/test_settings_ui.py --settings <輸出>/0c-settings
 | 指令 | 參數 | 說明 |
 |---|---|---|
 | `models_command` | `action`：`status`／`download`／`cancel`／`remove` | 對應 `0c-update models <action> -json`，結果原樣回傳；status 逾時 20 秒，其他 60 秒（download 在背景開始、立刻回傳） |
-| `open_url` | `url` | 交給系統瀏覽器（Linux `xdg-open`、macOS `open`、Windows `rundll32 url.dll,FileProtocolHandler`）；只放行 `https://huggingface.co/` 開頭、路徑只有英數與 `/._-` 的網址。設定視窗本身照舊不離開本機頁面 |
-
-UI 測試：`python3 scripts/test_settings_ui.py --settings <輸出>/0c-settings [--only models]`，`fake-update.py --models` 依契約模擬內建、未安裝、下載中、已安裝、需要重新下載、缺推論元件、發行版關閉下載、字典不在配對清單上；外部網址交給 PATH 上假的 `xdg-open` 記下來。
+| `open_url` | `url` | 交給系統瀏覽器（`rundll32 url.dll,FileProtocolHandler`）；只放行 `https://huggingface.co/` 開頭、路徑只有英數與 `/._-` 的網址。設定視窗本身照舊不離開本機頁面 |
 
 ## 清除學習紀錄（#301）
 
@@ -79,33 +74,17 @@ UI 測試：`python3 scripts/test_settings_ui.py --settings <輸出>/0c-settings
 
 「我的詞彙」的 DOM 只建一次，這張卡放在清單旁的固定容器（`vocab.js` 的 `el.reset`），由 `personal-reset.js` 自己重畫：清單重新整理時確認不會被收掉，清單重畫保留焦點（`data-k`）也認得這幾個按鈕。
 
-UI 測試：`python3 scripts/test_settings_ui.py --settings <輸出>/0c-settings --only personal`，用真的 `0c-update` 與 `0c-server`（`testdata/toy`），設定程式呼叫的 `0c-update` 外面包一層記錄參數：「選字」頁沒有這張卡；取消不動作；引擎沒在跑時刪掉 `user.json` 與 Linux／Windows 形式的備份、`vocab.json` 保留；引擎在跑時 `user.json` 立刻變成空白的個人資料、引擎不結束，之後 SIGTERM 結束也不寫回；清除後畫面重讀 `learned`，學到的詞與「不再學的詞（1）」入口消失（分頁標籤的下一個控制項就是「清除…」，再清一次不會按到任何一列）。`test/personal_reset_test.js` 驗證確認文案、結果提示，以及只有成功時才通知「靈犀學到的」重讀。
+`test/personal_reset_test.js` 驗證確認文案、結果提示，以及只有成功時才通知「靈犀學到的」重讀。
 
 ## 建置
 
-Linux（容器）與 macOS（在 Apple Silicon 的 Mac 上）各有建置腳本，打包機不需要 Rust：
-
-在容器裡建置（Ubuntu 22.04、固定 Rust 版本），打包機不需要 Rust：
-
-```sh
-python3 scripts/build_settings_linux.py --version <版本> --test
-```
-
-輸出在 `build/settings/linux-<arch>/`：`0c-settings`（約 3–4 MB）與 `NOTICES.txt`。macOS：
-
-```sh
-python3 scripts/build_settings_macos.py --version <版本> --test    # 在 Apple Silicon 的 Mac 上
-```
-
-把 Rust 裝在 `--out` 旁的快取（rustup 以 `--no-modify-path` 安裝，不改任何 shell 設定檔），輸出 `build/settings/macos-arm64/0c-settings.app`（ad-hoc 簽章）與 `NOTICES.txt`；`scripts/package_macos.py --settings` 把 App 放進 `0c.app/Contents/Helpers/`，先以 bundle 簽章再簽外層並公證。直接用 `cargo build` 時**必須**加 `--features tauri/custom-protocol`，否則會編成開發模式並嘗試載入 `devUrl`。`Cargo.lock` 納入版本控制，建置一律 `--locked`。
-
-Windows（在 Windows x64 建置機上，用機器上已安裝的 MSVC 工具鏈 Rust，需要 1.90 以上；不安裝或修改工具鏈）：
+在 Windows x64 建置機上，用機器上已安裝的 MSVC 工具鏈 Rust（需要 1.90 以上；不安裝或修改工具鏈）：
 
 ```powershell
 python scripts\build_settings_windows.py --version <版本> --test
 ```
 
-輸出 `build\settings\windows-amd64\0c-settings.exe`（未簽章，約 3 MB）與 `NOTICES.txt`；`scripts/package_windows.py --settings` 把它放進套件、以版本資訊資源取代 Tauri 寫的那一份、與其他執行檔一起簽章。需要 `icons/icon.ico`（`tauri-build` 在 Windows 上要它產生資源檔）。
+輸出 `build\settings\windows-amd64\0c-settings.exe`（未簽章，約 3 MB）與 `NOTICES.txt`；`scripts/package_windows.py --settings` 把它放進套件、以版本資訊資源取代 Tauri 寫的那一份、與其他執行檔一起簽章。需要 `icons/icon.ico`（`tauri-build` 在 Windows 上要它產生資源檔）。直接用 `cargo build` 時**必須**加 `--features tauri/custom-protocol`，否則會編成開發模式並嘗試載入 `devUrl`。`Cargo.lock` 納入版本控制，建置一律 `--locked`。
 
 ## 安全界線
 
@@ -116,13 +95,8 @@ python scripts\build_settings_windows.py --version <版本> --test
 
 ## 執行環境
 
-- 桌面項目的檔名：GTK 在 Wayland 上向合成器宣告的 app id 是**程式名稱** `0c-settings`（用 `WAYLAND_DEBUG=client` 在 GNOME 50 實測 `xdg_toplevel.set_app_id("0c-settings")`），不是 Tauri 的 identifier；所以應用程式項目必須叫 `0c-settings.desktop`，GNOME 才會把視窗對到它，顯示正確的圖示與分組。
-
-- Linux 需要 WebKitGTK 4.1（`libwebkit2gtk-4.1`）與 GTK 3；缺少時載入器會在程式開始前以 exit 127 結束，所以由 `0c-update open-settings` 在啟動前偵測並說明。
-- macOS 用系統內建的 WKWebView，沒有額外相依，hardened runtime 不需要 entitlement（以 Developer ID 簽章並通過公證、在 macOS 26 執行驗證）。bundle ID 是 `com.biggo.0c.settings`，`LSMultipleInstancesProhibited` 讓重複啟動由 LaunchServices 把既有視窗帶到前面（單一實例外掛在這個情況下不會被觸發），`open` 的參數也到不了既有的行程。切頁改走 Darwin 通知（#125）：啟動時以 `notify_register_file_descriptor` 為每個頁面登記 `user.uid.<uid>.com.biggo.0c.settings.page.<頁面>`（名稱由 `updater::navigate_notification` 產生，與 Go 端 `settingsapp.NavigateNotification` 相同），`0c-update open-settings` 在 `open` 之後以 `notifyutil -p` 送出，收到就聚焦視窗並發出 `navigate` 事件（`src/navigate_mac.rs`）。`user.uid.<uid>.` 名稱空間只有同一個使用者能送，通知不帶資料，只認白名單內的頁面。
 - Windows 用 WebView2 Runtime（Windows 11 與近年的 Windows 10 內建，Evergreen 版）；缺少時由 `0c-update open-settings` 在啟動前偵測並說明。WebView2 的使用者資料夾放在 `%LOCALAPPDATA%\Zuin\settings-webview`，不另外建立以 identifier 命名的目錄。找不到 `0c-update` 時依序試 `ZC_UPDATER`、同資料夾（版本目錄）、`%LOCALAPPDATA%\Zuin\bin`（穩定副本）。匯出的狀態摘要把家目錄換成 `~`，連同 JSON 跳脫後的反斜線與正斜線寫法一起換。
-- 偵測到 NVIDIA 私有驅動（`/proc/driver/nvidia`）時自動設 `WEBKIT_DISABLE_DMABUF_RENDERER=1`，避開 Wayland 下 WebKitGTK 白畫面與 Error 71（Tauri 文件列為已知問題，不無條件關閉）。
-- 單一實例：已開著就聚焦既有視窗並切到要求的頁面；Linux 沒有 D-Bus session 時這個機制不生效，兩個實例各自執行。在 Wayland 上合成器不准程式自己置頂（沒有 xdg-activation token，在 GNOME 50 實測 `set_focus` 不會把被蓋住的視窗拉到前面），所以第二次啟動改成開新視窗再關掉舊的，新視窗會正常出現在最前面。
+- 單一實例：已開著就聚焦既有視窗並切到要求的頁面。
 
 更新頁提供檢查更新、立即下載、背景下載加速及立即安裝。下載顯示實際百分比與已收到／總大小，每秒重讀執行狀態；核對和安裝顯示處理中的進度條。總覽與關於頁分開標示已安裝版本、目前執行的引擎及設定視窗版本，Windows 新外殼已安裝但尚未重新登入時明確提示。後端命令及進度格式見 [JSON 契約實作](../../cmd/0c-update/contract.go)。
 
@@ -136,7 +110,7 @@ Windows 完整更新視窗驗收另有 `test/settings-update-test.ps1`：在沒�
 
 輸入設定的「選字鍵」（`selection-keys`，`settings.json` 的 `selection_keys`）三選一：`1234567890`（預設，舊設定檔沒有欄位時也是）、`1234qweras`、`asdfghjkl;`，不開放自訂（#112）。候選窗依序用那一排鍵選第 1–10 個字，鍵標由引擎隨候選送給外殼；換成字母鍵時數字 1–0 仍照位置選字（舊外殼、自己畫候選窗的程式只顯示數字也能選）。沒有候選窗時這些鍵照舊是注音鍵。畫在「選字」頁、選字排列之後（#207）。引擎讀設定，套用（引擎重啟）後生效。
 
-輸入設定的「修改字詞的位置」（`candidate-cursor`）可選「游標前方」／「游標後方」。macOS 未指定時採前方，Linux／Windows 採後方；舊設定缺少欄位時同樣使用平台預設，明確保存的 before／after 會保留。後方模式的游標在組字尾端時後面沒有字，改選結束在游標的詞（同前方模式），說明文字也註明這個例外。設定儲存在 `settings.json` 的 `candidate_cursor`，透過既有組字保護套用；不變更個人詞庫格式。
+輸入設定的「修改字詞的位置」（`candidate-cursor`）可選「游標前方」／「游標後方」。未指定時採後方，舊設定缺少欄位時也是；明確保存的 before／after 會保留。後方模式的游標在組字尾端時後面沒有字，改選結束在游標的詞（同前方模式），說明文字也註明這個例外。設定儲存在 `settings.json` 的 `candidate_cursor`，透過既有組字保護套用；不變更個人詞庫格式。
 
 輸入設定的「Ctrl＋標點打全形」（`ctrl-punctuation`，`settings.json` 的 `ctrl_punctuation`）預設開啟，放在「鍵盤與符號」頁、鍵盤排列之後（#207）。開啟時注音模式按 Ctrl＋, . ' ; 與 Ctrl＋Shift＋/ 1 ; 9 0 打全形的 ，。、；？！：（）（#231）；說明寫出會占用 VS Code 的 Ctrl＋, 、Ctrl＋. 、Excel 的 Ctrl＋Shift＋; 9、Konsole 的 Ctrl＋Shift＋9 0 等快速鍵，要保留時可以關掉；Windows 另寫明系統預設把 Ctrl＋Shift＋0 留給切換輸入法、這一鍵打不出「）」。關閉後這些鍵同其他快捷鍵交給應用程式（#168）。引擎讀設定，套用（引擎重啟）後生效；外殼依 health 的 `ctrl_punctuation` 決定要不要送這些鍵。
 

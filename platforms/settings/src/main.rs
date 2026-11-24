@@ -2,13 +2,13 @@
 // 0c-update 的 JSON 契約呼叫，以及管視窗。設定與更新驗證全在 Go；網路、登入與機密都不在這個程式裡。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(target_os = "macos")]
-mod navigate_mac;
 mod updater;
 mod watch;
 
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
@@ -25,18 +25,11 @@ fn open_window(app: &AppHandle, page: &'static str) -> tauri::Result<()> {
         .center()
         .on_navigation(local_origin);
     // WebView2 的使用者資料夾放在個人資料目錄內，不另外在 LOCALAPPDATA 留一個以 identifier 命名的目錄。
-    #[cfg(windows)]
-    let builder = match std::env::var_os("LOCALAPPDATA") {
-        Some(base) => builder.data_directory(PathBuf::from(base).join("Zuin").join("settings-webview")),
+    let builder = match local_app_data() {
+        Some(base) => builder.data_directory(base.join("Zuin").join("settings-webview")),
         None => builder,
     };
     builder.build().map(|_| ())
-}
-
-/// Wayland 的合成器不准程式自己把視窗拉到最前面（沒有 xdg-activation token），所以第二次啟動時
-/// 既有視窗被別的視窗蓋住就不會浮上來；但新建立的視窗會正常出現在最前面。這時改成開新視窗、關掉舊的。
-fn wayland_session() -> bool {
-    std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t == "wayland") || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 /// 把既有視窗帶到前面並切到要求的頁面（前端的 `navigate` 事件）。
@@ -50,30 +43,18 @@ fn focus_and_navigate(app: &AppHandle, page: &'static str) {
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)
+    std::env::var_os("USERPROFILE").map(PathBuf::from)
 }
 
-/// Linux 系統套件的位置（#181）：make install 依 PREFIX 在建置時設定，預設是 PREFIX=/usr 的位置。
-fn system_dir(dir: &'static str) -> Option<&'static Path> {
-    cfg!(target_os = "linux").then(|| Path::new(dir))
-}
-
-fn system_libexec() -> Option<&'static Path> {
-    system_dir(option_env!("ZC_SYSTEM_LIBEXECDIR").unwrap_or("/usr/libexec/0c"))
-}
-
-fn system_bin() -> Option<&'static Path> {
-    system_dir(option_env!("ZC_SYSTEM_BINDIR").unwrap_or("/usr/bin"))
+fn local_app_data() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
 }
 
 fn updater_path() -> Result<PathBuf, String> {
-    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
     updater::find_updater(
         std::env::var("ZC_UPDATER").ok().as_deref(),
         std::env::current_exe().ok().as_deref(),
-        home().as_deref(),
-        local_app_data.as_deref(),
-        system_libexec(),
+        local_app_data().as_deref(),
     )
 }
 
@@ -93,8 +74,7 @@ fn args(items: &[&str]) -> Vec<String> {
 
 #[tauri::command]
 fn app_info() -> Value {
-    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    let mcp = updater::planned_mcp_path(std::env::consts::OS, std::env::current_exe().ok().as_deref(), home().as_deref(), local_app_data.as_deref(), system_bin());
+    let mcp = updater::planned_mcp_path(local_app_data().as_deref());
     json!({
         "version": option_env!("ZC_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
         "platform": format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
@@ -211,41 +191,25 @@ async fn personal_command(action: String) -> Result<Value, String> {
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     let url = updater::browser_url(&url)?;
-    let mut command = browser_command(url);
-    command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    let mut child = std::process::Command::new("rundll32.exe")
+        .arg("url.dll,FileProtocolHandler")
+        .arg(url)
+        .creation_flags(updater::CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
     std::thread::spawn(move || {
-        let _ = child.wait(); // 回收子行程；xdg-open 等交出網址就結束
+        let _ = child.wait(); // 回收子行程；rundll32 交出網址就結束
     });
     Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn browser_command(url: &str) -> std::process::Command {
-    let mut command = std::process::Command::new("/usr/bin/open");
-    command.arg(url);
-    command
-}
-
-#[cfg(windows)]
-fn browser_command(url: &str) -> std::process::Command {
-    use std::os::windows::process::CommandExt;
-    let mut command = std::process::Command::new("rundll32.exe");
-    command.arg("url.dll,FileProtocolHandler").arg(url).creation_flags(0x0800_0000);
-    command
-}
-
-#[cfg(not(any(target_os = "macos", windows)))]
-fn browser_command(url: &str) -> std::process::Command {
-    let mut command = std::process::Command::new("xdg-open");
-    command.arg(url);
-    command
 }
 
 /// 把狀態摘要寫成檔案（下載資料夾，沒有就家目錄），回傳路徑。內容不含輸入內容、個人詞庫或使用者名稱。
 #[tauri::command]
 async fn export_summary() -> Result<Value, String> {
-    // -diagnostics：macOS 版本與正在執行的輸入法 App（#77）；只在匯出時收集，平常的狀態查詢不帶。
+    // -diagnostics：輸入法註冊的位置、最近用過輸入法的程式與判定（#257）；只在匯出時收集，平常的狀態查詢不帶。
     // 較舊的更新器不認得這個旗標時退回一般的狀態。
     let status = match call(args(&["status", "-json", "-diagnostics"]), 20).await {
         Ok(status) => status,
@@ -255,21 +219,10 @@ async fn export_summary() -> Result<Value, String> {
     let home = home().ok_or("找不到家目錄")?;
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let text = updater::build_summary(&status, &settings, option_env!("ZC_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")), secs, &home.to_string_lossy());
-    let dir = download_dir(&home);
+    let dir = updater::download_dir(&home);
     let path = dir.join(format!("0c-status-{}.json", updater::file_stamp(secs)));
     updater::write_private(&path, text.as_bytes()).map_err(|e| format!("無法寫入 {}：{e}", path.display()))?;
     Ok(json!({ "path": path.display().to_string() }))
-}
-
-/// 下載資料夾，沒有就家目錄；Linux 依 user-dirs.dirs（中文桌面是 ~/下載）。
-fn download_dir(home: &Path) -> PathBuf {
-    let user_dirs = if cfg!(target_os = "linux") {
-        let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".config"));
-        std::fs::read_to_string(config.join("user-dirs.dirs")).ok()
-    } else {
-        None
-    };
-    updater::download_dir(home, user_dirs.as_deref())
 }
 
 /// 「我的詞彙」匯出（#255）：前端組好的文字檔（ui/vocab-text.js）寫到下載資料夾，沒有就家目錄；
@@ -281,7 +234,7 @@ async fn export_vocab(text: String) -> Result<Value, String> {
     }
     tauri::async_runtime::spawn_blocking(move || {
         let home = home().ok_or("找不到家目錄")?;
-        let dir = download_dir(&home);
+        let dir = updater::download_dir(&home);
         let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let path = updater::write_new_file(&dir, &format!("0c-vocab-{}", updater::file_stamp(secs)), "txt", text.as_bytes())
             .map_err(|e| format!("無法寫入 {}：{e}", dir.display()))?;
@@ -300,34 +253,13 @@ fn local_origin(url: &tauri::Url) -> bool {
     }
 }
 
-/// NVIDIA 私有驅動下，WebKitGTK 的 DMABUF 繪圖在 Wayland 上常白畫面或出現 Error 71（Tauri 文件列為已知問題）。
-/// 只在偵測到該驅動時關閉；Tauri 建議不要無條件關閉。使用者自己設了就尊重。
-#[cfg(target_os = "linux")]
-fn linux_graphics_workaround() {
-    if std::path::Path::new("/proc/driver/nvidia").exists() && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn linux_graphics_workaround() {}
-
 fn main() {
-    linux_graphics_workaround();
     let argv: Vec<String> = std::env::args().collect();
     let page = updater::page_from_args(&argv);
     tauri::Builder::default()
         // 已經開著就聚焦既有視窗並切到要求的頁面，不開第二個。
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let page = updater::page_from_args(&args);
-            let existing: Vec<_> = app.webview_windows().into_values().collect();
-            if wayland_session() && open_window(app, page).is_ok() {
-                for window in existing {
-                    let _ = window.destroy(); // 新視窗已經開好，這時關掉舊的不會讓程式結束
-                }
-                return;
-            }
-            focus_and_navigate(app, page);
+            focus_and_navigate(app, updater::page_from_args(&args));
         }))
         .manage(watch::Watcher::default())
         .invoke_handler(tauri::generate_handler![
@@ -337,12 +269,6 @@ fn main() {
         ])
         .setup(move |app| {
             open_window(app.handle(), page)?;
-            // macOS：已開著時 0c-update 以 Darwin 通知要求切頁（open 的參數到不了既有的行程）。
-            #[cfg(target_os = "macos")]
-            {
-                let handle = app.handle().clone();
-                navigate_mac::listen(move |page| focus_and_navigate(&handle, page));
-            }
             Ok(())
         })
         .build(tauri::generate_context!())

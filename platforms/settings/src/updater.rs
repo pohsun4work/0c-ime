@@ -5,6 +5,7 @@
 
 use serde_json::Value;
 use std::io::Read;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -23,66 +24,28 @@ pub fn page_from_args(args: &[String]) -> &'static str {
     PAGES.iter().copied().find(|p| *p == wanted).unwrap_or(PAGES[0])
 }
 
-/// macOS：已經開著時 `open --args` 不會把頁面交給它，0c-update 改送這個 Darwin 通知（notify(3)）請它切頁（#125）。
-/// `user.uid.<uid>.` 是系統保留給該使用者的名稱空間；通知不帶資料，頁面寫在名稱裡。與 internal/settingsapp 的
-/// NavigateNotification 一致。
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn navigate_notification(uid: u32, page: &str) -> String {
-    format!("user.uid.{uid}.com.biggo.0c.settings.page.{page}")
-}
+const UPDATER: &str = "0c-update.exe";
 
-/// notify_register_file_descriptor 每收到一則通知就在檔案描述子寫入 4 位元組的登記代號（網路位元組順序）。
-/// 依代號找回頁面；不是自己登記的代號回傳 None。
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn page_for_token(tokens: &[(i32, &'static str)], bytes: [u8; 4]) -> Option<&'static str> {
-    let wanted = i32::from_be_bytes(bytes);
-    tokens.iter().find(|(token, _)| *token == wanted).map(|(_, page)| *page)
-}
-
-fn updater_name() -> &'static str {
-    if cfg!(windows) {
-        "0c-update.exe"
-    } else {
-        "0c-update"
-    }
-}
+/// 不閃出主控台視窗（CreateProcess 的 CREATE_NO_WINDOW）。
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn usable(path: &Path) -> bool {
     path.is_absolute() && path.is_file()
 }
 
 /// 找出要呼叫的 0c-update。優先用啟動這個程式的那一個（環境變數 ZC_UPDATER）：設定程式與它讀同一份契約，
-/// 版本必定一致；其次是同一個資料夾裡的（Windows 核心版本目錄與完整安裝的版本目錄都把 0c-update.exe 放在設定程式旁邊）；macOS 上設定程式是 0c.app 內的巢狀 App，往上找外層 App 的
-/// Contents/MacOS/0c-update（LaunchServices 的 open 不帶環境變數）；再來是穩定的安裝位置。Linux 的系統套件（#181）
-/// 把 0c-update 放在 libexec/0c，排在官網安裝（家目錄）之後，與外殼找工具的規則相同（internal/installs）。
-pub fn find_updater(
-    env_updater: Option<&str>,
-    current_exe: Option<&Path>,
-    home: Option<&Path>,
-    local_app_data: Option<&Path>,
-    system_libexec: Option<&Path>,
-) -> Result<PathBuf, String> {
+/// 版本必定一致；其次是同一個資料夾裡的（核心版本目錄與完整安裝的版本目錄都把 0c-update.exe 放在設定程式旁邊）；
+/// 再來是 %LOCALAPPDATA%\Zuin\bin 的穩定副本。
+pub fn find_updater(env_updater: Option<&str>, current_exe: Option<&Path>, local_app_data: Option<&Path>) -> Result<PathBuf, String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(p) = env_updater.filter(|p| !p.is_empty()) {
         candidates.push(PathBuf::from(p));
     }
     if let Some(dir) = current_exe.and_then(|exe| exe.parent()) {
-        candidates.push(dir.join(updater_name()));
-    }
-    if let Some(exe) = current_exe {
-        for contents in exe.ancestors().filter(|a| a.file_name().is_some_and(|n| n == "Contents")) {
-            candidates.push(contents.join("MacOS").join(updater_name()));
-        }
+        candidates.push(dir.join(UPDATER));
     }
     if let Some(base) = local_app_data {
-        candidates.push(base.join("Zuin").join("bin").join(updater_name())); // Windows 的穩定副本
-    }
-    if let Some(home) = home {
-        candidates.push(home.join(".local/share/zuin/bin").join(updater_name()));
-        candidates.push(home.join(".local/bin").join(updater_name()));
-    }
-    if let Some(dir) = system_libexec {
-        candidates.push(dir.join(updater_name()));
+        candidates.push(base.join("Zuin").join("bin").join(UPDATER));
     }
     candidates.into_iter().find(|p| usable(p)).ok_or_else(|| "找不到 0c-update；請重新安裝靈犀注音".to_string())
 }
@@ -247,31 +210,9 @@ pub fn browser_url(url: &str) -> Result<&str, String> {
     }
 }
 
-/// 只支援 stdio 的 AI 工具要填的 0c-mcp 路徑：不隨版本改變的位置（範例 5）。
-/// Linux 由安裝器放在 ~/.local/bin（沒有官網安裝、只有系統套件時是系統的 bin，#181）；Windows 放在穩定副本的
-/// %LOCALAPPDATA%\Zuin\bin；macOS 在輸入法 App 內（App 原地更新，路徑不變），設定程式是巢狀 App，取最外層的 Contents。
-pub fn planned_mcp_path(
-    os: &str,
-    current_exe: Option<&Path>,
-    home: Option<&Path>,
-    local_app_data: Option<&Path>,
-    system_bin: Option<&Path>,
-) -> Option<PathBuf> {
-    match os {
-        "windows" => local_app_data.map(|base| base.join("Zuin").join("bin").join("0c-mcp.exe")),
-        "macos" => current_exe
-            .and_then(|exe| exe.ancestors().filter(|a| a.file_name().is_some_and(|n| n == "Contents")).last())
-            .map(|contents| contents.join("MacOS").join("0c-mcp"))
-            .or_else(|| home.map(|h| h.join("Library/Input Methods/0c.app/Contents/MacOS/0c-mcp"))),
-        _ => {
-            let personal = home.map(|h| h.join(".local/bin/0c-mcp"));
-            let system = system_bin.map(|b| b.join("0c-mcp")).filter(|s| s.is_file());
-            match personal {
-                Some(p) if p.is_file() => Some(p),
-                p => system.or(p),
-            }
-        }
-    }
+/// 只支援 stdio 的 AI 工具要填的 0c-mcp 路徑：不隨版本改變的位置（範例 5），%LOCALAPPDATA%\Zuin\bin 的穩定副本。
+pub fn planned_mcp_path(local_app_data: Option<&Path>) -> Option<PathBuf> {
+    local_app_data.map(|base| base.join("Zuin").join("bin").join("0c-mcp.exe"))
 }
 
 fn tail(bytes: &[u8], max: usize) -> String {
@@ -303,12 +244,7 @@ pub fn run_blocking(updater: &Path, args: &[String], timeout: Duration) -> Resul
 pub fn run_with_input(updater: &Path, args: &[String], input: Option<Vec<u8>>, timeout: Duration) -> Result<Value, String> {
     let mut command = Command::new(updater);
     let stdin = if input.is_some() { Stdio::piped() } else { Stdio::null() };
-    command.args(args).stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不閃出主控台視窗
-    }
+    command.args(args).stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped()).creation_flags(CREATE_NO_WINDOW);
     let mut child = command.spawn().map_err(|e| format!("無法啟動 0c-update：{e}"))?;
     let writer = match (input, child.stdin.take()) {
         (Some(bytes), Some(mut pipe)) => Some(thread::spawn(move || {
@@ -409,39 +345,16 @@ pub fn build_summary(status: &Value, settings: &Value, app_version: &str, secs: 
 /// 「我的詞彙」匯出（#255）的文字檔上限：一萬個詞、各 4 個讀音加 200 則千字片語也遠小於這個大小。
 pub const VOCAB_EXPORT_MAX: usize = 16 << 20;
 
-/// 匯出檔放的位置：下載資料夾，沒有就家目錄（與狀態摘要相同）。Linux 的下載資料夾可能是中文名稱（~/下載），
-/// 依 user-dirs.dirs 的 XDG_DOWNLOAD_DIR；那個資料夾不存在時才用 ~/Downloads。
-pub fn download_dir(home: &Path, user_dirs: Option<&str>) -> PathBuf {
-    let xdg = user_dirs.and_then(|text| xdg_download_dir(text, home)).filter(|dir| dir.is_dir() && dir != home);
-    if let Some(dir) = xdg {
-        return dir;
-    }
+/// 匯出檔放的位置：下載資料夾，沒有就家目錄（與狀態摘要相同）。
+pub fn download_dir(home: &Path) -> PathBuf {
     let downloads = home.join("Downloads");
     if downloads.is_dir() { downloads } else { home.to_path_buf() }
 }
 
-/// 解析 user-dirs.dirs 的 XDG_DOWNLOAD_DIR="$HOME/下載"（只接受 $HOME 開頭或絕對路徑，與 xdg-user-dirs 相同）。
-pub fn xdg_download_dir(text: &str, home: &Path) -> Option<PathBuf> {
-    let value = text.lines().map(str::trim).filter(|line| !line.starts_with('#')).find_map(|line| line.strip_prefix("XDG_DOWNLOAD_DIR="))?;
-    let value = value.trim().strip_prefix('"')?.strip_suffix('"')?;
-    if let Some(rest) = value.strip_prefix("$HOME") {
-        let rest = rest.trim_start_matches('/');
-        return Some(if rest.is_empty() { home.to_path_buf() } else { home.join(rest) });
-    }
-    value.starts_with('/').then(|| PathBuf::from(value))
-}
-
-/// 寫一個新檔案：不覆寫既有的檔案，只有自己能讀寫（Unix 0600；Windows 的使用者資料夾本來就只有自己能讀）。
+/// 寫一個新檔案：不覆寫既有的檔案（使用者資料夾本來就只有自己能讀）。
 pub fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path)?.write_all(bytes)
+    std::fs::OpenOptions::new().write(true).create_new(true).open(path)?.write_all(bytes)
 }
 
 /// 在 dir 寫 stem.ext；已經有同名的檔案（同一秒匯出兩次）就改名 stem-2.ext、stem-3.ext…，回傳寫好的路徑。
@@ -463,8 +376,6 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::fs;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
 
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("zc-settings-test-{}-{}", std::process::id(), name));
@@ -473,40 +384,15 @@ mod tests {
         dir
     }
 
+    /// 測試用的替身：批次檔（Rust 經 cmd.exe 執行 .cmd），找路徑的測試只看檔案在不在。
     fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        #[cfg(unix)]
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap();
         path
-    }
-
-    /// 測試平行執行時，別的執行緒 fork 的瞬間會短暫握著剛寫好的腳本的寫入端，exec 會得到 ETXTBSY；
-    /// 這是測試自己造成的競態，重試即可。
-    #[cfg(unix)]
-    fn run(updater: &Path, args: &[String], timeout: Duration) -> Result<Value, String> {
-        for _ in 0..40 {
-            match run_blocking(updater, args, timeout) {
-                Err(e) if e.contains("Text file busy") => std::thread::sleep(Duration::from_millis(25)),
-                other => return other,
-            }
-        }
-        run_blocking(updater, args, timeout)
     }
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn navigate_notification_matches_the_go_side() {
-        // 與 internal/settingsapp 的 TestNavigateNotificationNamesAreScopedToTheUser 是同一個字串。
-        assert_eq!(navigate_notification(501, "vocab"), "user.uid.501.com.biggo.0c.settings.page.vocab");
-        let tokens = [(3, "overview"), (4, "vocab")];
-        assert_eq!(page_for_token(&tokens, 4i32.to_be_bytes()), Some("vocab"));
-        assert_eq!(page_for_token(&tokens, 3i32.to_be_bytes()), Some("overview"));
-        assert_eq!(page_for_token(&tokens, 9i32.to_be_bytes()), None);
-        assert_eq!(page_for_token(&tokens, 4i32.to_le_bytes()), None);
     }
 
     #[test]
@@ -527,76 +413,26 @@ mod tests {
     #[test]
     fn updater_prefers_the_one_that_launched_us() {
         let dir = temp("find");
-        let launcher = script(&dir, "launcher-update", "exit 0");
+        let launcher = script(&dir, "launcher-update.cmd", "");
         let sibling_dir = dir.join("app");
         fs::create_dir_all(&sibling_dir).unwrap();
-        let sibling = script(&sibling_dir, updater_name(), "exit 0");
-        let exe = sibling_dir.join("0c-settings");
-        let home = dir.join("home");
-        let stable = home.join(".local/share/zuin/bin");
-        fs::create_dir_all(&stable).unwrap();
-        let stable_updater = script(&stable, updater_name(), "exit 0");
-
-        let found = |env: Option<&str>, exe: Option<&Path>, home: Option<&Path>| find_updater(env, exe, home, None, None);
-        assert_eq!(found(launcher.to_str(), Some(&exe), Some(&home)).unwrap(), launcher);
-        assert_eq!(found(None, Some(&exe), Some(&home)).unwrap(), sibling);
-        assert_eq!(found(Some(""), Some(&exe), Some(&home)).unwrap(), sibling);
-        assert_eq!(found(Some("relative/path"), None, Some(&home)).unwrap(), stable_updater);
-        assert_eq!(found(Some("/does/not/exist"), None, Some(&home)).unwrap(), stable_updater);
-        assert!(found(None, None, Some(&dir.join("empty"))).is_err());
-    }
-
-    #[test]
-    fn linux_system_package_comes_after_the_personal_install() {
-        let dir = temp("system");
-        let libexec = dir.join("usr/libexec/0c");
-        fs::create_dir_all(&libexec).unwrap();
-        let system = script(&libexec, updater_name(), "exit 0");
-        let exe = dir.join("usr/bin/0c-settings"); // 旁邊沒有 0c-update
-        let home = dir.join("home");
-        assert_eq!(find_updater(None, Some(&exe), Some(&home), None, Some(&libexec)).unwrap(), system);
-        let bin = home.join(".local/bin");
-        fs::create_dir_all(&bin).unwrap();
-        let personal = script(&bin, updater_name(), "exit 0");
-        assert_eq!(find_updater(None, Some(&exe), Some(&home), None, Some(&libexec)).unwrap(), personal);
-        // 0c-mcp：官網安裝有就用它，沒有時是系統的；兩邊都沒有時照舊顯示官網安裝的位置（畫面註明沒有附）。
-        let sys_bin = dir.join("usr/bin");
-        fs::create_dir_all(&sys_bin).unwrap();
-        assert_eq!(planned_mcp_path("linux", None, Some(&home), None, Some(&sys_bin)).unwrap(), bin.join("0c-mcp"));
-        let sys_mcp = script(&sys_bin, "0c-mcp", "exit 0");
-        assert_eq!(planned_mcp_path("linux", None, Some(&home), None, Some(&sys_bin)).unwrap(), sys_mcp);
-        script(&bin, "0c-mcp", "exit 0");
-        assert_eq!(planned_mcp_path("linux", None, Some(&home), None, Some(&sys_bin)).unwrap(), bin.join("0c-mcp"));
-    }
-
-    #[test]
-    fn windows_falls_back_to_the_stable_copy_in_local_app_data() {
-        let dir = temp("winstable");
-        let stable_dir = dir.join("Local/Zuin/bin");
+        let sibling = script(&sibling_dir, UPDATER, "");
+        let exe = sibling_dir.join("0c-settings.exe");
+        let local = dir.join("Local");
+        let stable_dir = local.join("Zuin").join("bin");
         fs::create_dir_all(&stable_dir).unwrap();
-        let stable = script(&stable_dir, updater_name(), "exit 0");
-        let lonely = dir.join("versions/x/0c-settings.exe"); // 旁邊沒有 0c-update
-        assert_eq!(find_updater(None, Some(&lonely), None, Some(&dir.join("Local")), None).unwrap(), stable);
-        assert!(find_updater(None, Some(&lonely), None, Some(&dir.join("elsewhere")), None).is_err());
-    }
+        let stable = script(&stable_dir, UPDATER, "");
 
-    #[test]
-    fn nested_mac_app_finds_the_updater_of_the_outer_app() {
-        let dir = temp("nested");
-        let outer = dir.join("0c.app/Contents");
-        let outer_macos = outer.join("MacOS");
-        fs::create_dir_all(&outer_macos).unwrap();
-        let updater = script(&outer_macos, updater_name(), "exit 0");
-        let inner_macos = outer.join("Helpers/0c-settings.app/Contents/MacOS");
-        fs::create_dir_all(&inner_macos).unwrap();
-        let exe = inner_macos.join("0c-settings");
-        assert_eq!(find_updater(None, Some(&exe), None, None, None).unwrap(), updater);
-        // 內層 App 自己的 MacOS 資料夾若有同名檔案，優先用它旁邊的（與 Linux 同一個規則）。
-        let own = script(&inner_macos, updater_name(), "exit 0");
-        assert_eq!(find_updater(None, Some(&exe), None, None, None).unwrap(), own);
-        // 不在 Contents 底下的路徑不會被往上猜。
-        let elsewhere = dir.join("tools/0c-settings");
-        assert!(find_updater(None, Some(&elsewhere), Some(&dir.join("empty")), None, None).is_err());
+        let found = |env: Option<&str>, exe: Option<&Path>| find_updater(env, exe, Some(&local));
+        assert_eq!(found(launcher.to_str(), Some(&exe)).unwrap(), launcher);
+        assert_eq!(found(None, Some(&exe)).unwrap(), sibling);
+        assert_eq!(found(Some(""), Some(&exe)).unwrap(), sibling);
+        assert_eq!(found(Some(r"relative\path"), None).unwrap(), stable);
+        assert_eq!(found(Some(r"C:\does\not\exist"), None).unwrap(), stable);
+        // 版本目錄裡旁邊沒有 0c-update 時用穩定副本；兩處都沒有時回報錯誤。
+        let lonely = dir.join("versions").join("x").join("0c-settings.exe");
+        assert_eq!(found(None, Some(&lonely)).unwrap(), stable);
+        assert!(find_updater(None, Some(&lonely), Some(&dir.join("elsewhere"))).is_err());
     }
 
     #[test]
@@ -630,35 +466,33 @@ mod tests {
         assert!(parse_output(b"", b"", None).unwrap_err().contains("無"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn runs_the_updater_with_exact_arguments_and_parses_its_json() {
         let dir = temp("run");
-        let updater = script(&dir, "0c-update", r#"printf '{"ok":true,"args":"%s|%s|%s"}\n' "$1" "$2" "$3""#);
-        let value = run(&updater, &strings(&["set", "-json", "-apply"]), Duration::from_secs(5)).unwrap();
-        assert_eq!(value["args"], "set|-json|-apply");
+        let updater = script(&dir, "0c-update.cmd", r#"echo {"ok":true,"args":"%1 %2 %3"}"#);
+        let value = run_blocking(&updater, &strings(&["set", "-json", "-apply"]), Duration::from_secs(5)).unwrap();
+        assert_eq!(value["args"], "set -json -apply");
         // 結束碼 1 但輸出契約錯誤文件：照樣交給前端。
-        let failing = script(&dir, "fails", r#"echo '{"schema":1,"ok":false,"error":{"code":"busy"}}'; exit 1"#);
-        assert_eq!(run(&failing, &[], Duration::from_secs(5)).unwrap()["error"]["code"], "busy");
+        let failing = script(&dir, "fails.cmd", "echo {\"schema\":1,\"ok\":false,\"error\":{\"code\":\"busy\"}}\r\nexit /b 1");
+        assert_eq!(run_blocking(&failing, &[], Duration::from_secs(5)).unwrap()["error"]["code"], "busy");
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_hung_updater_is_killed_at_the_timeout() {
-        let dir = temp("timeout");
-        let hung = script(&dir, "0c-update", "exec sleep 30");
+        // 直接執行 PING.EXE：批次檔被結束時，它啟動的子行程不會跟著結束。
+        let ping = Path::new(&std::env::var_os("SystemRoot").unwrap()).join("System32").join("PING.EXE");
         let start = Instant::now();
-        let error = run(&hung, &[], Duration::from_millis(300)).unwrap_err();
+        let error = run_blocking(&ping, &strings(&["-n", "30", "127.0.0.1"]), Duration::from_millis(300)).unwrap_err();
         assert!(error.contains("逾時"), "{error}");
         assert!(start.elapsed() < Duration::from_secs(5), "逾時後要立刻結束它，不能等到它自己結束");
     }
 
-    #[cfg(unix)]
     #[test]
     fn large_output_does_not_deadlock_the_pipe() {
         let dir = temp("large");
-        let big = script(&dir, "0c-update", r#"i=0; printf '{"pad":"'; while [ $i -lt 2000 ]; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; i=$((i+1)); done; printf '"}\n'"#);
-        let value = run(&big, &[], Duration::from_secs(10)).unwrap();
+        fs::write(dir.join("big.json"), format!("{{\"pad\":\"{}\"}}", "x".repeat(2000 * 64))).unwrap();
+        let big = script(&dir, "0c-update.cmd", r#"type "%~dp0big.json""#);
+        let value = run_blocking(&big, &[], Duration::from_secs(10)).unwrap();
         assert_eq!(value["pad"].as_str().unwrap().len(), 2000 * 64);
     }
 
@@ -691,44 +525,29 @@ mod tests {
     #[test]
     fn vocab_export_goes_to_the_download_folder_without_overwriting() {
         let home = temp("vocab-export");
-        assert_eq!(download_dir(&home, None), home, "沒有下載資料夾時放家目錄");
+        assert_eq!(download_dir(&home), home, "沒有下載資料夾時放家目錄");
         fs::create_dir(home.join("Downloads")).unwrap();
-        assert_eq!(download_dir(&home, None), home.join("Downloads"));
-        // 中文桌面的下載資料夾是 ~/下載（user-dirs.dirs）。
-        let dirs = "# 註解\nXDG_DESKTOP_DIR=\"$HOME/桌面\"\nXDG_DOWNLOAD_DIR=\"$HOME/下載\"\n";
-        assert_eq!(xdg_download_dir(dirs, &home), Some(home.join("下載")));
-        assert_eq!(download_dir(&home, Some(dirs)), home.join("Downloads"), "user-dirs 的資料夾不存在時用 ~/Downloads");
-        fs::create_dir(home.join("下載")).unwrap();
-        assert_eq!(download_dir(&home, Some(dirs)), home.join("下載"));
-        assert_eq!(xdg_download_dir("XDG_DOWNLOAD_DIR=\"/data/dl\"", &home), Some(PathBuf::from("/data/dl")));
-        assert_eq!(xdg_download_dir("XDG_DOWNLOAD_DIR=\"$HOME/\"", &home), Some(home.clone()));
-        assert_eq!(xdg_download_dir("XDG_DOWNLOAD_DIR=relative", &home), None);
-        assert_eq!(download_dir(&home, Some("XDG_DOWNLOAD_DIR=\"$HOME\"")), home.join("Downloads"), "XDG 指向家目錄時仍優先用 Downloads");
+        assert_eq!(download_dir(&home), home.join("Downloads"));
 
-        let dir = home.join("下載");
+        let dir = home.join("Downloads");
         let first = write_new_file(&dir, "0c-vocab-20261104-010203", "txt", "陳怡君\tㄔㄣˊ ㄧˊ ㄐㄩㄣ\n".as_bytes()).unwrap();
         let second = write_new_file(&dir, "0c-vocab-20261104-010203", "txt", b"second").unwrap();
         assert_eq!(first, dir.join("0c-vocab-20261104-010203.txt"));
         assert_eq!(second, dir.join("0c-vocab-20261104-010203-2.txt"), "同一秒再匯出不覆寫，改名");
         assert_eq!(fs::read_to_string(&first).unwrap(), "陳怡君\tㄔㄣˊ ㄧˊ ㄐㄩㄣ\n");
-        #[cfg(unix)]
-        assert_eq!(fs::metadata(&first).unwrap().permissions().mode() & 0o777, 0o600, "只有自己能讀");
         let _ = fs::remove_dir_all(&home);
     }
 
     #[test]
     fn summary_keeps_state_and_drops_the_home_directory() {
+        // JSON 文字裡的反斜線是跳脫過的，正斜線寫法也要換。
         let status = json!({"installed": "0.1.0-dev.43", "runtime": {"state": "running"}});
-        let settings = json!({"file": {"path": "/home/alice/.local/share/zuin/settings.json"}, "items": []});
-        let text = build_summary(&status, &settings, "0.1.0-dev.43", 1_791_248_523, "/home/alice");
-        assert!(!text.contains("alice"), "{text}");
-        assert!(text.contains("~/.local/share/zuin/settings.json") && text.contains("0.1.0-dev.43") && text.contains("2026-10-06T01:02:03Z"));
-        assert_eq!(scrub_home("/x", "/"), "/x", "家目錄太短時不替換");
-        // Windows：JSON 文字裡的反斜線是跳脫過的，正斜線寫法也要換。
-        let windows = json!({"file": {"path": r"C:\Users\alice\AppData\Local\Zuin\settings.json", "alt": "C:/Users/alice/x"}});
-        let text = build_summary(&json!({}), &windows, "0.1.0-dev.43", 0, r"C:\Users\alice");
+        let settings = json!({"file": {"path": r"C:\Users\alice\AppData\Local\Zuin\settings.json", "alt": "C:/Users/alice/x"}});
+        let text = build_summary(&status, &settings, "0.1.0-dev.43", 1_791_248_523, r"C:\Users\alice");
         assert!(!text.contains("alice"), "{text}");
         assert!(text.contains(r"~\\AppData\\Local\\Zuin\\settings.json") && text.contains("~/x"), "{text}");
+        assert!(text.contains("0.1.0-dev.43") && text.contains("2026-10-06T01:02:03Z"));
+        assert_eq!(scrub_home("/x", "/"), "/x", "家目錄太短時不替換");
     }
 
     #[test]
@@ -780,30 +599,16 @@ mod tests {
 
     #[test]
     fn mcp_path_is_the_version_independent_location() {
-        let home = Path::new("/home/alice");
-        assert_eq!(planned_mcp_path("linux", None, Some(home), None, None).unwrap(), PathBuf::from("/home/alice/.local/bin/0c-mcp"));
-        let local = Path::new("/c/Users/alice/AppData/Local");
-        assert_eq!(planned_mcp_path("windows", None, None, Some(local), None).unwrap(), local.join("Zuin").join("bin").join("0c-mcp.exe"));
-        let exe = Path::new("/Users/alice/Library/Input Methods/0c.app/Contents/Helpers/0c-settings.app/Contents/MacOS/0c-settings");
-        assert_eq!(planned_mcp_path("macos", Some(exe), Some(home), None, None).unwrap(),
-                   PathBuf::from("/Users/alice/Library/Input Methods/0c.app/Contents/MacOS/0c-mcp"));
-        assert_eq!(planned_mcp_path("macos", Some(Path::new("/tmp/0c-settings")), Some(home), None, None).unwrap(),
-                   PathBuf::from("/home/alice/Library/Input Methods/0c.app/Contents/MacOS/0c-mcp"));
+        let local = Path::new(r"C:\Users\alice\AppData\Local");
+        assert_eq!(planned_mcp_path(Some(local)).unwrap(), PathBuf::from(r"C:\Users\alice\AppData\Local\Zuin\bin\0c-mcp.exe"));
+        assert_eq!(planned_mcp_path(None), None);
     }
 
-    #[cfg(unix)]
     #[test]
     fn requests_reach_the_updater_on_standard_input() {
         let dir = temp("stdin");
-        let updater = script(&dir, "0c-update", r#"read -r line; printf '{"ok":true,"got":%s}\n' "$line""#);
-        let mut value = Err(String::new());
-        for _ in 0..40 {
-            value = run_with_input(&updater, &strings(&["vocab", "request"]), Some(br#"{"op":"list"}"#.to_vec()), Duration::from_secs(5));
-            if !matches!(&value, Err(e) if e.contains("Text file busy")) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
+        let updater = script(&dir, "0c-update.cmd", "set /p line=\r\necho {\"ok\":true,\"got\":%line%}");
+        let value = run_with_input(&updater, &strings(&["vocab", "request"]), Some(br#"{"op":"list"}"#.to_vec()), Duration::from_secs(5));
         assert_eq!(value.unwrap()["got"]["op"], "list");
     }
 

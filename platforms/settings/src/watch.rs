@@ -4,8 +4,10 @@
 //! 離開頁面、視窗隱藏或程式結束時結束那支行程。它意外結束（更新交接換掉了執行檔、被系統結束）時
 //! 等一下再以最後看到的版本重新啟動：版本在中斷期間變了，新的 watch 會立刻印出一行，頁面不會漏掉修改。
 
+use crate::updater::CREATE_NO_WINDOW;
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -76,7 +78,7 @@ impl Watcher {
         }
     }
 
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub fn active(&self) -> bool {
         self.running.lock().unwrap_or_else(|e| e.into_inner()).is_some()
     }
@@ -86,12 +88,7 @@ fn run<F: Fn(Value)>(updater: PathBuf, mut since: Option<u64>, stop: Arc<AtomicB
     let mut backoff = BACKOFF_MIN;
     while !stop.load(Ordering::SeqCst) {
         let mut command = Command::new(&updater);
-        command.args(watch_args(since)).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
+        command.args(watch_args(since)).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).creation_flags(CREATE_NO_WINDOW);
         if let Ok(mut child) = command.spawn() {
             let stdout = child.stdout.take();
             {
@@ -133,9 +130,7 @@ fn run<F: Fn(Value)>(updater: PathBuf, mut since: Option<u64>, stop: Arc<AtomicB
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
     use std::sync::mpsc;
-    #[cfg(unix)]
     use std::time::Instant;
 
     #[test]
@@ -153,23 +148,23 @@ mod tests {
         assert!(parse_line(r#"{"version":"x"}"#).is_none());
     }
 
-    #[cfg(unix)]
+    /// 批次檔替身（Rust 經 cmd.exe 執行 .cmd）。等待用 ping：被結束的是 cmd.exe，ping 自己幾秒後結束。
     fn script(name: &str, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("zc-watch-test-{}-{}", std::process::id(), name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("0c-update");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.join("0c-update.cmd");
+        std::fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap();
         path
     }
 
     /// 第一支印出版本 5 後結束（模擬引擎交接把它換掉）；重新啟動時要帶 -since 5，第二支印出 6 後一直等。
-    #[cfg(unix)]
     #[test]
     fn restarts_after_the_watch_exits_and_resumes_from_the_last_version() {
-        let updater = script("restart", r#"if [ "$4" = "5" ]; then echo '{"version":6,"count":2}'; exec sleep 30; fi; echo '{"version":5,"count":1}'"#);
+        let updater = script(
+            "restart",
+            "if \"%4\"==\"5\" (\r\n  echo {\"version\":6,\"count\":2}\r\n  ping -n 6 127.0.0.1 >nul\r\n  exit /b\r\n)\r\necho {\"version\":5,\"count\":1}",
+        );
         let watcher = Watcher::default();
         let (tx, rx) = mpsc::channel();
         watcher.start(updater, None, move |v| {
@@ -186,10 +181,9 @@ mod tests {
     }
 
     /// 再次 start 換掉舊的那支：舊的行程被結束，不會留下兩支。
-    #[cfg(unix)]
     #[test]
     fn starting_again_replaces_the_previous_watch() {
-        let updater = script("replace", r#"echo "{\"version\":${4:-1}}"; exec sleep 30"#);
+        let updater = script("replace", "set v=%4\r\nif not defined v set v=1\r\necho {\"version\":%v%}\r\nping -n 6 127.0.0.1 >nul");
         let watcher = Watcher::default();
         let (tx, rx) = mpsc::channel();
         let first = tx.clone();
