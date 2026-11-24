@@ -7,12 +7,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/0c-biggo/0c-ime/internal/autoupdate"
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
-
-// inputSetupFollows：安裝後由 0c-update 設定輸入法框架（一行安裝），Linux 安裝器不另外提示下一步。
-var inputSetupFollows bool
 
 // installOnline 是一行安裝（#19）的後半段：讀已簽章索引、下載並核對本平台套件，完整安裝後建立
 // 自動更新排程並設定輸入法框架。已安裝相同或較新版本時不重裝，只修復排程與輸入法設定。
@@ -40,11 +36,11 @@ func installOnline(feed, channel string) error {
 		if order, err := update.CompareVersion(f.Version, current); err == nil && order <= 0 {
 			fmt.Printf("已安裝靈犀注音 %s（索引最新為 %s），不重新安裝。\n", current, f.Version)
 			afterInstall()
-			return setupInputMethod(basePath())
+			return nil
 		}
 	}
 	fmt.Printf("下載靈犀注音 %s（%.0f MB）…\n", f.Version, float64(asset.Size)/(1<<20))
-	dir, err := os.MkdirTemp(scratchRoot(), "0c-install-")
+	dir, err := os.MkdirTemp("", "0c-install-")
 	if err != nil {
 		return err
 	}
@@ -53,7 +49,7 @@ func installOnline(feed, channel string) error {
 	if err != nil {
 		return fmt.Errorf("下載：%w", err)
 	}
-	root, cleanup, err := update.StageIn(scratchRoot(), archive, asset.SHA256, runtime.GOOS, runtime.GOARCH)
+	root, cleanup, err := update.Stage(archive, asset.SHA256, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}
@@ -68,21 +64,10 @@ func installOnline(feed, channel string) error {
 	if err = canInstall(r, channel, false); err != nil {
 		return err
 	}
-	inputSetupFollows = true
 	if err = install(root, r); err != nil {
 		return err
 	}
 	afterInstall()
 	forgetInstalledTarget(r.Version)
-	return setupInputMethod(basePath())
-}
-
-// markProfileAtLogin 記下「下次登入、桌面啟動前把靈犀注音加入輸入法清單」。
-func markProfileAtLogin(base string) error {
-	s, err := autoupdate.Load(base)
-	if err != nil {
-		return err
-	}
-	s.ProfileAtLogin = true
-	return autoupdate.Save(base, s)
+	return nil
 }

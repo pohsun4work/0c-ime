@@ -3,9 +3,7 @@
 package main
 
 import (
-	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -103,25 +101,14 @@ func feed(args []string) error {
 	rollout := flags.Int("rollout", 100, "分批比例 0–100")
 	withdrawn := flags.String("withdrawn", "", "已撤回版本（逗號分隔）")
 	kind := flags.String("kind", "core", "core（只換引擎／字典／模型）或 shell（需換外殼）")
-	var kindFor assetFlags
-	flags.Var(&kindFor, "kind-for", "個別平台改用的種類，格式 OS=core|shell（例如 linux=core；可重複）。"+
-		"舊更新器裝不上某平台的外殼時，該平台先發 core 換更新器（docs/releasing.md）")
 	out := flags.String("out", "", "輸出索引檔；簽章寫入同名 .sig")
 	var assets assetFlags
-	flags.Var(&assets, "asset", "套件路徑=HTTPS 網址（可重複；每平台一個）")
+	flags.Var(&assets, "asset", "Windows 套件 ZIP 路徑=HTTPS 網址（可重複；每個架構一個）")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if *key == "" || *out == "" || *serial == 0 || len(assets) == 0 {
 		return fmt.Errorf("需要 -key、-out、-serial 與至少一個 -asset")
-	}
-	kinds, used := map[string]string{}, map[string]bool{}
-	for _, spec := range kindFor {
-		os, k, ok := strings.Cut(spec, "=")
-		if !ok || (k != "core" && k != "shell") || kinds[os] != "" {
-			return fmt.Errorf("-kind-for 格式為 OS=core|shell，每個 OS 一次：%q", spec)
-		}
-		kinds[os] = k
 	}
 	priv, err := loadKey(*key)
 	if err != nil {
@@ -156,17 +143,7 @@ func feed(args []string) error {
 		if err != nil {
 			return err
 		}
-		k := *kind
-		if v, ok := kinds[r.OS]; ok {
-			k = v // 同一 OS 的每個架構都套用
-			used[r.OS] = true
-		}
-		f.Assets = append(f.Assets, update.SignedAsset{Asset: update.Asset{OS: r.OS, Arch: r.Arch, URL: url, SHA256: sum, Size: st.Size()}, Kind: k})
-	}
-	for os := range kinds {
-		if !used[os] {
-			return fmt.Errorf("-kind-for %s 沒有對應的 -asset", os)
-		}
+		f.Assets = append(f.Assets, update.SignedAsset{Asset: update.Asset{OS: r.OS, Arch: r.Arch, URL: url, SHA256: sum, Size: st.Size()}, Kind: *kind})
 	}
 	body, sig, err := update.SignFeed(f, priv)
 	if err != nil {
@@ -178,55 +155,26 @@ func feed(args []string) error {
 	return os.WriteFile(*out+".sig", sig, 0o644)
 }
 
-// releaseOf 從壓縮包讀出 release.json 的版本、通道與平台（不解壓其他檔案）。
+// releaseOf 從 Windows 套件 ZIP 讀出 release.json 的版本、通道與平台（不解壓其他檔案）。
 func releaseOf(path string) (*update.Release, error) {
-	var data []byte
-	match := func(name string) bool {
-		return filepath.Base(name) == "release.json" && strings.Count(strings.Trim(name, "/"), "/") == 1
+	z, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, err
 	}
-	if strings.HasSuffix(path, ".zip") {
-		z, err := zip.OpenReader(path)
+	defer z.Close()
+	var data []byte
+	for _, f := range z.File {
+		if filepath.Base(f.Name) != "release.json" || strings.Count(strings.Trim(f.Name, "/"), "/") != 1 {
+			continue
+		}
+		rc, err := f.Open()
 		if err != nil {
 			return nil, err
 		}
-		defer z.Close()
-		for _, f := range z.File {
-			if match(f.Name) {
-				rc, err := f.Open()
-				if err != nil {
-					return nil, err
-				}
-				data, err = io.ReadAll(io.LimitReader(rc, 1<<20))
-				rc.Close()
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-	} else {
-		file, err := os.Open(path)
+		data, err = io.ReadAll(io.LimitReader(rc, 1<<20))
+		rc.Close()
 		if err != nil {
 			return nil, err
-		}
-		defer file.Close()
-		gz, err := gzip.NewReader(file)
-		if err != nil {
-			return nil, err
-		}
-		tr := tar.NewReader(gz)
-		for {
-			h, err := tr.Next()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				return nil, err
-			}
-			if match(h.Name) {
-				if data, err = io.ReadAll(io.LimitReader(tr, 1<<20)); err != nil {
-					return nil, err
-				}
-			}
 		}
 	}
 	if data == nil {
@@ -236,10 +184,7 @@ func releaseOf(path string) (*update.Release, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, err
 	}
-	if r.OS == "" && r.Machine != "" {
-		r.OS, r.Arch = "linux", map[string]string{"x86_64": "amd64", "aarch64": "arm64"}[r.Machine]
-	}
-	if r.Product != "0c" || !update.ValidVersion(r.Version) || r.OS == "" || r.Arch == "" {
+	if r.Product != "0c" || !update.ValidVersion(r.Version) || r.OS != "windows" || r.Arch == "" {
 		return nil, fmt.Errorf("不支援的套件")
 	}
 	return &r, nil

@@ -398,6 +398,3 @@ func uninstall() error {
 }
 
 const restartHint = "完成組字後登出再登入，或在工作管理員結束 0c-server.exe，下一個按鍵會以新設定啟動引擎。"
-
-// installIntegrity：Windows 的檔案核對在更新與解除安裝時提示（#82），status 不另外顯示。
-func installIntegrity() string { return "" }

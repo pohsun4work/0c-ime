@@ -1,5 +1,3 @@
-//go:build !windows
-
 package autoupdate
 
 import (
@@ -22,8 +20,8 @@ func TestPrepareCoreRetriesStageRenameDeniedByScanner(t *testing.T) {
 		return os.Rename(from, to)
 	}, nil))
 	base := t.TempDir()
-	archive, sum := linuxArchive(t, "0.1.0-dev.18", false)
-	dir, err := PrepareCore(base, "", archive, Target{Version: "0.1.0-dev.18", Kind: "core", SHA256: sum}, "linux", "amd64", linuxCore)
+	archive, sum := windowsArchive(t, "0.1.0-dev.18", false)
+	dir, err := PrepareCore(base, archive, Target{Version: "0.1.0-dev.18", Kind: "core", SHA256: sum}, "windows", "amd64", windowsCore)
 	if err != nil {
 		t.Fatalf("transient denial must be retried: %v", err)
 	}

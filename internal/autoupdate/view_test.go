@@ -220,14 +220,3 @@ func TestLockIOErrorsAreNotBusy(t *testing.T) {
 		t.Fatalf("invalid base: %v", err)
 	}
 }
-
-// 設定程式以完整文字辨識「仍開著舊版外殼」（#98），兩邊要一起改。
-func TestSettingsUIRecognizesOldShellDetail(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "platforms", "settings", "ui", "app.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "const OLD_SHELL = '"+OldShellDetail+"';") {
-		t.Fatalf("app.js does not match OldShellDetail %q", OldShellDetail)
-	}
-}

@@ -84,9 +84,5 @@ func handOverResidentEngine(version string, health func() (map[string]string, bo
 	}
 }
 
-func removeEngineService()                 {}
-func startEngineService() bool             { return false } // 交接照舊：有登入工作時請它執行（runEngineTask）
-func engineServiceState() (string, string) { return "login_task", "" }
-
-// engineAfterInstall：安裝完成後叫起常駐引擎（macOS 另有處理，見 engine_service_darwin.go）。
+// engineAfterInstall：安裝完成後叫起常駐引擎。
 func engineAfterInstall(base string) { ensureEngineService(base) }

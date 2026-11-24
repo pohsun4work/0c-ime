@@ -31,8 +31,6 @@ const (
 	codeBusy       = "busy"
 	codeInProgress = "in_progress"
 	codeIO         = "io"
-	// codePackageManaged：由系統套件管理員更新（#181），更新、安裝、回復與排程的命令不能用。
-	codePackageManaged = "package_managed"
 )
 
 // 套用結果（apply.state）。設定「已儲存」與「已套用」是兩回事：引擎只在啟動時讀設定。
@@ -81,8 +79,6 @@ func classify(err error) contractError {
 		return contractError{Code: codeBusy, Message: err.Error()}
 	case errors.Is(err, errResetBusy):
 		return contractError{Code: codeBusy, Message: err.Error()}
-	case errors.Is(err, errPackageManaged):
-		return contractError{Code: codePackageManaged, Message: err.Error()}
 	case errors.As(err, &me):
 		return contractError{Code: me.Code, Message: me.Message}
 	}
@@ -144,7 +140,6 @@ type features struct {
 	// 引擎服務（#120，只在 status -json）：是否常駐（0.2.0 起恆為 true）、定義是否存在（installed／absent）與服務管理員的狀態。
 	EngineService      bool   `json:"engine_service,omitempty"`
 	EngineServiceState string `json:"engine_service_state,omitempty"`
-	EngineServiceUnit  string `json:"engine_service_unit,omitempty"`
 }
 
 func featuresOf() features { return features{Vocab: true, PersonalReset: true} }

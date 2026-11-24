@@ -28,35 +28,14 @@ var ErrShellBusy = errors.New("等待完成組字或閒置")
 // ErrShellHealth：完整外殼未通過運作檢查，平台已回復原版。
 var ErrShellHealth = errors.New("更新檢查失敗，已回復原版")
 
-// ErrOldShellLoaded：跨過登入邊界後仍有舊版外殼在執行（macOS：系統開到 backups 裡的舊 App，#98）。
-var ErrOldShellLoaded = errors.New("仍在執行舊版外殼")
-
-// OldShellDetail 是 ErrOldShellLoaded 的受阻說明；設定程式以這段文字辨識，改動時要一起改 app.js。
-const OldShellDetail = "已安裝，但系統仍開著更新前留下的舊版輸入法；登出再登入後改用新版"
-
-// ErrShellRetiring：新版外殼已裝好、不必重新登入，舊版的輸入法程式還在執行（macOS，#170）。背景安裝的交接只在
-// 使用者離開電腦（螢幕鎖定或關閉）時做，以免已開著的 App 漏字（#178）。
-var ErrShellRetiring = errors.New("舊版輸入法程式等使用者離開時結束")
-
-// ShellRetiringDetail 是 ErrShellRetiring 的受阻說明；設定程式以這段文字辨識，改動時要一起改 app.js 與 engine-state.js
-// （舊的說明文字也要留著認得：狀態檔可能還是 0.2.1／0.2.2 寫的）。
-const ShellRetiringDetail = "已安裝，離開電腦（螢幕鎖定或關閉）時自動換成新版，不必登出"
-
 // A notification is consent for one verified asset, not for a later release.
 var ErrTargetChanged = errors.New("待辦版本已變更，請從更新選單確認目前版本")
-
-// LiveShellPlatform 支援在登入中的桌面安全重載外殼。
-type LiveShellPlatform interface{ ReloadsShell() bool }
 
 // ShellActivationChecker 核對外殼是否已生效。需要重新登入的平台（macOS）核對是否已跨過外殼安裝邊界；
 // 不等重新登入的平台（ShellWithoutRelogin）只核對收據是這一版，讀得到而版本不同時回 (false, nil)。
 type ShellActivationChecker interface {
 	ShellReady(context.Context, string) (bool, error)
 }
-
-// ShellLoadProver 表示平台的 ShellReady 已核對沒有舊外殼在執行（macOS：輸入法程序都對應新版執行檔），
-// 不只是跨過登入邊界。只有這種平台，引擎閒置結束時也可以算生效。
-type ShellLoadProver interface{ ShellLoadProven() bool }
 
 // ShellWithoutRelogin：外殼裝好就算數、不等重新登入的平台（Windows，#253）。之後開啟的應用程式載入新版 DLL，
 // 已經開著的留在舊 DLL 照常打字（舊 DLL 和核心更新一樣能連新引擎），重新開啟才換成新版；檔案總管這類關不掉的宿主
@@ -72,19 +51,9 @@ const (
 	ShellEngineFailedDetail = "已安裝，但新版引擎還沒接手，稍後會再試"
 )
 
-// ShellRecoverer 在模式／閒置判斷之前收尾已開始的外殼交易。
-type ShellRecoverer interface {
-	RecoverShell(context.Context) (bool, error)
-}
-
-func (c *Coordinator) liveShell() bool {
-	p, ok := c.Platform.(LiveShellPlatform)
-	return ok && p.ReloadsShell()
-}
-
 func (c *Coordinator) shellWithoutRelogin() bool {
 	p, ok := c.Platform.(ShellWithoutRelogin)
-	return ok && p.ShellActiveWithoutRelogin() && !c.liveShell()
+	return ok && p.ShellActiveWithoutRelogin()
 }
 
 // Conditions 是切換前觀察到的使用狀態；Known 為 false 表示平台無法判斷。
@@ -112,12 +81,6 @@ type Platform interface {
 	Conditions() Conditions
 	Notify(n Notice) error
 	Target() (goos, arch string)
-}
-
-// ShellIdleGate is used by platforms that replace a live installation even when
-// the loaded shell itself is not reloaded until login (macOS).
-type ShellIdleGate interface {
-	ShellNeedsIdle() bool
 }
 
 type Coordinator struct {
@@ -180,29 +143,6 @@ func (c *Coordinator) Run(ctx context.Context) (*State, error) {
 	}
 	if !c.consentMatches(s) {
 		return s, ErrTargetChanged
-	}
-	if p, ok := c.Platform.(ShellRecoverer); ok {
-		recovered, err := p.RecoverShell(ctx)
-		if err != nil {
-			reason := "install_failed"
-			if errors.Is(err, ErrShellBusy) {
-				reason = "engine_busy"
-			}
-			if errors.Is(err, ErrShellHealth) && s.Target != nil {
-				reason = "health_failed"
-				s.Stage = StageFailed
-				if !s.failed(s.Target.Version) {
-					s.Failed = append(s.Failed, s.Target.Version)
-				}
-				s.record(c.Now(), "failed", s.Target.Version, err.Error())
-			}
-			s.block(c.Now(), reason, err.Error())
-			return s, c.save(s)
-		}
-		if recovered && s.Target != nil && s.Target.Kind == "shell" {
-			c.activate(s, c.Now())
-			return s, c.save(s)
-		}
 	}
 	err = c.step(ctx, s)
 	return s, errors.Join(err, c.save(s))
@@ -276,8 +216,6 @@ func (c *Coordinator) save(s *State) error {
 			// scheduler, not by this coordinator's download snapshot.
 			s.ScheduleRemoved = latest.ScheduleRemoved
 			s.UpdaterRepairs, s.UpdaterBroken, s.UpdaterNotified = latest.UpdaterRepairs, latest.UpdaterBroken, latest.UpdaterNotified
-			// 登入時補做輸入法設定由安裝器（可能就在這次 InstallShell 裡）記下、由排程清除，協調器不改它（#195）。
-			s.ProfileAtLogin = latest.ProfileAtLogin
 		}
 		*latest = *s
 		return nil
@@ -535,13 +473,6 @@ func (c *Coordinator) safe(ctx context.Context, s *State, now time.Time) bool {
 
 func (c *Coordinator) apply(ctx context.Context, s *State, now time.Time) {
 	if s.Target.Kind == "shell" {
-		needsIdle := c.liveShell()
-		if gate, ok := c.Platform.(ShellIdleGate); ok {
-			needsIdle = needsIdle || gate.ShellNeedsIdle()
-		}
-		if needsIdle && !c.safe(ctx, s, now) {
-			return
-		}
 		// 平台安裝器需要已保存的目標；中止後也能以同一套件接續。
 		if err := c.save(s); err != nil {
 			s.block(now, "install_failed", err.Error())
@@ -574,8 +505,6 @@ func (c *Coordinator) apply(ctx context.Context, s *State, now time.Time) {
 		default:
 			s.Stage = StagePending
 			switch {
-			case c.liveShell():
-				c.activate(s, now)
 			case c.shellWithoutRelogin():
 				s.record(now, "installed", s.Target.Version, "")
 				c.confirm(ctx, s, now)
@@ -639,17 +568,10 @@ func (c *Coordinator) verifyCore(ctx context.Context, s *State, now time.Time) {
 }
 
 func (c *Coordinator) confirm(ctx context.Context, s *State, now time.Time) {
-	// 舊 Linux 更新器留下 pending／needs_relogin 時，由新流程接手完整安裝。
-	// 已安裝也要由平台核對真正載入的外殼，不能只看引擎版本。
-	if s.Target.Kind == "shell" && c.liveShell() {
-		c.apply(ctx, s, now)
-		return
-	}
 	if s.Target.Kind == "shell" && c.shellWithoutRelogin() {
 		c.confirmInstalledShell(ctx, s, now)
 		return
 	}
-	shellConfirmed := false
 	if s.Target.Kind == "shell" {
 		if p, ok := c.Platform.(ShellActivationChecker); ok {
 			ready, err := p.ShellReady(ctx, s.Target.Version)
@@ -657,19 +579,10 @@ func (c *Coordinator) confirm(ctx context.Context, s *State, now time.Time) {
 				c.awaitShell(s, now, err)
 				return
 			}
-			prover, ok := c.Platform.(ShellLoadProver)
-			shellConfirmed = ok && prover.ShellLoadProven()
 		}
 	}
 	version, running, err := c.Platform.Running(ctx)
 	if err == nil && running && version == s.Target.Version {
-		c.activate(s, now)
-		return
-	}
-	// 平台已確認沒有舊外殼（macOS：新的登入工作階段，執行中的輸入法程序都對應新版執行檔，或還沒有 App
-	// 載入輸入法，#98）。引擎閒置結束不代表沒生效：新外殼下一次按鍵就從同一個新 App 啟動引擎。
-	// 還有舊引擎在跑時才等它交接（#77）。
-	if shellConfirmed && err == nil && !running {
 		c.activate(s, now)
 		return
 	}
@@ -696,7 +609,7 @@ func (c *Coordinator) confirm(ctx context.Context, s *State, now time.Time) {
 // confirmPendingShell 核對等待重新登入的外殼是否已生效，回傳是否因此生效。只用於需要重新登入的平台；
 // 可在登入中重載外殼的平台（Linux）由 confirm 接著安裝，不在這裡做。
 func (c *Coordinator) confirmPendingShell(ctx context.Context, s *State, now time.Time) bool {
-	if s.Target == nil || s.Target.Kind != "shell" || s.Stage != StagePending || c.liveShell() {
+	if s.Target == nil || s.Target.Kind != "shell" || s.Stage != StagePending {
 		return false
 	}
 	if _, ok := c.Platform.(ShellActivationChecker); !ok {
@@ -846,16 +759,8 @@ func recordOnce(s *State, now time.Time, kind, version, detail string) {
 }
 
 func (c *Coordinator) awaitShell(s *State, now time.Time, err error) {
-	if errors.Is(err, ErrShellRetiring) {
-		// 不必登出：使用者離開電腦時的排程喚起會交接，之後 confirm 就會生效。不算要使用者處理的事，不發通知。
-		s.block(now, "waiting_idle", ShellRetiringDetail)
-		return
-	}
 	detail := "重新登入後生效"
-	switch {
-	case errors.Is(err, ErrOldShellLoaded):
-		detail = OldShellDetail
-	case err != nil:
+	if err != nil {
 		detail += "；無法確認登入工作階段：" + err.Error()
 	}
 	s.block(now, "needs_relogin", detail)

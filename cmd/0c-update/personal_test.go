@@ -190,9 +190,6 @@ func TestPersonalCommandUsage(t *testing.T) {
 			t.Fatalf("%v：%v", args, err)
 		}
 	}
-	if !packageModeCommands["personal"] {
-		t.Fatal("系統套件安裝也要能清除學習紀錄")
-	}
 	if !featuresOf().PersonalReset {
 		t.Fatal("settings -json 要回報 features.personal_reset")
 	}

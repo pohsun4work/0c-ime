@@ -8,14 +8,6 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/autoupdate"
 )
 
-// useWindowsRules：這幾段判斷是純邏輯，Linux、macOS 上也跑得到（#253）。
-func useWindowsRules(t *testing.T, on bool) {
-	t.Helper()
-	saved := shellWithoutRelogin
-	shellWithoutRelogin = on
-	t.Cleanup(func() { shellWithoutRelogin = saved })
-}
-
 func pendingShellState(reason, detail string) *autoupdate.State {
 	return &autoupdate.State{Schema: 1, InstallID: "test", Mode: autoupdate.ModeAuto, Stage: autoupdate.StagePending,
 		Target:  &autoupdate.Target{Version: "0.2.8", Kind: "shell"},
@@ -23,7 +15,6 @@ func pendingShellState(reason, detail string) *autoupdate.State {
 }
 
 func TestOutcomeBodyAfterInstallingWithoutRelogin(t *testing.T) {
-	useWindowsRules(t, true)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	done := &autoupdate.State{Stage: autoupdate.StageActive, History: []autoupdate.Event{
 		{At: now.Add(-time.Minute), Kind: "installed", Version: "0.2.8"},
@@ -53,7 +44,6 @@ func TestOutcomeBodyAfterInstallingWithoutRelogin(t *testing.T) {
 
 // 選單「已安裝，閒置時換上這一版的引擎」按下去沒換成：沒有待辦（Target 是 nil、Stage 是 idle），不能說已是最新。
 func TestOutcomeBodyWhenStaleEngineWasNotReplaced(t *testing.T) {
-	useWindowsRules(t, true)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	for _, detail := range []string{autoupdate.ShellEngineBusyDetail, autoupdate.ShellEngineIdleDetail, autoupdate.ShellEngineFailedDetail} {
 		for _, stage := range []string{autoupdate.StageIdle, autoupdate.StageActive} {
@@ -75,26 +65,8 @@ func TestOutcomeBodyWhenStaleEngineWasNotReplaced(t *testing.T) {
 	}
 }
 
-// macOS／Linux：原本的文字不變。
-func TestOutcomeBodyKeepsOtherPlatforms(t *testing.T) {
-	useWindowsRules(t, false)
-	now := time.Now()
-	done := &autoupdate.State{Stage: autoupdate.StageActive, History: []autoupdate.Event{{At: now, Kind: "installed", Version: "0.2.8"}}}
-	if got := outcomeBody(done, nil, "0.2.8", now); got != "已是最新版本 0.2.8。" {
-		t.Fatal(got)
-	}
-	if got := outcomeBody(pendingShellState("needs_relogin", "重新登入後生效"), nil, "0.2.8", now); got != "0.2.8 重新登入後生效。" {
-		t.Fatal(got)
-	}
-	busy := pendingShellState("engine_busy", "x")
-	if got := outcomeBody(busy, nil, "0.2.8", now); !strings.Contains(got, "請先完成組字") {
-		t.Fatal(got)
-	}
-}
-
 // 已裝好的外殼只差新引擎接手：選單可以按「現在完成」，而且不用再跳一次 UAC。
 func TestPendingShellNeedsNoElevationOnceInstalled(t *testing.T) {
-	useWindowsRules(t, true)
 	base := t.TempDir()
 	save := func(s *autoupdate.State) {
 		if err := autoupdate.Save(base, s); err != nil {
@@ -117,9 +89,8 @@ func TestPendingShellNeedsNoElevationOnceInstalled(t *testing.T) {
 	}
 }
 
-// 舊版更新器留下的狀態：讀出來就不再叫人登出（舊版 DLL 會直接顯示這段說明）；狀態檔由協調器收尾。macOS 照舊。
+// 舊版更新器留下的狀態：讀出來就不再叫人登出（舊版 DLL 會直接顯示這段說明）；狀態檔由協調器收尾。
 func TestHideLegacyRelogin(t *testing.T) {
-	useWindowsRules(t, true)
 	s := pendingShellState("needs_relogin", "已安裝，重新登入後生效")
 	stored := s.Blocked
 	hideLegacyRelogin(s)
@@ -128,11 +99,5 @@ func TestHideLegacyRelogin(t *testing.T) {
 	}
 	if stored.Reason != "needs_relogin" {
 		t.Fatal("只改讀出來的這一份")
-	}
-	useWindowsRules(t, false)
-	s = pendingShellState("needs_relogin", "已安裝，重新登入後生效")
-	hideLegacyRelogin(s)
-	if s.Blocked.Reason != "needs_relogin" {
-		t.Fatalf("%+v", s.Blocked)
 	}
 }

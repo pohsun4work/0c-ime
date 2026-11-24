@@ -1,17 +1,15 @@
 package update
 
-// 更新備份的清理（#179）。每次安裝、回復、解除安裝都把整個舊版移入備份（macOS 的 App 約 500 MB，Windows 的版本目錄
-// 約 460 MB），以前從來不刪，越積越多。回復只用得到收據 previous 指到的那一份，所以每次成功之後只留它，其他的刪掉。
-// macOS 在安裝、回復、解除安裝成功後同步清理。Windows 改到背景（PruneWindows）：第一次升級要刪的舊版可達
-// 數 GB、上百個目錄（.14 實測 27 份版本目錄約 9 GB 加 110 份備份，安裝精靈停在進度條約 70 秒）。
+// 更新備份的清理（#179）。每次安裝、回復、解除安裝都把整個舊版移入備份（版本目錄約 460 MB），以前從來不刪，
+// 越積越多。回復只用得到收據 previous 指到的那一份，所以每次成功之後只留它，其他的刪掉。清理在背景做（PruneWindows）：
+// 第一次升級要刪的舊版可達數 GB、上百個目錄（.14 實測 27 份版本目錄約 9 GB 加 110 份備份，安裝精靈停在進度條約 70 秒）。
 //
 // 安全規則：
 //   - 只在持有安裝鎖時、依寫好的收據決定刪什麼；刪除失敗只記錄，不影響安裝、回復的結果，下次再試。
-//   - 只刪自己命名格式的目錄（備份 macos-<UTC 時間>-<亂數>、windows-<亂數>；Windows 的版本目錄 <版本>-<12 位雜湊>
-//     與中斷安裝留下的 .broken-<數字>），連結、一般檔案與其他名稱都不碰。核心更新的 <版本>-c-<雜湊> 由 PruneCore 管理。
+//   - 只刪自己命名格式的目錄（備份 windows-<亂數>、版本目錄 <版本>-<12 位雜湊> 與中斷安裝留下的 .broken-<數字>），
+//     連結、一般檔案與其他名稱都不碰。核心更新的 <版本>-c-<雜湊> 由 PruneCore 管理。
 //   - 備份目錄（或它的上層）是符號連結時照舊拒絕，什麼都不刪。
-//   - 仍在使用的不刪。macOS：呼叫端回報有程式從裡面執行、開著其中的檔案，或系統的背景項目登記指向它。
-//     Windows：版本目錄先刪 DLL、再刪執行檔；仍被應用程式載入的 DLL、執行中的程式刪不掉，就保留其餘檔案。
+//   - 仍在使用的不刪：版本目錄先刪 DLL、再刪執行檔；仍被應用程式載入的 DLL、執行中的程式刪不掉，就保留其餘檔案。
 //     （.14 實測：執行中的 exe、已載入的 DLL 不擋目錄改名，開著的檔案才擋，所以不能只靠改名判斷。）
 //     刪除先把整個目錄改名移開再刪：有程式開著其中的檔案時改名失敗，整個保留，不會刪到一半。
 //     刪到一半失敗（例如防毒軟體占住檔案）時，移開的目錄下次清理再刪。
@@ -24,12 +22,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/0c-biggo/0c-ime/internal/atomicfile"
 	"github.com/0c-biggo/0c-ime/internal/enginedir"
 )
 
 var (
-	macBackupName     = regexp.MustCompile(`^macos-[0-9]{8}-[0-9]{6}-[0-9]+$`)
 	windowsBackupName = regexp.MustCompile(`^windows-[0-9]+$`)
 	windowsVersionDir = regexp.MustCompile(`^(.+)-[0-9a-f]{12}(\.broken-[0-9]+)?$`)
 )
@@ -138,71 +134,6 @@ func prunable(root string, owned func(string) bool, keep map[string]bool) bool {
 	return false
 }
 
-// MacLSForgotten 記下已從 LaunchServices 取消登記的備份目錄名稱（每行一個，見 cmd/0c-update）。
-const MacLSForgotten = ".launchservices-forgotten"
-
-// pruneMacBackups 只保留 keep（收據的 previous，例如 backups/macos-…）與使用中的備份，
-// 並把已刪除的目錄從 LaunchServices 紀錄中拿掉。
-func pruneMacBackups(p MacPaths, keep string) {
-	backups := filepath.Join(p.Support, "backups")
-	kept := map[string]bool{}
-	if dir, ok := strings.CutPrefix(keep, "backups/"); ok && !strings.Contains(dir, "/") {
-		kept[dir] = true
-	}
-	var release func(string) error
-	if p.InUse != nil {
-		release = func(dir string) error {
-			if p.InUse(dir) {
-				return errInUse
-			}
-			return nil
-		}
-	}
-	trashed, err := pruneDir(backups, macBackupName.MatchString, kept, release)
-	if err != nil {
-		PruneWarn(backups, err)
-		return
-	}
-	removeTrash(trashed)
-	if err := SyncLSForgotten(backups); err != nil {
-		PruneWarn(filepath.Join(backups, MacLSForgotten), err)
-	}
-}
-
-// SyncLSForgotten 把 LaunchServices 紀錄中已不存在的備份目錄拿掉：紀錄不會無限變長，
-// 日後同名的新備份也不會被誤當成已處理。沒有紀錄檔時不做事。
-func SyncLSForgotten(backups string) error {
-	file := filepath.Join(backups, MacLSForgotten)
-	if err := noLinks(file); err != nil {
-		return err
-	}
-	b, err := os.ReadFile(file)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	names := strings.Fields(string(b))
-	var still []string
-	for _, name := range names {
-		if !macBackupName.MatchString(name) {
-			continue
-		}
-		if info, err := os.Lstat(filepath.Join(backups, name)); err == nil && info.IsDir() {
-			still = append(still, name)
-		}
-	}
-	if len(still) == len(names) {
-		return nil
-	}
-	text := ""
-	if len(still) > 0 {
-		text = strings.Join(still, "\n") + "\n"
-	}
-	return atomicfile.Write(file, []byte(text))
-}
-
 // windowsOwnedVersion 認得完整安裝的版本目錄 <版本>-<12 位雜湊>（含 .broken-<數字>）；核心更新的 -c- 目錄不算。
 func windowsOwnedVersion(name string) bool {
 	m := windowsVersionDir.FindStringSubmatch(name)
@@ -239,7 +170,7 @@ func releasePrograms(dir string) error {
 	return nil
 }
 
-// removeProgram 測試替換成會失敗的版本，模擬執行中的程式或仍被載入的 DLL（Linux 上刪得掉）。
+// removeProgram 測試替換成會失敗的版本，模擬執行中的程式或仍被載入的 DLL。
 var removeProgram = os.Remove
 
 // windowsKeep 算出 final 收據要保留的備份與版本目錄：收據 previous 那一份備份，以及收據、回復目標與引擎指標

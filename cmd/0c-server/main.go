@@ -31,7 +31,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/zhconv"
 	"github.com/0c-biggo/0c-ime/internal/datadir"
 	"github.com/0c-biggo/0c-ime/internal/e2esync"
-	"github.com/0c-biggo/0c-ime/internal/installs"
 	"github.com/0c-biggo/0c-ime/internal/neural"
 	"github.com/0c-biggo/0c-ime/internal/settings"
 	"github.com/0c-biggo/0c-ime/internal/simplified"
@@ -265,7 +264,7 @@ func serve() string {
 	// 找的同一份）；隔離測試（指定 -user、-socket）與開發時指定別的字典不碰使用者的 0c-update 與個人目錄。
 	var remind *modelRemind
 	if bundled.SelectSource != neural.SourceBundled && !explicit["neural-package"] && !explicit["user"] && !explicit["socket"] &&
-		(filepath.Clean(*data) == filepath.Clean(defaultData) || filepath.Clean(*data) == filepath.Clean(installs.Default().SystemData())) {
+		filepath.Clean(*data) == filepath.Clean(defaultData) {
 		remind = newModelRemind(filepath.Dir(*user), dictionarySHA, lg)
 	}
 	neuralState := "disabled_by_setting"

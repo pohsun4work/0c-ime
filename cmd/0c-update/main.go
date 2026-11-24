@@ -23,9 +23,6 @@ import (
 )
 
 func installedVersion() (string, error) {
-	if packageManaged() { // 系統套件（#181）：版本記在 distribution.json，沒有收據
-		return distributionVersion(), nil
-	}
 	b, err := os.ReadFile(receiptPath())
 	if os.IsNotExist(err) {
 		return "", nil
@@ -197,19 +194,6 @@ func run(args []string) error {
 		return fmt.Errorf("用法：0c-update status|settings|profile|set|models|vocab|api|personal|open-settings|engine|auto|finish|mode|pause|resume|snooze|schedule|verify|check|download|download-now|apply|install|rollback|uninstall [選項]")
 	}
 	action := args[0]
-	// macOS 以 root 執行時（sudo installer、MDM）改以登入的使用者身分重新執行，成功時不會返回（#198）
-	if err := dropRoot(args); err != nil {
-		return err
-	}
-	delegateToPersonal(args) // 系統安裝的 0c-update、而官網安裝也在時，交給官網那一份（成功時不會返回）
-	if err := refusePackageManaged(action, args[1:]); err != nil {
-		return err
-	}
-	switch action {
-	case "status", "check", "auto", "finish":
-		// macOS：背景項目的登記留在已安裝的 App（#205）；舊輸入法程式的選單、設定程式與排程都經過這幾個命令。
-		adoptSchedule(action != "status")
-	}
 	switch action {
 	case "settings":
 		return settingsCommand(args[1:])
@@ -298,12 +282,6 @@ func run(args []string) error {
 			return err
 		}
 	}
-	// 之前以 root 安裝留下的檔案，這個帳號改不動；先說明修復指令，不要做到一半才 permission denied（#198）
-	if action == "install" || action == "apply" || action == "rollback" || action == "uninstall" {
-		if err := refuseForeignOwned(args); err != nil {
-			return err
-		}
-	}
 	switch action {
 	case "status":
 		version, err := installedVersion()
@@ -313,25 +291,10 @@ func run(args []string) error {
 		if *asJSON {
 			return statusJSON(version, *diagnostics)
 		}
-		if packageManaged() {
-			if version == "" {
-				version = "（版本未知）"
-			}
-			fmt.Printf("靈犀注音（0c）：%s\n平台：%s/%s\n更新：由系統套件管理員更新\n", version, runtime.GOOS, runtime.GOARCH)
-			printInstalls(os.Stdout, installList())
-			printModelStatus(os.Stdout, modelStatus(dialEngine))
-			return nil
-		}
 		if version == "" {
 			version = "尚未有版本收據"
 		}
 		fmt.Printf("靈犀注音（0c）：%s\n平台：%s/%s\n收據：%s\n", version, runtime.GOOS, runtime.GOARCH, receiptPath())
-		if line := installIntegrity(); line != "" {
-			fmt.Println(line)
-		}
-		if line := ownershipLine(); line != "" {
-			fmt.Println(line)
-		}
 		if engine := autoupdate.PointerVersion(basePath()); engine != "" {
 			fmt.Printf("引擎（核心更新）：%s\n", engine)
 		}
@@ -339,7 +302,6 @@ func run(args []string) error {
 			printState(s)
 		}
 		fmt.Println(scheduleStatus())
-		printInstalls(os.Stdout, installList())
 		printModelStatus(os.Stdout, modelStatus(dialEngine))
 		return nil
 	case "rollback":
@@ -375,7 +337,7 @@ func run(args []string) error {
 				return fmt.Errorf("安裝壓縮包請使用 apply -archive 與 -sha256")
 			}
 			var cleanup func()
-			root, cleanup, err = update.StageIn(scratchRoot(), *archive, *checksum, runtime.GOOS, runtime.GOARCH)
+			root, cleanup, err = update.Stage(*archive, *checksum, runtime.GOOS, runtime.GOARCH)
 			if err != nil {
 				return err
 			}
@@ -429,7 +391,7 @@ func run(args []string) error {
 			if action == "download" {
 				return fmt.Errorf("download 需要 -out 保存目錄")
 			}
-			directory, err = os.MkdirTemp(scratchRoot(), "0c-download-")
+			directory, err = os.MkdirTemp("", "0c-download-")
 			if err != nil {
 				return err
 			}
@@ -447,7 +409,7 @@ func run(args []string) error {
 	} else if action != "apply" || *archive == "" {
 		return fmt.Errorf("check/download 需要 -feed；apply 需要 -feed 或 -archive 與 -sha256")
 	}
-	root, cleanup, err := update.StageIn(scratchRoot(), *archive, *checksum, runtime.GOOS, runtime.GOARCH)
+	root, cleanup, err := update.Stage(*archive, *checksum, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}
