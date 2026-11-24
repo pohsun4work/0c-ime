@@ -1,12 +1,8 @@
-//go:build !windows
-
 package main
 
 import (
 	"encoding/json"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,14 +22,11 @@ func TestAllSymbolsHalfwidthSettingInServer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, settings.FileName), b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	sock := filepath.Join(dir, "all.sock")
-	server := exec.Command(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-legacy-socket", "")
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+	sock := testPipe("all")
+	server, _ := startServer(t, binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-legacy-socket", "")
+	defer stopServer(t, server)
 	waitDial(t, sock)
-	conn, err := net.Dial("unix", sock)
+	conn, err := dial(sock)
 	if err != nil {
 		t.Fatal(err)
 	}

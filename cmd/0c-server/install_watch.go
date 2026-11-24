@@ -5,22 +5,18 @@ import (
 	"errors"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/0c-biggo/0c-ime/internal/installs"
 )
 
 // 系統安裝的升級交接（#181）：apt upgrade 換掉 /usr 下的 0c-server、字典或神經 worker 之後，執行中的引擎
 // 還是舊的；系統安裝沒有 0c-update 幫忙交接（由套件管理員更新）。引擎自己每分鐘至多看一次這幾個檔案的
 // stat（不讀內容），發現換了、而且連續兩次觀察都相同（套件已經裝完），就在背景用新的執行檔核對字典能載入
 // （不擋存檔、失聯偵測與閒置結束）；核對通過、使用者停手又沒有組字時，走與 0c-update 相同的交接（Drain：
-// 存檔、斷開連線），最後以 exec 換成新的執行檔；外殼下一個按鍵重連到新引擎並重播組字。官網安裝由
-// 0c-update 交接，不啟用這段（installWatchEnabled）。
+// 存檔、斷開連線），最後以 exec 換成新的執行檔；外殼下一個按鍵重連到新引擎並重播組字。只在 -install-watch on
+// 時啟用；官網安裝由 0c-update 交接。
 const (
 	installWatchInterval = time.Minute
 	installWatchIdle     = 30 * time.Second // 最後一個按鍵之後這麼久才交接
@@ -29,26 +25,6 @@ const (
 	// 用完才當成核對失敗，等檔案再變。
 	installCheckRetries = 3
 )
-
-// distributionMarker 是發行版套件放的模式標記（$PREFIX/share/0c/distribution.json，與 $PREFIX/share/0c/data 同層）。
-func distributionMarker(data string) string {
-	return filepath.Join(filepath.Dir(filepath.Clean(data)), "distribution.json")
-}
-
-// installWatchEnabled 決定 -install-watch auto 是否啟用：只在 Linux 的系統安裝——執行檔在建置時設定的系統
-// libexec/0c（installs.InSystem），或字典旁有發行版的模式標記。官網安裝（~/.local 底下，解開符號連結後比對）
-// 一律不開，由 0c-update 交接；開發建置（例如 /tmp 下的執行檔）兩者都不是，也不開。macOS 的 App 在
-// /Applications 但由 0c-update 交接，所以只限 Linux。
-func installWatchEnabled(goos, exe, data string, l installs.Layout) bool {
-	if goos != "linux" || exe == "" || l.InPersonal(exe) {
-		return false
-	}
-	if l.InSystem(exe) {
-		return true
-	}
-	_, err := os.Stat(distributionMarker(data))
-	return err == nil
-}
 
 // installWatch 追蹤安裝檔案有沒有被換掉，並記下新檔案的核對結果；交接由呼叫端執行。
 // poll 在儲存迴圈呼叫，核對在另一個 goroutine 完成後呼叫 finish，所以欄位都受 mu 保護。
@@ -65,14 +41,10 @@ type installWatch struct {
 	next     time.Time
 }
 
-// newInstallWatch 記下啟動時的狀態。running 是執行中程式的 stat（Linux 的 /proc/self/exe 指向實際執行的
-// inode，即使啟動當下檔案正好被換掉也不會把新檔當成基準）；nil 時改看 paths[0]。
-func newInstallWatch(paths []string, running os.FileInfo, interval time.Duration, now time.Time) *installWatch {
+// newInstallWatch 記下啟動時的狀態。
+func newInstallWatch(paths []string, interval time.Duration, now time.Time) *installWatch {
 	w := &installWatch{paths: paths, interval: interval, next: now.Add(interval)}
 	w.base = w.stat()
-	if running != nil && len(w.base) > 0 {
-		w.base[0] = running
-	}
 	return w
 }
 
@@ -179,14 +151,13 @@ func checkNewEngine(ctx context.Context, exe, data string, timeout time.Duration
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, "-check-data", "-data", data)
-	cmd.Env = append(os.Environ(), "ZC_ENGINE_REDIRECTED=1")
 	cmd.WaitDelay = 5 * time.Second // 逾時被結束後，留著輸出管線的子行程不讓這裡一直等
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil
 	}
-	// 只有新程式自己跑完、回報失敗（結束碼非 0）才確定載入不了；逾時、被訊號結束、執行不了（例如套件
-	// 正在換檔的 ETXTBSY、ENOENT）都可能是暫時的。
+	// 只有新程式自己跑完、回報失敗（結束碼非 0）才確定載入不了；逾時、被結束、執行不了（例如正在換檔）
+	// 都可能是暫時的。
 	var exit *exec.ExitError
 	definite := ctx.Err() == nil && errors.As(err, &exit) && exit.Exited()
 	return &checkError{err: err, out: truncateUTF8(strings.TrimSpace(string(out)), 300), transient: !definite}
@@ -214,16 +185,4 @@ func truncateUTF8(s string, n int) string {
 		n--
 	}
 	return s[:n]
-}
-
-// runningExecutable 回傳執行中程式的 stat：Linux 經 /proc/self/exe 取得實際執行的 inode。
-func runningExecutable() os.FileInfo {
-	if runtime.GOOS != "linux" {
-		return nil
-	}
-	st, err := os.Stat("/proc/self/exe")
-	if err != nil {
-		return nil
-	}
-	return st
 }

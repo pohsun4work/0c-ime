@@ -1,5 +1,3 @@
-//go:build !windows
-
 package main
 
 import (
@@ -13,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -31,7 +28,7 @@ func TestVocabAPIStartsOnlyWhenEnabled(t *testing.T) {
 	binary := buildServer(t)
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
-	sock := filepath.Join(dir, "api.sock")
+	sock := testPipe("api")
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()
@@ -41,13 +38,10 @@ func TestVocabAPIStartsOnlyWhenEnabled(t *testing.T) {
 	run := func(legacy string, fn func(health map[string]string)) {
 		t.Helper()
 		os.WriteFile(filepath.Join(dir, settings.FileName), []byte(`{"schema":1,"selection":"statistical"`+legacy+`}`), 0o600)
-		server := exec.Command(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock)
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+		server, _ := startServer(t, binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock)
+		defer stopServer(t, server)
 		waitDial(t, sock)
-		c, _ := net.Dial("unix", sock)
+		c, _ := dial(sock)
 		defer c.Close()
 		ipc.WriteFrame(c, ipc.Envelope{Op: ipc.OpHealth})
 		var r ipc.Reply
@@ -102,7 +96,7 @@ func TestVocabAPIWritesPersistAcrossRestart(t *testing.T) {
 	binary := buildServer(t)
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
-	sock := filepath.Join(dir, "api.sock")
+	sock := testPipe("api")
 	vocabPath := filepath.Join(dir, "vocab.json")
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	port := l.Addr().(*net.TCPAddr).Port
@@ -119,14 +113,12 @@ func TestVocabAPIWritesPersistAcrossRestart(t *testing.T) {
 	})
 	start := func() *exec.Cmd {
 		t.Helper()
-		server := exec.Command(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock)
+		server := serverCommand(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock)
 		server.Stderr = &logs
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
+		launch(t, server)
 		waitDial(t, sock)
 		// IPC 回得了話時已經裝好結束訊號的處理（API 比它早開始監聽）：之後的 Interrupt 會照常存檔再結束。
-		c, err := net.Dial("unix", sock)
+		c, err := dial(sock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,8 +212,7 @@ func TestVocabAPIWritesPersistAcrossRestart(t *testing.T) {
 		t.Fatalf("存檔失敗要回錯誤：%d %v", code, out)
 	}
 	os.Remove(vocabPath)
-	server.Process.Signal(os.Interrupt)
-	server.Wait()
+	stopServer(t, server)
 	if f := stored(); len(f.Words) != 2 {
 		t.Fatalf("結束前補存：%+v", f)
 	}
@@ -241,7 +232,7 @@ func TestVocabRemoveRewritesUserStoreWithoutTyping(t *testing.T) {
 	binary := buildServer(t)
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
-	sock := filepath.Join(dir, "api.sock")
+	sock := testPipe("api")
 	user := filepath.Join(dir, "user.json")
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	port := l.Addr().(*net.TCPAddr).Port
@@ -269,17 +260,15 @@ func TestVocabRemoveRewritesUserStoreWithoutTyping(t *testing.T) {
 	}
 	start := func() (*exec.Cmd, net.Conn) {
 		t.Helper()
-		server := exec.Command(binary, "-data", data, "-user", user, "-socket", sock)
+		server := serverCommand(binary, "-data", data, "-user", user, "-socket", sock)
 		server.Stderr = &logs
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
+		launch(t, server)
 		waitDial(t, sock)
-		c, err := net.Dial("unix", sock)
+		c, err := dial(sock)
 		if err != nil {
 			t.Fatal(err)
 		}
-		// IPC 回得了話時已經裝好結束訊號的處理（API 比它早開始監聽）：之後的 SIGTERM 會照常存檔再結束。
+		// IPC 回得了話時已經裝好結束訊號的處理（API 比它早開始監聽）：之後的結束訊號會照常存檔再結束。
 		ipcCall(c, ipc.Envelope{Op: ipc.OpHealth})
 		return server, c
 	}
@@ -304,8 +293,7 @@ func TestVocabRemoveRewritesUserStoreWithoutTyping(t *testing.T) {
 	}
 	stop := func(server *exec.Cmd, c net.Conn) {
 		c.Close()
-		server.Process.Signal(syscall.SIGTERM)
-		server.Wait()
+		stopServer(t, server)
 	}
 
 	ipcVocab := func(c net.Conn, req engine.VocabRequest) {
@@ -337,7 +325,7 @@ func TestVocabRemoveRewritesUserStoreWithoutTyping(t *testing.T) {
 			t.Fatalf("%s 提交後 user.json 要有這個詞的使用紀錄：%v %s", via, err, b)
 		}
 
-		// 重啟後只刪詞，不打字就結束（SIGTERM）。
+		// 重啟後只刪詞，不打字就結束（結束訊號）。
 		server, c = start()
 		if via == "api" {
 			if code := post("/v1/words/remove", `{"words":["麻婆"]}`); code != 200 {

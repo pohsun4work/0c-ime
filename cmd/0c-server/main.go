@@ -1,7 +1,7 @@
 //go:debug default=go1.26
 
-// 0c-server 是行程外的輸入法引擎（docs/19）：在 unix socket（Linux／macOS）或 named pipe（Windows）上
-// 為平台薄殼（Fcitx 5 addon、TSF DLL 等）提供服務。每位使用者一個實例；它是個人化資料唯一的寫入者。
+// 0c-server 是行程外的輸入法引擎（docs/19）：在 named pipe 上為 TSF DLL 提供服務。
+// 每位使用者一個實例；它是個人化資料唯一的寫入者。
 package main
 
 import (
@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -52,18 +51,17 @@ func main() {
 // serve 執行引擎直到結束；回傳要換成的新執行檔（系統安裝的升級交接），一般結束時為空字串。
 func serve() string {
 	defaultData, defaultUser, defaultSock := defaultPaths()
-	redirectEngine(filepath.Dir(defaultUser))
 	data := flag.String("data", defaultData, "資料包目錄")
 	user := flag.String("user", defaultUser, "個人資料檔")
-	sock := flag.String("socket", defaultSock, transportName)
-	legacy := flag.String("legacy-socket", legacyName(), "過渡期同時服務的舊 zuin "+transportName+"；空值停用，指定 -socket 時預設停用")
+	sock := flag.String("socket", defaultSock, "named pipe 名稱")
+	legacy := flag.String("legacy-socket", legacyName(), "過渡期同時服務的舊 zuin named pipe 名稱；空值停用，指定 -socket 時預設停用")
 	idle := flag.Duration("idle-exit", 0, "沒有任何連線這麼久之後自行結束（0 為不結束）")
 	lockWait := flag.Duration("lock-wait", 5*time.Second, "個人資料目錄被另一個引擎鎖住時最多等這麼久（交接時舊引擎存完檔才放鎖）；逾時照常輸入但不存檔")
 	checkData := flag.Bool("check-data", false, "僅驗證資料包能載入，不開啟管道、不讀寫個人詞庫")
 	neuralPackage := flag.String("neural-package", "", "神經選字 ONNX 包；未指定時依 settings.json 使用資料包旁內附的 neural/select")
 	neuralPython := flag.String("neural-python", "python3", "ONNX worker Python 路徑；指定時也取代內附或系統的 Python")
 	systemPython := flag.String("system-python", neural.SystemPython(), "沒有內附 Python 時使用的系統 Python（需要 numpy、onnxruntime）；空值不使用")
-	installWatchMode := flag.String("install-watch", "auto", "執行檔或字典被套件管理員換掉時自己交接重啟：auto（Linux 系統安裝才啟用）、on、off")
+	installWatchMode := flag.String("install-watch", "off", "執行檔或字典被換掉時自己交接重啟：on、off")
 	installWatchEvery := flag.Duration("install-watch-interval", installWatchInterval, "檢查安裝檔案的間隔")
 	installWatchQuiet := flag.Duration("install-watch-idle", installWatchIdle, "最後一個按鍵之後這麼久才交接")
 	neuralWorker := flag.String("neural-worker", "", "worker 腳本路徑（encoder_runtime.py 或 sequence_runtime.py）")
@@ -96,7 +94,7 @@ func serve() string {
 
 	// 單一實例：任一名稱能連上，表示已有 server（可能是舊版 zuin-server）在跑，它才是個人資料的寫入者。
 	for _, name := range names {
-		if alreadyRunning(name) {
+		if serving(name) {
 			fmt.Fprintln(os.Stderr, "0c-server 已經在執行：", name)
 			os.Exit(0)
 		}
@@ -130,16 +128,14 @@ func serve() string {
 	eng.Model.Now = func() int64 { return time.Now().Unix() }
 
 	// 使用者設定：預設神經選字與前文開啟，補標點（Beta）關閉。明確的 -neural-*／-punct-* 參數優先（開發與隔離測試）。
-	// #206：Windows 的中英切換鍵預設改成左右 Shift；0.2.4 以前存檔時順手寫進去的 right 在第一次以新版啟動時換一次。
+	// #206：中英切換鍵預設改成左右 Shift；0.2.4 以前存檔時順手寫進去的 right 在第一次以新版啟動時換一次。
 	// 放在引擎：不論是新版安裝程式、還是舊版更新器在背景裝上這一版，第一個以新設定服務的一定是新版引擎。
-	if writable && runtime.GOOS == "windows" {
+	if writable {
 		if adopted, err := settings.AdoptBothShift(*user); err != nil {
 			lg.Printf("中英切換鍵未換成左右 Shift，下次啟動再試：%v", err)
 		} else if adopted {
 			lg.Printf("中英切換鍵改成左右 Shift（Windows 的新預設，#206；可在設定程式改回右 Shift）")
 		}
-	}
-	if writable {
 		if adopted, err := settings.AdoptHoshiSymbols(*user); err != nil {
 			lg.Printf("符號預設未換成照微軟，下次啟動再試：%v", err)
 		} else if adopted {
@@ -172,9 +168,7 @@ func serve() string {
 	eng.CJKLatinSpace = config.CJKLatinSpace               // #273
 	eng.ZhuyinErrorHint = config.ZhuyinErrorHint           // #300
 	eng.NoLearning = !config.PersonalLearning              // #297
-	// #173：Windows、Linux 的設定；macOS 開 Caps Lock 一律切到英文（#84），不看設定檔的值。
-	capsSetting := config.CapsLockEnglish && (settings.CapsLockEnglishSetting(runtime.GOOS) || config.ProfileRules().CapsLetter == "lower")
-	eng.CapsLockEnglish = capsLockRequests(runtime.GOOS, capsSetting)
+	eng.CapsLockEnglish = config.CapsLockEnglish           // #173
 
 	if config.OutputSimplified { // #118：字典編在執行檔裡，只有開啟時才解析
 		if conv, err := simplified.TW2S(); err != nil {
@@ -367,8 +361,8 @@ func serve() string {
 		return vocabDisabled == "" && (vocabDirty || vocabVersion() != savedVocab)
 	}
 
-	var listeners []*endpoint
-	var stopping atomic.Bool // 已決定結束：端點由自己關閉，不再當成被移除
+	var listeners []net.Listener
+	var stopping atomic.Bool // 已決定結束（closeAll）：不再提醒或交接
 	stopAPI, apiInfo := func() {}, func() map[string]string { return map[string]string{"api_state": "off"} }
 	closeAll := func() {
 		stopping.Store(true)
@@ -393,7 +387,7 @@ func serve() string {
 	// 加詞、刪詞、改讀音與復原也會改學習資料（刪詞清掉指向它的手選、更正與證據，加詞解除 tombstone、
 	// 取代衝突的舊更正，#122）；只存 vocab.json 的話，之後沒打字就結束或交接，user.json 不會重寫，
 	// 重啟後留著指向已刪除自訂詞的更正（#196）。只標記、不加急：組字中加詞與候選窗反悔鍵也走這裡，
-	// 加急會在下一秒整份重寫 user.json，打字中途就存；交接（BeforeDrain）與結束（含 SIGTERM／SIGHUP、
+	// 加急會在下一秒整份重寫 user.json，打字中途就存；交接（BeforeDrain）與結束（含結束訊號、
 	// 閒置結束）一定會 save()，所以照一般學習等使用者停下來或最長間隔即可。
 	vocabEdited := func() error {
 		schedule.changed(time.Now(), false)
@@ -492,9 +486,8 @@ func serve() string {
 		"personal_learning": fmt.Sprint(!eng.NoLearning),
 		// #173：引擎認得 caps_lock 請求而且設定「Caps Lock 開著時直接打英文」開著；外殼只在這一項是 true 時回報
 		// Caps Lock 狀態，舊引擎沒有這一項、或設定關閉時，注音模式照舊不理 Caps Lock（#168）。
-		"caps_lock_english": fmt.Sprint(capsSetting),
-		// #219：引擎處理 caps_lock 請求（開啟暫時切英文、關閉回到開啟前的模式，期間手動切換為準）。macOS 一律是 true，
-		// macOS 外殼看到這一項才改送 caps_lock；舊引擎沒有這一項，外殼照舊送 mode。Windows、Linux 同 caps_lock_english。
+		"caps_lock_english": fmt.Sprint(eng.CapsLockEnglish),
+		// #219：引擎處理 caps_lock 請求（開啟暫時切英文、關閉回到開啟前的模式，期間手動切換為準）；同 caps_lock_english。
 		"caps_lock_request": fmt.Sprint(eng.CapsLockEnglish),
 		// #150：不打聲調也能選字；外殼不用看，0c-update 拿它跟設定檔比較。
 		"toneless": fmt.Sprint(eng.Toneless),
@@ -579,26 +572,18 @@ func serve() string {
 	var watch *installWatch
 	watchCtx, stopWatch := context.WithCancel(context.Background())
 	defer stopWatch() // 引擎結束時不留下還在核對的新執行檔
-	if exeErr == nil && (*installWatchMode == "on" || *installWatchMode == "auto" && installWatchEnabled(runtime.GOOS, executable, *data, installs.Default())) {
+	if exeErr == nil && *installWatchMode == "on" {
 		neuralDir := filepath.Join(filepath.Dir(filepath.Clean(*data)), "neural")
 		watch = newInstallWatch([]string{executable, filepath.Join(*data, "manifest.json"),
 			filepath.Join(neuralDir, "sequence_runtime.py"), filepath.Join(neuralDir, "punct_runtime.py"),
 			filepath.Join(neuralDir, "select", "manifest.json"), filepath.Join(neuralDir, "punct", "manifest.json")},
-			runningExecutable(), *installWatchEvery, time.Now())
-		lg.Printf("系統安裝：執行檔或字典被套件管理員換掉時，停手後自己交接到新版（每 %v 檢查）", *installWatchEvery)
+			*installWatchEvery, time.Now())
+		lg.Printf("執行檔或字典被換掉時，停手後自己交接到新版（每 %v 檢查）", *installWatchEvery)
 	}
 	remind.startup(time.Now())
 	go func() {
 		lastBusy := time.Now()
 		for now := range time.Tick(saveTick) {
-			for i, l := range listeners {
-				if !stopping.Load() && l.lost() {
-					// 例如登出時執行期目錄被清掉：留下來只會變成占著個人資料鎖、沒人連得到的孤兒。
-					lg.Printf("端點 %s 已被移除或由別的引擎取代，存檔後結束", names[i])
-					closeAll()
-					return
-				}
-			}
 			if schedule.due(now, srv.LastKey()) {
 				save()
 			}
@@ -653,10 +638,10 @@ func serve() string {
 		}
 	}()
 	sig := make(chan os.Signal, 1)
-	// SIGHUP：工作階段結束時也照常存檔再結束（學習最晚一分鐘才寫入，不能直接被終止）。
-	// Windows 登出／關機的 CTRL_LOGOFF_EVENT／CTRL_SHUTDOWN_EVENT 由 Go 轉成 SIGTERM；前提是引擎不載入
-	// user32／gdi32（見 logoff_windows_test.go）。
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	// 結束訊號都照常存檔再結束（學習最晚一分鐘才寫入，不能直接被終止）：Ctrl+C／Ctrl+Break 由 Go 轉成 SIGINT，
+	// 登出／關機的 CTRL_LOGOFF_EVENT／CTRL_SHUTDOWN_EVENT 轉成 SIGTERM；前提是引擎不載入 user32／gdi32
+	// （見 logoff_windows_test.go）。
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	stopSignals := watchSignals(sig, closeAll, signal.Stop)
 
 	var wg sync.WaitGroup
@@ -722,8 +707,3 @@ func watchSignals(sig chan os.Signal, onSignal func(), stopNotify func(chan<- os
 		}
 	}
 }
-
-// capsLockRequests 回報引擎要不要處理外殼送來的 caps_lock 請求（#173、#219）。Windows、Linux 照設定「Caps Lock 開著時
-// 直接打英文」（setting）；macOS 開 Caps Lock 一律是英文（#84），交給 caps_lock 讓核心記住開啟前的模式，關閉時回到那個模式
-// （開著期間手動切換過就照手動的）。設定檔的值只影響 info 的 caps_lock_english，不影響 macOS。
-func capsLockRequests(goos string, setting bool) bool { return goos == "darwin" || setting }

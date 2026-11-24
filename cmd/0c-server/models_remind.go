@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +18,9 @@ type modelRemind struct {
 	last                time.Time            // 只在存檔 goroutine 讀寫
 	committed           atomic.Bool          // 上次檢查之後送出過字
 }
+
+// newModelRemind：下載模型與提醒（#180）只在 Linux；Windows 的安裝包一定內建模型，不建立。
+func newModelRemind(string, string, *log.Logger) *modelRemind { return nil }
 
 // startup 是引擎啟動時的檢查（不算送出字；送出過字的紀錄由 0c-update 保存在 remind.json）。
 func (r *modelRemind) startup(now time.Time) {

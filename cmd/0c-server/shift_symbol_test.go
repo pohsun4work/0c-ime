@@ -1,12 +1,8 @@
-//go:build !windows
-
 package main
 
 import (
 	"encoding/json"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,15 +30,12 @@ func TestShiftSymbolHalfwidthSettingInServer(t *testing.T) {
 			t.Fatal(err)
 		}
 		hoshiSymbolsAdopted(t, dir, tc.adopted)
-		sock := filepath.Join(dir, "shift.sock")
-		server := exec.Command(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-legacy-socket", "")
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
+		sock := testPipe("shift")
+		server, _ := startServer(t, binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-legacy-socket", "")
 		func() {
-			defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+			defer stopServer(t, server)
 			waitDial(t, sock)
-			conn, err := net.Dial("unix", sock)
+			conn, err := dial(sock)
 			if err != nil {
 				t.Fatal(err)
 			}

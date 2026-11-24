@@ -1,11 +1,7 @@
-//go:build !windows
-
 package main
 
 import (
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -51,7 +47,7 @@ func testSavedMixedToggle(t *testing.T, full bool) {
 		}
 		data, words = target, 82015
 	}
-	sock := filepath.Join(dir, "mixed.sock")
+	sock := testPipe("mixed")
 	config := settings.Default()
 	config.Selection = settings.Statistical
 	config.Punctuation = false
@@ -60,15 +56,12 @@ func testSavedMixedToggle(t *testing.T, full bool) {
 		if err := settings.Save(filepath.Join(dir, settings.FileName), config); err != nil {
 			t.Fatal(err)
 		}
-		server := exec.Command(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock)
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		stop := func() { server.Process.Signal(os.Interrupt); server.Wait() }
+		server, _ := startServer(t, binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock)
+		stop := func() { stopServer(t, server) }
 		func() {
 			defer stop()
 			waitDial(t, sock)
-			conn, err := net.Dial("unix", sock)
+			conn, err := dial(sock)
 			if err != nil {
 				t.Fatal(err)
 			}

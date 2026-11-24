@@ -1,5 +1,3 @@
-//go:build !windows
-
 package main
 
 import (
@@ -9,10 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -26,69 +21,10 @@ import (
 	"github.com/0c-biggo/0c-ime/bridge/ipc"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
-	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
-	"github.com/0c-biggo/0c-ime/internal/installs"
 	"github.com/0c-biggo/0c-ime/internal/neural"
+	"golang.org/x/sys/windows"
 )
-
-func TestInstallWatchEnabledOnlyForLinuxSystemInstall(t *testing.T) {
-	root := t.TempDir()
-	// Fedora Silverblue：/home 是 /var/home 的符號連結，$HOME 寫 /home/<user>，執行檔的實際路徑在 /var/home。
-	realHome := filepath.Join(root, "var", "home", "u")
-	os.MkdirAll(realHome, 0o755)
-	os.MkdirAll(filepath.Join(root, "home"), 0o755)
-	home := filepath.Join(root, "home", "u")
-	if err := os.Symlink(realHome, home); err != nil {
-		t.Fatal(err)
-	}
-	prefix := filepath.Join(root, "usr")
-	l := installs.Layout{Home: home, Libexec: filepath.Join(prefix, "libexec", "0c"), Data: filepath.Join(prefix, "share", "0c"), Bin: filepath.Join(prefix, "bin")}
-	systemData := filepath.Join(prefix, "share", "0c", "data")
-	officialData := filepath.Join(realHome, ".local", "share", "zuin", "data")
-	devData := filepath.Join(root, "tmp", "share", "0c", "data")
-	for _, d := range []string{systemData, officialData, devData} {
-		os.MkdirAll(d, 0o755)
-	}
-	official := filepath.Join(realHome, ".local", "share", "zuin", "versions", "0.2.3", "bin", "0c-server")
-	officialBin := filepath.Join(realHome, ".local", "bin", "0c-server")
-	system := filepath.Join(l.Libexec, "0c-server")
-	dev := filepath.Join(root, "tmp", "go-build", "0c-server")
-	for _, exe := range []string{official, officialBin, system, dev} {
-		os.MkdirAll(filepath.Dir(exe), 0o755)
-		os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755)
-	}
-	for _, c := range []struct {
-		name, goos, exe, data string
-		marker, want          bool
-	}{
-		{"官網安裝的版本目錄（家目錄是符號連結）", "linux", official, officialData, false, false},
-		{"官網安裝的 ~/.local/bin（家目錄是符號連結）", "linux", officialBin, officialData, false, false},
-		{"官網安裝、字典旁卻有發行版標記：一律不開", "linux", official, officialData, true, false},
-		{"官網安裝的引擎指定系統字典（有標記）：一律不開", "linux", officialBin, systemData, true, false},
-		{"系統安裝在建置時設定的 libexec", "linux", system, systemData, false, true},
-		{"系統安裝有發行版標記", "linux", system, systemData, true, true},
-		{"/tmp 的開發建置", "linux", dev, devData, false, false},
-		{"別的位置、字典旁有發行版標記（發行版自訂 libexec）", "linux", dev, devData, true, true},
-		{"macOS 的 App 由 0c-update 交接", "darwin", system, systemData, true, false},
-		{"Windows", "windows", system, systemData, true, false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			marker := distributionMarker(c.data)
-			os.Remove(marker)
-			if c.marker {
-				os.WriteFile(marker, []byte(`{"schema":1,"updates":"package-manager"}`), 0o644)
-				defer os.Remove(marker)
-			}
-			if got := installWatchEnabled(c.goos, c.exe, c.data, l); got != c.want {
-				t.Fatalf("installWatchEnabled = %v，應為 %v", got, c.want)
-			}
-		})
-	}
-	if distributionMarker(systemData) != filepath.Join(prefix, "share", "0c", "distribution.json") {
-		t.Fatalf("marker path %s", distributionMarker(systemData))
-	}
-}
 
 // 檔案換掉後要連續兩次看到同一個新狀態才交接（套件可能還沒裝完）；核對失敗的那一組不再重試，檔案再變才重新考慮。
 func TestInstallWatchWaitsForStableFilesAndSkipsRejected(t *testing.T) {
@@ -98,7 +34,7 @@ func TestInstallWatchWaitsForStableFilesAndSkipsRejected(t *testing.T) {
 	os.WriteFile(exe, []byte("v1"), 0o755)
 	os.WriteFile(manifest, []byte("{}"), 0o644)
 	start := time.Now()
-	w := newInstallWatch([]string{exe, manifest, missing}, nil, time.Minute, start)
+	w := newInstallWatch([]string{exe, manifest, missing}, time.Minute, start)
 	at := func(m int) time.Time { return start.Add(time.Duration(m) * time.Minute) }
 	poll := func(m int) (bool, bool) { return w.poll(at(m)) }
 	if r, c := w.poll(start.Add(30 * time.Second)); r || c {
@@ -143,13 +79,6 @@ func TestInstallWatchWaitsForStableFilesAndSkipsRejected(t *testing.T) {
 	if r, _ := poll(9); !r {
 		t.Fatal("new stable files not ready")
 	}
-	// 執行中的程式以 /proc/self/exe 為準：啟動當下檔案正好被換掉時也看得出來。
-	running, _ := os.Stat(manifest)
-	w2 := newInstallWatch([]string{exe}, running, time.Minute, start)
-	w2.poll(at(1))
-	if r, _ := w2.poll(at(2)); !r {
-		t.Fatal("running binary differs from the file on disk but was not noticed")
-	}
 }
 
 // 寫一份已編譯的小字典（含 manifest.json）；回傳 manifest 的 SHA-256。
@@ -182,7 +111,7 @@ func writeCompiledData(t *testing.T, data string) string {
 
 func healthOf(t *testing.T, sock string) map[string]string {
 	t.Helper()
-	c, err := net.Dial("unix", sock)
+	c, err := dial(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +127,7 @@ func healthOf(t *testing.T, sock string) map[string]string {
 	return r.Info
 }
 
-// 系統安裝（Debian）：沒有內附 Python 時用系統的 python3，模型可以放在個人目錄；找到模型卻沒有 Python
+// 系統安裝：沒有內附 Python 時用系統的 Python，模型可以放在個人目錄；找到模型卻沒有 Python
 // 時回報 runtime_missing，照常用統計引擎打字。
 func TestSystemInstallNeuralDiscovery(t *testing.T) {
 	binary := buildServer(t)
@@ -228,26 +157,20 @@ func TestSystemInstallNeuralDiscovery(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(userDir, "settings.json"), []byte(`{"punctuation":true}`), 0o600)
 	run := func(t *testing.T, python string) map[string]string {
-		sock := filepath.Join(t.TempDir(), "0c.sock")
-		server := exec.Command(binary, "-data", data, "-user", filepath.Join(userDir, "user.json"), "-socket", sock,
+		sock := testPipe("system-python")
+		server, _ := startServer(t, binary, "-data", data, "-user", filepath.Join(userDir, "user.json"), "-socket", sock,
 			"-system-python", python, "-install-watch", "off")
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+		defer stopServer(t, server)
 		waitDial(t, sock)
 		return healthOf(t, sock)
 	}
 	t.Run("沒有 Python", func(t *testing.T) {
-		// 照樣以系統 Python 的路徑啟動 worker：執行檔不存在是 runtime_missing（10 分鐘重試，之後裝好 python3
+		// 照樣以系統 Python 的路徑啟動 worker：執行檔不存在是 runtime_missing（10 分鐘重試，之後裝好 Python
 		// 不必重啟引擎）；模型來源照實回報。
-		sock := filepath.Join(t.TempDir(), "0c.sock")
-		server := exec.Command(binary, "-data", data, "-user", filepath.Join(userDir, "user.json"), "-socket", sock,
-			"-system-python", filepath.Join(root, "no", "python3"), "-install-watch", "off")
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+		sock := testPipe("no-python")
+		server, _ := startServer(t, binary, "-data", data, "-user", filepath.Join(userDir, "user.json"), "-socket", sock,
+			"-system-python", filepath.Join(root, "no", "python.exe"), "-install-watch", "off")
+		defer stopServer(t, server)
 		waitDial(t, sock)
 		info := healthOf(t, sock)
 		for deadline := time.Now().Add(5 * time.Second); info["selection_state"] == "loading" || info["punctuation_state"] == "loading"; info = healthOf(t, sock) {
@@ -265,7 +188,8 @@ func TestSystemInstallNeuralDiscovery(t *testing.T) {
 		}
 	})
 	t.Run("系統 Python 與個人目錄的模型", func(t *testing.T) {
-		info := run(t, "/bin/sh") // 存在的執行檔；worker 腳本是空的，啟動後沒有就緒就退回
+		// 存在的執行檔；不認得 Python 的參數，啟動後沒有就緒就退回
+		info := run(t, filepath.Join(os.Getenv("SystemRoot"), "System32", "whoami.exe"))
 		want := map[string]string{"neural_python": "system", "neural_startup_state": "enabled", "selection_source": "user", "punctuation_source": "user"}
 		for k, v := range want {
 			if info[k] != v {
@@ -275,7 +199,7 @@ func TestSystemInstallNeuralDiscovery(t *testing.T) {
 	})
 }
 
-// 測試用的 stderr 收集器：引擎 exec 成新版之後仍寫同一個 fd，讀寫要上鎖。
+// 測試用的 stderr 收集器：引擎還在跑時就要讀，讀寫要上鎖。
 type lockedBuffer struct {
 	mu sync.Mutex
 	b  bytes.Buffer
@@ -288,157 +212,20 @@ func (l *lockedBuffer) Write(p []byte) (int, error) {
 }
 func (l *lockedBuffer) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
 
-func buildServerVersion(t *testing.T, version string) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "0c-server")
-	if out, err := exec.Command("go", "build", "-ldflags", "-X main.buildVersion="+version, "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	return binary
-}
-
-// 像 dpkg 一樣換檔：寫到 .dpkg-new 再改名蓋過去，執行中的引擎留著舊的 inode。
+// installFile 換掉安裝的檔案：執行中的程式不能被蓋過去，先把舊檔改名移開（執行中的引擎留著舊檔），再放新檔。
 func installFile(t *testing.T, src, dst string) {
 	t.Helper()
 	body, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dst+".dpkg-new", body, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(dst+".dpkg-new", dst); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// #181：apt upgrade 換掉 /usr 下的 0c-server 之後，引擎在使用者停手、沒有組字時自己交接到新版：
-// 交接前的學習存檔、連線斷開，外殼重連後由新版服務；組字中不交接；新執行檔載入不了字典時不交接。
-func TestSystemInstallHandsOverAfterPackageUpgrade(t *testing.T) {
-	v1, v2 := buildServerVersion(t, "v1"), buildServerVersion(t, "v2")
-	root := t.TempDir()
-	exe := filepath.Join(root, "libexec", "0c", "0c-server")
-	os.MkdirAll(filepath.Dir(exe), 0o755)
-	installFile(t, v1, exe)
-	data := filepath.Join(root, "share", "0c", "data")
-	writeCompiledData(t, data)
-	user := filepath.Join(root, "home", "user.json")
-	os.MkdirAll(filepath.Dir(user), 0o700)
-	sock := filepath.Join(root, "0c.sock")
-	logs := &lockedBuffer{}
-	server := exec.Command(exe, "-data", data, "-user", user, "-socket", sock,
-		"-install-watch", "on", "-install-watch-interval", "200ms", "-install-watch-idle", "500ms")
-	server.Stderr = logs
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
-	waitDial(t, sock)
-	pid := healthOf(t, sock)["pid"]
-
-	c, err := net.Dial("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	call := func(c net.Conn, env ipc.Envelope) (ipc.Reply, error) {
-		c.SetDeadline(time.Now().Add(3 * time.Second))
-		if err := ipc.WriteFrame(c, env); err != nil {
-			return ipc.Reply{}, err
-		}
-		var r ipc.Reply
-		err := ipc.ReadFrame(c, &r)
-		return r, err
-	}
-	must := func(c net.Conn, env ipc.Envelope) ipc.Reply {
-		t.Helper()
-		r, err := call(c, env)
-		if err != nil || !r.OK {
-			t.Fatalf("%+v %v\n%s", r, err, logs.String())
-		}
-		return r
-	}
-	open := must(c, ipc.Envelope{Op: ipc.OpOpen, Version: proto.Version})
-	key := func(c net.Conn, session uint64, k string) ipc.Reply {
-		return must(c, ipc.Envelope{Op: ipc.OpHandle, Session: session, Req: &proto.Request{Type: proto.Key, Key: k}})
-	}
-	for _, k := range "a86qi6" {
-		key(c, open.Session, string(k))
-	}
-	if r := key(c, open.Session, proto.KeyEnter); r.Snapshot == nil || r.Snapshot.Commit != "麻婆" {
-		t.Fatalf("commit: %+v", r)
-	}
-	// 新的執行檔壞了（例如套件裝到一半）：不交接，舊引擎照常服務。
-	broken := filepath.Join(t.TempDir(), "broken")
-	os.WriteFile(broken, []byte("#!/bin/sh\nexit 1\n"), 0o755)
-	installFile(t, broken, exe)
-	for deadline := time.Now().Add(10 * time.Second); !strings.Contains(logs.String(), "暫不交接"); time.Sleep(50 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("broken binary was not checked:\n%s", logs.String())
+	if _, err := os.Stat(dst); err == nil {
+		if err := os.Rename(dst, fmt.Sprintf("%s.old-%d", dst, time.Now().UnixNano())); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if info := healthOf(t, sock); info["version"] != "v1" || info["draining"] != "false" {
-		t.Fatalf("handed over to a broken binary: %v", info)
-	}
-	// 組字中：不交接。
-	for _, k := range "a86" {
-		key(c, open.Session, string(k))
-	}
-	installFile(t, v2, exe)
-	time.Sleep(2 * time.Second)
-	if info := healthOf(t, sock); info["version"] != "v1" || info["composing"] != "1" {
-		t.Fatalf("handed over while composing: %v", info)
-	}
-	for _, k := range "qi6" {
-		key(c, open.Session, string(k))
-	}
-	if r := key(c, open.Session, proto.KeyEnter); r.Snapshot == nil || r.Snapshot.Commit != "麻婆" {
-		t.Fatalf("commit while upgrade pending: %+v", r)
-	}
-	// 停手後交接：連線被斷開（外殼視為引擎切換），學習已存檔。
-	c.SetDeadline(time.Now().Add(15 * time.Second))
-	var r ipc.Reply
-	if err := ipc.ReadFrame(c, &r); err == nil {
-		t.Fatalf("connection not closed by handover: %+v", r)
-	} else if err != io.EOF && !strings.Contains(err.Error(), "reset") && !strings.Contains(err.Error(), "closed") {
-		t.Fatalf("waiting for handover: %v\n%s", err, logs.String())
-	}
-	// 外殼重連：新版在同一個行程（exec）服務。交接中的舊引擎可能還接受連線（存檔後才關端點），重試到新版回應為止。
-	var info map[string]string
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		if c, err := net.Dial("unix", sock); err == nil {
-			r, err := call(c, ipc.Envelope{Op: ipc.OpHealth})
-			c.Close()
-			if err == nil && r.OK && r.Info["version"] == "v2" {
-				info = r.Info
-				break
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("new engine not serving:\n%s", logs.String())
-		}
-	}
-	// 交接前的學習在斷線後、放鎖前存檔，新版讀得到。
-	if b, err := os.ReadFile(user); err != nil || !strings.Contains(string(b), "麻婆") {
-		t.Fatalf("learning not saved before handover: %v %s\n%s", err, b, logs.String())
-	}
-	if info["pid"] != pid || info["personal_store"] != "loaded" || info["personal_lock"] == "busy" {
-		t.Fatalf("handover state: pid %s→%s %v\n%s", pid, info["pid"], info, logs.String())
-	}
-	c2, err := net.Dial("unix", sock)
-	if err != nil {
+	if err := os.WriteFile(dst, body, 0o755); err != nil {
 		t.Fatal(err)
-	}
-	defer c2.Close()
-	open2 := must(c2, ipc.Envelope{Op: ipc.OpOpen, Version: proto.Version})
-	for _, k := range "a86qi6" {
-		key(c2, open2.Session, string(k))
-	}
-	if r := key(c2, open2.Session, proto.KeyEnter); r.Snapshot == nil || r.Snapshot.Commit != "麻婆" {
-		t.Fatalf("typing after handover: %+v", r)
-	}
-	if !strings.Contains(logs.String(), "交接到新版") || !strings.Contains(logs.String(), "換成新的執行檔") {
-		t.Fatalf("handover not logged:\n%s", logs.String())
 	}
 }
 
@@ -450,7 +237,7 @@ func TestInstallWatchRemembersPassedCheckAndRetriesTransientFailures(t *testing.
 	os.WriteFile(exe, []byte("v1"), 0o755)
 	start := time.Now()
 	at := func(d time.Duration) time.Time { return start.Add(d) }
-	w := newInstallWatch([]string{exe}, nil, time.Minute, start)
+	w := newInstallWatch([]string{exe}, time.Minute, start)
 	os.WriteFile(exe+".new", []byte("v2 longer"), 0o755)
 	os.Rename(exe+".new", exe)
 	w.poll(at(time.Minute))
@@ -512,37 +299,55 @@ func TestInstallWatchRemembersPassedCheckAndRetriesTransientFailures(t *testing.
 	}
 }
 
+const fakeEngineEnv = "ZC_TEST_FAKE_ENGINE"
+
+// fakeEngineMain 讓測試執行檔扮演被換上來的新執行檔（TestMain 依 fakeEngineEnv 轉來這裡）。
+func fakeEngineMain(mode string) int {
+	switch mode {
+	case "fails": // 自己回報載入失敗
+		fmt.Fprintln(os.Stderr, strings.Repeat("字", 150)) // 450 位元組
+		return 1
+	case "slow": // 卡住，直到叫它的行程結束：不留下占著暫存目錄裡執行檔的行程
+		if h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(os.Getppid())); err == nil {
+			windows.WaitForSingleObject(h, uint32((5 * time.Minute).Milliseconds()))
+		}
+		return 0
+	default:
+		fmt.Println("資料包可載入")
+		return 0
+	}
+}
+
 // -check-data 的失敗分兩種：新程式自己回報載入失敗是確定的；逾時、執行不了是暫時的。輸出依 UTF-8 字元截斷。
 func TestCheckNewEngineClassifiesFailures(t *testing.T) {
 	dir := t.TempDir()
-	script := func(name, body string) string {
-		p := filepath.Join(dir, name)
-		os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o755)
-		return p
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
 	}
-	long := strings.Repeat("字", 150) // 450 位元組
-	fails := script("fails", "echo '"+long+"' >&2\nexit 1")
-	slow := script("slow", "exec sleep 30")
-	ok := script("ok", "echo 資料包可載入")
+	long := strings.Repeat("字", 150)
 	var check *checkError
-	err := checkNewEngine(context.Background(), fails, dir, time.Minute)
+	t.Setenv(fakeEngineEnv, "fails")
+	err = checkNewEngine(context.Background(), self, dir, time.Minute)
 	if !errors.As(err, &check) || check.transient {
 		t.Fatalf("load failure: %#v", err)
 	}
 	if !utf8.ValidString(check.out) || len(check.out) > 300 || !strings.HasPrefix(long, check.out) || len(check.out) != 300 {
 		t.Fatalf("output cut in the middle of a character: %d bytes %q", len(check.out), check.out)
 	}
+	t.Setenv(fakeEngineEnv, "slow")
 	started := time.Now()
-	if err := checkNewEngine(context.Background(), slow, dir, 200*time.Millisecond); !errors.As(err, &check) || !check.transient {
+	if err := checkNewEngine(context.Background(), self, dir, 200*time.Millisecond); !errors.As(err, &check) || !check.transient {
 		t.Fatalf("timeout: %#v", err)
 	}
 	if time.Since(started) > 10*time.Second {
 		t.Fatal("timeout not enforced")
 	}
-	if err := checkNewEngine(context.Background(), filepath.Join(dir, "missing"), dir, time.Minute); !errors.As(err, &check) || !check.transient {
+	if err := checkNewEngine(context.Background(), filepath.Join(dir, "missing.exe"), dir, time.Minute); !errors.As(err, &check) || !check.transient {
 		t.Fatalf("not executable: %#v", err)
 	}
-	if err := checkNewEngine(context.Background(), ok, dir, time.Minute); err != nil {
+	t.Setenv(fakeEngineEnv, "ok")
+	if err := checkNewEngine(context.Background(), self, dir, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if got := truncateUTF8("ab字", 3); got != "ab" {
@@ -563,22 +368,8 @@ func TestWatchSignalsNeverMissesASignalBeforeStop(t *testing.T) {
 			t.Fatalf("round %d: signaled = %v", i, got)
 		}
 	}
-	// 真的訊號：Notify 之後送給自己。
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGHUP)
-	closed := make(chan struct{})
-	stop := watchSignals(sig, func() { close(closed) }, signal.Stop)
-	syscall.Kill(os.Getpid(), syscall.SIGHUP)
-	select {
-	case <-closed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("signal not handled")
-	}
-	if !stop() {
-		t.Fatal("handled signal not reported")
-	}
-	sig = make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGHUP)
+	signal.Notify(sig, os.Interrupt)
 	if watchSignals(sig, func() {}, signal.Stop)() {
 		t.Fatal("no signal but reported one")
 	}
@@ -586,33 +377,29 @@ func TestWatchSignalsNeverMissesASignalBeforeStop(t *testing.T) {
 
 // 新執行檔的核對在背景跑：核對卡住（最長 2 分鐘）時，引擎照樣依 -idle-exit 結束，不被擋住。
 func TestSystemInstallCheckDoesNotBlockTheEngineLoop(t *testing.T) {
-	v1 := buildServerVersion(t, "v1")
 	root := t.TempDir()
-	exe := filepath.Join(root, "libexec", "0c", "0c-server")
+	exe := filepath.Join(root, "libexec", "0c", "0c-server.exe")
 	os.MkdirAll(filepath.Dir(exe), 0o755)
-	installFile(t, v1, exe)
+	installFile(t, buildServer(t), exe)
 	data := filepath.Join(root, "share", "0c", "data")
 	writeCompiledData(t, data)
 	user := filepath.Join(root, "home", "user.json")
 	os.MkdirAll(filepath.Dir(user), 0o700)
-	sock := filepath.Join(root, "0c.sock")
+	sock := testPipe("check-blocks")
 	logs := &lockedBuffer{}
-	server := exec.Command(exe, "-data", data, "-user", user, "-socket", sock, "-idle-exit", "3s",
+	server := serverCommand(exe, "-data", data, "-user", user, "-socket", sock, "-idle-exit", "3s",
 		"-install-watch", "on", "-install-watch-interval", "200ms", "-install-watch-idle", "0s")
+	server.Env = append(os.Environ(), fakeEngineEnv+"=slow") // 換上來的「新執行檔」是卡住的測試執行檔
 	server.Stderr = logs
-	if err := server.Start(); err != nil {
+	launch(t, server)
+	waitDial(t, sock)
+	self, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	defer server.Process.Kill()
-	waitDial(t, sock)
-	stuck := filepath.Join(t.TempDir(), "stuck")
-	os.WriteFile(stuck, []byte("#!/bin/sh\nexec sleep 300\n"), 0o755)
-	installFile(t, stuck, exe)
-	exited := make(chan error, 1)
-	go func() { exited <- server.Wait() }()
-	select {
-	case <-exited:
-	case <-time.After(20 * time.Second):
+	installFile(t, self, exe)
+	exited, _ := waitFor(server, 20*time.Second)
+	if !exited {
 		t.Fatalf("engine loop blocked by the check:\n%s", logs.String())
 	}
 	if !strings.Contains(logs.String(), "閒置") {
