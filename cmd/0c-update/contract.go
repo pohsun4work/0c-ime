@@ -8,12 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/0c-biggo/0c-ime/core/fuzzy"
 	"github.com/0c-biggo/0c-ime/internal/autoupdate"
 	"github.com/0c-biggo/0c-ime/internal/models"
 	"github.com/0c-biggo/0c-ime/internal/settings"
@@ -102,13 +100,12 @@ func failJSON(w io.Writer, err error) error {
 }
 
 type fileView struct {
-	Path      string   `json:"path"`
-	WritePath string   `json:"write_path,omitempty"` // 讀取舊檔時，下一次修改寫入的新位置
-	State     string   `json:"state"`                // ok、missing、corrupt、unreadable
-	Schema    int      `json:"schema"`
-	ReadOnly  bool     `json:"read_only"` // 檔案來自較新版本：可讀不可改
-	Notes     []string `json:"notes"`
-	Error     string   `json:"error,omitempty"`
+	Path     string   `json:"path"`
+	State    string   `json:"state"` // ok、missing、corrupt、unreadable
+	Schema   int      `json:"schema"`
+	ReadOnly bool     `json:"read_only"` // 檔案來自較新版本：可讀不可改
+	Notes    []string `json:"notes"`
+	Error    string   `json:"error,omitempty"`
 }
 
 type engineView struct {
@@ -125,14 +122,13 @@ type settingsItem struct {
 }
 
 type settingsDoc struct {
-	Profiles       settings.ProfileView `json:"profiles"`
-	Schema         int                  `json:"schema"`
-	OK             bool                 `json:"ok"`
-	File           fileView             `json:"file"`
-	Engine         engineView           `json:"engine"`
-	Items          []settingsItem       `json:"items"`
-	PendingRestart bool                 `json:"pending_restart"`
-	Features       features             `json:"features"`
+	Schema         int            `json:"schema"`
+	OK             bool           `json:"ok"`
+	File           fileView       `json:"file"`
+	Engine         engineView     `json:"engine"`
+	Items          []settingsItem `json:"items"`
+	PendingRestart bool           `json:"pending_restart"`
+	Features       features       `json:"features"`
 }
 
 // features 是 0.2.0 的介面入口（#128）。開發期間由內部開關控制，0.2.0 起恆為 true；設定程式與外殼仍依此
@@ -149,154 +145,10 @@ type features struct {
 
 func featuresOf() features { return features{Vocab: true, PersonalReset: true} }
 
-// runningValues 把引擎 health 回報的啟動配置換成設定的命令列寫法；沒有回報的項目不出現。
-func runningValues(info map[string]string) map[string]string {
-	out := map[string]string{}
-	for _, key := range []string{"candidate-cursor", "candidate-layout", "emoji-shortcut", "keyboard-layout", "toggle-key", "shift-tap-ms", "mode-memory", "start-mode", "selection-keys"} {
-		if value := info[strings.ReplaceAll(key, "-", "_")]; value != "" {
-			out[key] = value
-		}
-	}
-	if v := info["selection_setting"]; v != "" {
-		out["selection"] = v
-	}
-	switch info["document_context"] {
-	case "true":
-		out["document-context"] = "on"
-	case "false":
-		out["document-context"] = "off"
-	}
-	switch info["left_shift"] {
-	case "true":
-		out["left-shift"] = "on"
-	case "false":
-		out["left-shift"] = "off"
-	}
-	switch info["esc_clear"] {
-	case "true":
-		out["esc-clear"] = "on"
-	case "false":
-		out["esc-clear"] = "off"
-	}
-	switch info["advance_after_select"] {
-	case "true":
-		out["advance-after-select"] = "on"
-	case "false":
-		out["advance-after-select"] = "off"
-	}
-	switch info["output_simplified"] {
-	case "true":
-		out["output-simplified"] = "on"
-	case "false":
-		out["output-simplified"] = "off"
-	}
-	switch info["simplified_hotkey"] { // #192
-	case "true":
-		out["simplified-hotkey"] = "on"
-	case "false":
-		out["simplified-hotkey"] = "off"
-	}
-	switch info["ctrl_punctuation"] {
-	case "true":
-		out["ctrl-punctuation"] = "on"
-	case "false":
-		out["ctrl-punctuation"] = "off"
-	}
-	switch info["shift_symbol_halfwidth"] { // #258
-	case "true":
-		out["shift-symbol-halfwidth"] = "on"
-		if info["all_symbols_halfwidth"] == "true" { // #282
-			out["shift-symbol-halfwidth"] = "all"
-		}
-	case "false":
-		out["shift-symbol-halfwidth"] = "off"
-	}
-	switch info["cjk_latin_space"] { // #273
-	case "true":
-		out["cjk-latin-space"] = "on"
-	case "false":
-		out["cjk-latin-space"] = "off"
-	}
-	switch info["personal_learning"] { // #297
-	case "true":
-		out["personal-learning"] = "on"
-	case "false":
-		out["personal-learning"] = "off"
-	}
-	switch info["zhuyin_error_hint"] { // #300
-	case "true":
-		out["zhuyin-error-hint"] = "on"
-	case "false":
-		out["zhuyin-error-hint"] = "off"
-	}
-	switch info["caps_lock_english"] { // #173
-	case "true":
-		out["caps-lock-english"] = "on"
-	case "false":
-		out["caps-lock-english"] = "off"
-	}
-	switch info["toneless"] { // #150
-	case "true":
-		out["toneless"] = "on"
-	case "false":
-		out["toneless"] = "off"
-	}
-	switch info["space_selects"] {
-	case "true":
-		out["space-selects"] = "on"
-	case "false":
-		out["space-selects"] = "off"
-	}
-	switch info["english_autocomplete"] {
-	case "true":
-		out["english-autocomplete"] = "on"
-	case "false":
-		out["english-autocomplete"] = "off"
-	}
-	switch info["mixed_input"] {
-	case "true":
-		out["mixed-input"] = "on"
-	case "false":
-		out["mixed-input"] = "off"
-	}
-	switch info["emoji_equals_first"] {
-	case "true":
-		out["emoji-equals-first"] = "on"
-	case "false":
-		out["emoji-equals-first"] = "off"
-	}
-	// 補標點只有模型狀態：依設定關閉時為 disabled_by_setting，其他狀態都表示設定為開。
-	if v := info["punctuation_state"]; v != "" {
-		out["punctuation"] = "on"
-		if v == "disabled_by_setting" {
-			out["punctuation"] = "off"
-		}
-	}
-	if key, ok := info["fuzzy"]; ok { // 欄位存在但為空字串：全部關閉
-		on := map[string]string{}
-		for _, part := range strings.Split(key, ",") {
-			if id, mode, found := strings.Cut(part, "="); found {
-				on[id] = mode
-			}
-		}
-		for _, p := range fuzzy.Pairs() {
-			mode := "off"
-			if m, found := on[p.ID()]; found {
-				mode = m
-			}
-			out["fuzzy-"+p.ID()] = mode
-		}
-	}
-	return out
-}
-
 func buildSettingsDoc(base string, dial autoupdate.Dialer) settingsDoc {
 	path := settings.Path(filepath.Join(base, "user.json"))
 	r, err := settings.Read(path)
 	file := fileView{Path: r.Path, State: r.State, Schema: r.Schema, ReadOnly: r.ReadOnly, Notes: append([]string{}, r.Notes...)}
-	if r.Path != path {
-		file.WritePath = path
-	}
 	if err != nil {
 		file.Error = err.Error()
 	}
@@ -308,23 +160,13 @@ func buildSettingsDoc(base string, dial autoupdate.Dialer) settingsDoc {
 		doc.Engine.State = "unavailable"
 	case up:
 		doc.Engine = engineView{State: "running", Version: info["version"]}
-		running = runningValues(info)
-	}
-	doc.Profiles = r.Settings.Profiles()
-	if up && herr == nil {
-		doc.Profiles.Running = info["input_profile"]
-		doc.Profiles.Pending = info["input_profile_fingerprint"] != "" && info["input_profile_fingerprint"] != r.Settings.ProfileFingerprint()
-		doc.PendingRestart = doc.Profiles.Pending
+		running = settings.RunningValues(info)
 	}
 	for _, it := range r.Settings.Items() {
 		item := settingsItem{Item: it}
 		if v, ok := running[it.Key]; ok {
 			item.Running = &v
-			want := it.Value
-			if it.Effective != "" { // 停用期間實際用的值（#184）
-				want = it.Effective
-			}
-			item.Pending = v != want
+			item.Pending = v != it.Value
 		}
 		doc.PendingRestart = doc.PendingRestart || item.Pending
 		doc.Items = append(doc.Items, item)
@@ -341,7 +183,14 @@ type setOptions struct {
 	repair bool // 設定檔壞掉時改名保留，從預設值重新開始
 }
 
-const setUsage = "用法：0c-update set selection neural|statistical、set punctuation on|off、set document-context on|off、set mixed-input on|off、set english-autocomplete on|off、set left-shift on|off、set shift-tap-ms 200|300|400|500|600、set esc-clear on|off、set space-selects on|off、set candidate-cursor before|after、set advance-after-select on|off、set output-simplified on|off、set simplified-hotkey on|off、set ctrl-punctuation on|off、set shift-symbol-halfwidth off|on|all、set cjk-latin-space on|off、set zhuyin-error-hint on|off、set personal-learning on|off、set caps-lock-english on|off（Windows、Linux）、set toneless on|off、set keyboard-layout standard|eten|hsu、set fuzzy-z-zh|fuzzy-c-ch|fuzzy-s-sh|fuzzy-en-eng off|select|auto [鍵 值 ...] [-apply] [-notify] [-json] [-repair]"
+// setUsage 列出每一項設定與允許值。
+func setUsage() string {
+	var parts []string
+	for _, it := range settings.Default().Items() {
+		parts = append(parts, "set "+it.Key+" "+strings.Join(it.Values, "|"))
+	}
+	return "用法：0c-update " + strings.Join(parts, "、") + " [鍵 值 ...] [-apply] [-notify] [-json] [-repair]"
+}
 
 func parseSetArgs(args []string) (setOptions, error) {
 	var o setOptions
@@ -369,7 +218,7 @@ func parseSetArgs(args []string) (setOptions, error) {
 		return o, usageError(err.Error())
 	}
 	if len(positional) < 2 || len(positional)%2 != 0 {
-		return o, usageError(setUsage)
+		return o, usageError(setUsage())
 	}
 	for i := 0; i < len(positional); i += 2 {
 		o.pairs = append(o.pairs, [2]string{positional[i], positional[i+1]})
@@ -401,7 +250,7 @@ type setResult struct {
 func runSet(base string, dial autoupdate.Dialer, o setOptions, notice func(string)) (setResult, error) {
 	path := settings.Path(filepath.Join(base, "user.json"))
 	res := setResult{Schema: contractSchema, OK: true, Changes: []changeView{}, Apply: applyView{State: applyNotRequested}}
-	err := autoupdate.WithLock(base, "settings-write.lock", func() error {
+	err := autoupdate.WithLock(base, settings.WriteLock, func() error {
 		r, err := settings.Read(path)
 		source := r.Path
 		quarantine := false
@@ -431,7 +280,7 @@ func runSet(base string, dial autoupdate.Dialer, o setOptions, notice func(strin
 		if err := settings.Save(path, s); err != nil {
 			return err
 		}
-		if choosesToggleKey(runtime.GOOS, o.pairs) {
+		if choosesToggleKey(o.pairs) {
 			// 自己選了中英切換鍵：新版引擎啟動時不再把右 Shift 換成左右 Shift（#206）。
 			if err := settings.MarkBothShift(path); err != nil {
 				fmt.Fprintln(os.Stderr, "0c-update: 無法記下中英切換鍵的選擇：", err)
@@ -443,33 +292,15 @@ func runSet(base string, dial autoupdate.Dialer, o setOptions, notice func(strin
 		return res, err
 	}
 	if o.apply {
-		if on, ok := liveSimplified(res.Changes); ok && autoupdate.SetOutputSimplified(dial, on) == nil {
-			res.Apply = applyView{Requested: true, State: applyApplied}
-			return res, nil
-		}
 		res.Apply = applySettings(dial, notice)
 		ensureEngineService(base) // 引擎交接退出後立刻叫起常駐引擎（#120）
 	}
 	return res, nil
 }
 
-// choosesToggleKey：Windows 上這次設定了中英切換鍵（新鍵 toggle-key 或舊鍵 left-shift，#206）。
-func choosesToggleKey(goos string, pairs [][2]string) bool {
-	return goos == "windows" && slices.ContainsFunc(pairs, func(p [2]string) bool { return p[0] == "toggle-key" || p[0] == "left-shift" })
-}
-
-// liveSimplified：這次只改了「輸出簡體字」，引擎可以即時切換、不必交接重啟（#169，設定程式的開關與舊外殼的選單都走這裡）。
-// 舊引擎、引擎沒在執行或切換失敗時，呼叫端照舊以交接重啟套用。
-func liveSimplified(changes []changeView) (on, ok bool) {
-	if len(changes) == 0 {
-		return false, false
-	}
-	for _, c := range changes {
-		if c.Key != "output-simplified" {
-			return false, false
-		}
-	}
-	return changes[len(changes)-1].To == "on", true
+// choosesToggleKey：這次設定了中英切換鍵（#206）。
+func choosesToggleKey(pairs [][2]string) bool {
+	return slices.ContainsFunc(pairs, func(p [2]string) bool { return p[0] == "toggle-key" })
 }
 
 // applySettings 請引擎在沒有組字時存檔退出；外殼的下一個按鍵會以新設定重新啟動引擎。

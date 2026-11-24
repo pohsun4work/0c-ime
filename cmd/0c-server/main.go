@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"os/signal"
@@ -23,19 +24,16 @@ import (
 	"time"
 
 	"github.com/0c-biggo/0c-ime/bridge/ipc"
-	"github.com/0c-biggo/0c-ime/core/engine"
-	"github.com/0c-biggo/0c-ime/core/layout"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/session"
 	"github.com/0c-biggo/0c-ime/core/vocab"
-	"github.com/0c-biggo/0c-ime/core/zhconv"
 	"github.com/0c-biggo/0c-ime/internal/datadir"
 	"github.com/0c-biggo/0c-ime/internal/e2esync"
 	"github.com/0c-biggo/0c-ime/internal/installs"
 	"github.com/0c-biggo/0c-ime/internal/neural"
 	"github.com/0c-biggo/0c-ime/internal/settings"
-	"github.com/0c-biggo/0c-ime/internal/simplified"
 )
 
 // buildVersion 由打包工具以 -ldflags "-X main.buildVersion=<版本>" 寫入；開發建置為 dev。
@@ -139,13 +137,6 @@ func serve() string {
 			lg.Printf("中英切換鍵改成左右 Shift（Windows 的新預設，#206；可在設定程式改回右 Shift）")
 		}
 	}
-	if writable {
-		if adopted, err := settings.AdoptHoshiSymbols(*user); err != nil {
-			lg.Printf("符號預設未換成照微軟，下次啟動再試：%v", err)
-		} else if adopted {
-			lg.Printf("符號預設改成照微軟：標點寬度所有符號鍵打半形、內建靈犀注音的標點操作改微軟參考")
-		}
-	}
 	settingsReport, configErr := settings.Read(settings.Path(*user))
 	config := settingsReport.Settings
 	if configErr != nil {
@@ -156,56 +147,18 @@ func serve() string {
 	}
 	eng.DocumentContextOff = !config.DocumentContext
 	eng.Fuzzy = config.FuzzyConfig()
-	eng.InputStyle = config.ProfileRules()
-	eng.MixedInput = config.MixedInput
-	eng.Toneless = config.EffectiveToneless() // #150：開啟時 session 停用混打的自動判斷；health 的 mixed_input 照設定檔回報。所有符號鍵打半形時暫停（#282）
+	eng.InputStyle = config.Rules()
+	eng.InputStyle.Version = inputstyle.Version
+	eng.InputStyle.Punctuation, eng.InputStyle.Up, eng.InputStyle.ShiftLetter, eng.InputStyle.CapsLetter = "microsoft", "cycle", "inline", "platform"
+	eng.MixedInput = true
 	eng.EnglishAutocomplete = config.EnglishAutocomplete
 	eng.CandidateBeforeCursor = config.CandidateCursor == "before"
-	eng.EmojiShortcut = config.EmojiShortcut
-	eng.EmojiEqualsFirst = config.EmojiEqualsFirst
 	eng.EscKeepComposition = !config.EscClear
-	eng.SpaceInsertsSpace = !config.SpaceSelects
 	eng.AdvanceAfterSelect = config.AdvanceAfterSelect
-	eng.CtrlPunct = config.EffectiveCtrlPunctuation()      // #168；所有符號鍵打半形時固定開（#282）
-	eng.ShiftSymbolHalfwidth = config.ShiftSymbolHalfwidth // #258
-	eng.AllSymbolsHalfwidth = config.AllSymbolsHalfwidth   // #282
-	eng.CJKLatinSpace = config.CJKLatinSpace               // #273
-	eng.ZhuyinErrorHint = config.ZhuyinErrorHint           // #300
-	eng.NoLearning = !config.PersonalLearning              // #297
-	// #173：Windows、Linux 的設定；macOS 開 Caps Lock 一律切到英文（#84），不看設定檔的值。
-	capsSetting := config.CapsLockEnglish && (settings.CapsLockEnglishSetting(runtime.GOOS) || config.ProfileRules().CapsLetter == "lower")
-	eng.CapsLockEnglish = capsLockRequests(runtime.GOOS, capsSetting)
-
-	if config.OutputSimplified { // #118：字典編在執行檔裡，只有開啟時才解析
-		if conv, err := simplified.TW2S(); err != nil {
-			lg.Printf("簡體字典無法載入，照樣送出繁體：%v", err)
-		} else {
-			eng.Simplified = conv
-		}
-	}
-	// #169：輸入法選單（與 0c-update set -apply）即時切換「輸出簡體字」：字典第一次開啟時才解析，之後共用；
-	// 新的值照 0c-update set 的寫法寫進設定檔（同一把寫入鎖、保留不認得的欄位），設定程式的開關跟著變。
-	eng.SimplifiedSwitch = engine.SimplifiedSwitch{
-		Load: func() (*zhconv.Converter, error) {
-			conv, err := simplified.TW2S()
-			if err != nil {
-				lg.Printf("簡體字典無法載入，照樣送出繁體：%v", err)
-			}
-			return conv, err
-		},
-		Save: func(on bool) error {
-			value := "off"
-			if on {
-				value = "on"
-			}
-			if _, err := settings.Change(*user, [2]string{"output-simplified", value}); err != nil {
-				lg.Printf("輸出簡體字已切換為 %s，但設定檔沒有寫入：%v", value, err)
-				return err
-			}
-			return nil
-		},
-	}
-	eng.SelectionKeys = config.SelectionKeys // #112
+	eng.CtrlPunct = true
+	eng.ShiftSymbolHalfwidth, eng.AllSymbolsHalfwidth = true, true
+	eng.NoLearning = !config.PersonalLearning // #297
+	eng.SelectionKeys = config.SelectionKeys  // #112
 	// 0.2.0 正式開放（#128）：引擎的欄位留著，零值給測試確認關閉時行為不變。
 	eng.Preview02 = true
 	eng.SharedMode = config.ModeMemory == settings.ModeShared // #115
@@ -232,12 +185,10 @@ func serve() string {
 			}
 		}
 	}
-	// 鍵盤排列（#83）：倚天 41 鍵時 session 停用混打與 = 開 Emoji；設定檔的值不動，health 照實回報。
-	eng.Layout, _ = layout.ByName(config.KeyboardLayout)
-	if config.CandidateLayout == "horizontal" {
-		eng.CandidateColumns = config.ProfileRules().CandidatePageSize
-	}
-	if config.CandidateLayout == "grid" {
+	switch config.CandidateLayout {
+	case "horizontal":
+		eng.CandidateColumns = config.PageSize
+	case "grid":
 		eng.CandidateColumns = 5
 	}
 	// 模型與字典配對出貨；缺 manifest 時無法核對配對，保留統計引擎，不讓輸入法停擺。
@@ -457,53 +408,23 @@ func serve() string {
 	}
 	srv.Info = map[string]string{"version": buildVersion, "protocol": fmt.Sprint(proto.Version),
 		"neural_startup_state": neuralState, "personal_store": personalState, "personal_lock": lockState,
-		"input_profile": config.ActiveProfile().ID, "input_profile_fingerprint": config.ProfileFingerprint(),
-		"input_style_shift_space": config.ProfileRules().ShiftSpace, "input_style_shift_letter": config.ProfileRules().ShiftLetter, "input_style_caps_letter": config.ProfileRules().CapsLetter,
-		"selection_setting": config.Selection, "punctuation": fmt.Sprint(eng.Punct != nil), "document_context": fmt.Sprint(config.DocumentContext),
-		"fuzzy": eng.Fuzzy.Key(), "mixed_input": fmt.Sprint(config.MixedInput), "english_autocomplete": fmt.Sprint(config.EnglishAutocomplete), "left_shift": fmt.Sprint(config.TogglesLeft()), "right_shift": fmt.Sprint(config.TogglesRight()), "toggle_key": config.ToggleKey, "shift_tap_ms": fmt.Sprint(config.ShiftTapMillis()), "mode_memory": config.ModeMemory, "start_mode": config.EffectiveStartMode(), "esc_clear": fmt.Sprint(config.EscClear), "space_selects": fmt.Sprint(config.SpaceSelects), "advance_after_select": fmt.Sprint(config.AdvanceAfterSelect),
-		"selection_keys": config.SelectionKeys, "candidate_cursor": config.CandidateCursor, "candidate_layout": config.CandidateLayout, "emoji_shortcut": config.EmojiShortcut, "emoji_equals_first": fmt.Sprint(config.EmojiEqualsFirst),
-		"keyboard_layout": config.KeyboardLayout, "preview_0_2": fmt.Sprint(eng.Preview02), "vocab_state": vocabState,
+		"punctuation": fmt.Sprint(eng.Punct != nil), "left_shift": fmt.Sprint(config.TogglesLeft()), "right_shift": fmt.Sprint(config.TogglesRight()),
+		"preview_0_2": fmt.Sprint(eng.Preview02), "vocab_state": vocabState,
 		// #123：外殼據此決定要不要把組字中的 Shift＋←／→、候選窗的 Shift＋Delete／⌫ 送給引擎。
 		"vocab_keys": fmt.Sprint(eng.Preview02 && vocabDisabled == ""),
 		// #135：沒在組字時的聲調鍵要交給核心（單按＋空白是聲調符號）；Windows 外殼在 TestKeyDown 依此決定。
 		"tone_mark_keys": fmt.Sprint(eng.ToneMarkKeys()),
-		// #183：沒在組字時引擎會處理的可見 ASCII 按鍵，依鍵盤排列與設定（許氏的數字、- / 交還應用程式）。
-		// Windows 外殼的 TestKeyDown 依此決定；舊引擎沒有這一項，外殼照舊依 keyboard_layout、emoji_shortcut 與 tone_mark_keys 推算。
+		// #183：沒在組字時引擎會處理的可見 ASCII 按鍵；Windows 外殼的 TestKeyDown 依此決定。
 		"idle_keys": eng.IdleKeys(),
 		// #278：全形（Shift＋空白）時沒在組字引擎會處理的可見 ASCII 按鍵（@ # * + 等打全形）。外殼在快照的 full_width
-		// 為 true 時照這一項；舊引擎沒有這一項，外殼照舊只補攔大寫、空白與 \ ' " < > ?。
+		// 為 true 時照這一項。
 		"idle_keys_full_width": eng.IdleKeysFullWidth(),
-		// #168：引擎認得 Ctrl＋標點的鍵名而且設定開著；外殼只在這一項是 true、又在中文模式時送那六個鍵，
-		// 舊引擎沒有這一項，外殼照舊交給應用程式。
+		// #168：外殼在這一項是 true、又在中文模式時送 Ctrl＋標點。
 		"ctrl_punctuation": fmt.Sprint(eng.CtrlPunct),
-		// #231：引擎認得的 Ctrl＋標點鍵（不跟著設定）。外殼送 Ctrl+: ( ) 前要看到這一項列了那個字元，
-		// 舊引擎沒有這一項，外殼只送最早的六個鍵。
-		"ctrl_punctuation_keys": proto.CtrlPunctKeys,
-		// #258：Shift＋符號打半形；外殼不用看（沒在組字時交還的鍵已從 idle_keys 拿掉），0c-update 拿它跟設定檔比較。
-		"shift_symbol_halfwidth": fmt.Sprint(eng.ShiftSymbolHalfwidth),
-		// #282：所有符號鍵打半形；外殼不用看（交還的鍵已從 idle_keys 拿掉），0c-update 拿它跟設定檔的標點寬度比較。
-		// 舊引擎沒有這一項，標點寬度選 all 時 0c-update 照舊顯示待套用。
-		"all_symbols_halfwidth": fmt.Sprint(eng.AllSymbolsHalfwidth),
-		// #273：中英文之間自動加空格；外殼不用看（送出的 Commit 已補好），0c-update 拿它跟設定檔比較。
-		"cjk_latin_space": fmt.Sprint(eng.CJKLatinSpace),
-		// #300：打錯注音時提示；外殼不用看（快照的 bell 說這一鍵要提示），0c-update 拿它跟設定檔比較。
-		"zhuyin_error_hint": fmt.Sprint(eng.ZhuyinErrorHint),
-		// #297：記住我選的字詞；外殼不用看（不學的是引擎），0c-update 拿它跟設定檔比較。
-		"personal_learning": fmt.Sprint(!eng.NoLearning),
-		// #173：引擎認得 caps_lock 請求而且設定「Caps Lock 開著時直接打英文」開著；外殼只在這一項是 true 時回報
-		// Caps Lock 狀態，舊引擎沒有這一項、或設定關閉時，注音模式照舊不理 Caps Lock（#168）。
-		"caps_lock_english": fmt.Sprint(capsSetting),
-		// #219：引擎處理 caps_lock 請求（開啟暫時切英文、關閉回到開啟前的模式，期間手動切換為準）。macOS 一律是 true，
-		// macOS 外殼看到這一項才改送 caps_lock；舊引擎沒有這一項，外殼照舊送 mode。Windows、Linux 同 caps_lock_english。
-		"caps_lock_request": fmt.Sprint(eng.CapsLockEnglish),
-		// #150：不打聲調也能選字；外殼不用看，0c-update 拿它跟設定檔比較。
-		"toneless": fmt.Sprint(eng.Toneless),
-		// #192：設定「用快捷鍵切換簡體字」開著；外殼只在這一項是 true 時攔切換鍵，按下時送 output_simplified（同選單）。
-		// 設定改了會重啟引擎，舊引擎沒有這一項，外殼照舊把這個鍵交給應用程式。
-		"simplified_hotkey": fmt.Sprint(config.SimplifiedHotkey),
-		// #169：引擎認得 output_simplified 請求，「輸出簡體字」可以即時切換；目前的值在 RuntimeInfo 的 output_simplified。
-		// 舊引擎沒有這一項，外殼退回 0c-update set output-simplified … -apply（重啟引擎套用）。
-		"output_simplified_live": "true"}
+		// #231：引擎認得的 Ctrl＋標點鍵；外殼送 Ctrl+: ( ) 前要看到這一項列了那個字元。
+		"ctrl_punctuation_keys": proto.CtrlPunctKeys}
+	// 啟動時載入的設定：外殼讀其中幾項（中英切換鍵、Shift＋空白、開始時的模式…），0c-update 拿它跟設定檔比較。
+	maps.Copy(srv.Info, config.HealthInfo())
 	// #181：模型從哪裡來（bundled：安裝包內建；user：個人目錄），推論用哪個 Python（bundled、system、custom、missing）。
 	srv.Info["neural_python"] = pythonSource
 	if selectionSource != "" {
@@ -535,8 +456,6 @@ func serve() string {
 			punctuationState = "fallback"
 		}
 		info := map[string]string{"selection_state": selectionState, "punctuation_state": punctuationState}
-		// 「輸出簡體字」可以從選單即時切換（#169）：回報引擎目前實際的值，設定程式據此判斷有沒有套用。
-		info["output_simplified"] = fmt.Sprint(eng.OutputSimplified())
 		// #160：新 session 開始時的模式（全部共用時是目前共用的模式）。外殼在第一個按鍵前據此顯示中／英。
 		info["initial_mode"] = proto.ModeZhuyin
 		if eng.InitialEnglish() {
@@ -722,8 +641,3 @@ func watchSignals(sig chan os.Signal, onSignal func(), stopNotify func(chan<- os
 		}
 	}
 }
-
-// capsLockRequests 回報引擎要不要處理外殼送來的 caps_lock 請求（#173、#219）。Windows、Linux 照設定「Caps Lock 開著時
-// 直接打英文」（setting）；macOS 開 Caps Lock 一律是英文（#84），交給 caps_lock 讓核心記住開啟前的模式，關閉時回到那個模式
-// （開著期間手動切換過就照手動的）。設定檔的值只影響 info 的 caps_lock_english，不影響 macOS。
-func capsLockRequests(goos string, setting bool) bool { return goos == "darwin" || setting }

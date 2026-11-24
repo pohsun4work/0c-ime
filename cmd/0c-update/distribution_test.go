@@ -75,27 +75,6 @@ func TestPackageManagedRefusesUpdateCommands(t *testing.T) {
 	}
 }
 
-// #229：輸入習慣（profile，#225）跟 set 一樣只改使用者自己的設定。系統安裝的新使用者預設是內建的 0c，
-// 被它鎖住的設定要先複製成自訂才能改，profile 被擋就完全改不了。
-func TestPackageManagedAllowsProfile(t *testing.T) {
-	setPackageManaged(t, true)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("LOCALAPPDATA", home)           // Windows 的設定在 %LOCALAPPDATA%\Zuin，不能寫到建置機使用者的真設定
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir()) // 沒有引擎：只寫設定檔
-	if err := run([]string{"set", "mixed-input", "off"}); err == nil || errors.Is(err, errPackageManaged) {
-		t.Fatalf("前提：新使用者的 mixed-input 由內建輸入習慣固定：%v", err)
-	}
-	out, err := captureStdout(t, func() error { return run([]string{"profile", "copy", "0c", "--name", "mine", "-json"}) })
-	var doc struct{ OK bool }
-	if err != nil || json.Unmarshal([]byte(out), &doc) != nil || !doc.OK {
-		t.Fatalf("profile copy：%v %s", err, out)
-	}
-	if err := run([]string{"set", "mixed-input", "off"}); err != nil {
-		t.Fatalf("複製成自訂之後應能改：%v", err)
-	}
-}
-
 // 官網安裝不受影響：同樣的命令不經過這道閘門。
 func TestSelfUpdatingInstallIsNotGated(t *testing.T) {
 	setPackageManaged(t, false)

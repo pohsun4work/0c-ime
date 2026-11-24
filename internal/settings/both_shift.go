@@ -11,6 +11,10 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/filelock"
 )
 
+// WriteLock 是讀改寫設定檔時持有的鎖（個人資料目錄的 update/settings-write.lock）：0c-update set 與
+// 引擎啟動時的 AdoptBothShift 都在這把鎖內讀改寫，彼此不會蓋掉對方剛寫的值。
+const WriteLock = "settings-write.lock"
+
 // BothShiftMarker 是 Windows 已經把舊的右 Shift 換成左右 Shift 的紀錄（#206），放在設定檔旁的 update 目錄
 // （%LOCALAPPDATA%\Zuin\update，與更新器的狀態同一處）。
 func BothShiftMarker(settingsPath string) string {
@@ -20,10 +24,10 @@ func BothShiftMarker(settingsPath string) string {
 // AdoptBothShift（#206）：Windows 的中英切換鍵預設從右 Shift 改成左右 Shift，沒有自己選過的舊用戶也跟著改。
 // 0.2.4 以前每次存檔都把當時的預設 right 寫進 toggle_key（改其他設定時也是），檔案分不出那是使用者選的還是順手寫進去的，
 // 所以第一次以新版啟動時把 toggle_key=right 改成 both 一次，並記下 marker；之後使用者自己改回右 Shift 不會再被改掉。
-// 沒有 toggle_key 的舊檔（或只有 left_shift=false）讀起來本來就是新預設，不必改寫；left／none／both 與讀不懂的值都保留。
-// 只改 toggle_key 與舊欄位 left_shift 的值，其他欄位（含本版不認得的）照原樣、照原順序寫回。
+// 沒有 toggle_key 的舊檔讀起來本來就是新預設，不必改寫；left／none／both 與讀不懂的值都保留。
+// 只改 toggle_key 的值，其他欄位（含本版不認得的）照原樣、照原順序寫回。
 // 較新版本的檔案不動；讀不到或無法解析時回傳錯誤、不記 marker，下次再試。
-// userStore 是個人詞庫 user.json；在設定檔的寫入鎖內讀改寫（同 Change）。
+// userStore 是個人詞庫 user.json；在設定檔的寫入鎖內讀改寫。
 func AdoptBothShift(userStore string) (bool, error) {
 	path := Path(userStore)
 	if _, err := os.Stat(BothShiftMarker(path)); err == nil {
@@ -60,7 +64,7 @@ func adoptBothShift(path string, b []byte) (bool, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return false, fmt.Errorf("%s：%w：%v", path, ErrCorrupt, err)
 	}
-	if s.readOnly || s.profiles != "" {
+	if s.readOnly {
 		return false, nil
 	}
 	members, err := orderedMembers(b)
@@ -90,15 +94,10 @@ func adoptBothShift(path string, b []byte) (bool, error) {
 		k, _ := json.Marshal(m.key)
 		out.Write(k)
 		out.WriteByte(':')
-		switch {
-		case m.key == "toggle_key":
+		if m.key == "toggle_key" {
 			out.Write(both)
-		case m.key == "left_shift" && bytes.Equal(bytes.TrimSpace(m.raw), []byte("false")):
-			out.WriteString("true") // 給讀 left_shift 的舊版：左 Shift 也切換
-		default:
-			if err := json.Compact(&out, m.raw); err != nil {
-				return false, fmt.Errorf("%s：%w：%v", path, ErrCorrupt, err)
-			}
+		} else if err := json.Compact(&out, m.raw); err != nil {
+			return false, fmt.Errorf("%s：%w：%v", path, ErrCorrupt, err)
 		}
 	}
 	out.WriteByte('}')

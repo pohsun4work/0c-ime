@@ -274,7 +274,7 @@ func TestSetTextOutputKeepsExistingWording(t *testing.T) {
 }
 
 func TestRunningValuesMapEngineHealthToSettingKeys(t *testing.T) {
-	got := runningValues(map[string]string{"selection_setting": "statistical", "document_context": "false", "punctuation_state": "disabled_by_setting", "fuzzy": "z-zh=select,en-eng=select"})
+	got := settings.RunningValues(map[string]string{"selection_setting": "statistical", "document_context": "false", "punctuation_state": "disabled_by_setting", "fuzzy": "z-zh=select,en-eng=select"})
 	want := map[string]string{"selection": "statistical", "document-context": "off", "punctuation": "off",
 		"fuzzy-z-zh": "select", "fuzzy-c-ch": "off", "fuzzy-s-sh": "off", "fuzzy-en-eng": "select"}
 	for k, v := range want {
@@ -283,22 +283,22 @@ func TestRunningValuesMapEngineHealthToSettingKeys(t *testing.T) {
 		}
 	}
 	// 引擎回報 auto：原樣對應到設定值，設定檔寫 auto 但引擎還在跑舊設定時 pending 才算得出來。
-	if got := runningValues(map[string]string{"fuzzy": "z-zh=auto,c-ch=select"}); got["fuzzy-z-zh"] != "auto" || got["fuzzy-c-ch"] != "select" || got["fuzzy-s-sh"] != "off" {
+	if got := settings.RunningValues(map[string]string{"fuzzy": "z-zh=auto,c-ch=select"}); got["fuzzy-z-zh"] != "auto" || got["fuzzy-c-ch"] != "select" || got["fuzzy-s-sh"] != "off" {
 		t.Errorf("auto 的對應：%v", got)
 	}
 	// 欄位存在但為空字串：全部關閉；欄位不存在（舊版引擎）：不知道。
-	if all := runningValues(map[string]string{"fuzzy": ""}); all["fuzzy-z-zh"] != "off" || len(all) != 4 {
+	if all := settings.RunningValues(map[string]string{"fuzzy": ""}); all["fuzzy-z-zh"] != "off" || len(all) != 4 {
 		t.Errorf("fuzzy 為空字串表示全部關閉：%v", all)
 	}
-	if old := runningValues(map[string]string{"version": "old", "selection_setting": "neural"}); len(old) != 1 || old["selection"] != "neural" {
+	if old := settings.RunningValues(map[string]string{"version": "old", "selection_setting": "neural"}); len(old) != 1 || old["selection"] != "neural" {
 		t.Errorf("舊版引擎沒回報的項目不得猜測：%v", old)
 	}
-	if on := runningValues(map[string]string{"punctuation_state": "fallback"}); on["punctuation"] != "on" {
+	if on := settings.RunningValues(map[string]string{"punctuation_state": "fallback"}); on["punctuation"] != "on" {
 		t.Errorf("補標點模型退回時，設定仍是開：%v", on)
 	}
 	for _, tc := range []struct{ value, want string }{{"true", "on"}, {"false", "off"}, {"", ""}} {
-		if got := runningValues(map[string]string{"emoji_equals_first": tc.value})["emoji-equals-first"]; got != tc.want {
-			t.Fatalf("equals option runtime %q => %q, want %q", tc.value, got, tc.want)
+		if got := settings.RunningValues(map[string]string{"esc_clear": tc.value})["esc-clear"]; got != tc.want {
+			t.Fatalf("switch runtime %q => %q, want %q", tc.value, got, tc.want)
 		}
 	}
 }

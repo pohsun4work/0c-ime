@@ -8,23 +8,23 @@ import (
 )
 
 // #319：「單按 Shift 的時限」經 settings --json 給設定程式；引擎回報的 shift_tap_ms 跟設定檔不同時標示待套用
-// （舊引擎固定回報 300，也就是它實際用的值），沒回報時不猜。不屬於輸入習慣風格，新安裝也不鎖。
+// ，沒回報時不猜。
 func TestShiftTapContractReportsPending(t *testing.T) {
 	base := t.TempDir()
 	writeSettings(t, base, `{"shift_tap_ms":500}`)
 	for _, tc := range []struct{ runtime, want string }{{"300", "300"}, {"500", "500"}, {"", ""}} {
-		v, ok := runningValues(map[string]string{"shift_tap_ms": tc.runtime})["shift-tap-ms"]
+		v, ok := settings.RunningValues(map[string]string{"shift_tap_ms": tc.runtime})["shift-tap-ms"]
 		if v != tc.want || ok != (tc.runtime != "") {
 			t.Fatalf("runtime %q: %q %v", tc.runtime, v, ok)
 		}
 		doc := buildSettingsDoc(base, modelStatusDial(map[string]string{"shift_tap_ms": tc.runtime}, true))
 		it := item(t, doc, "shift-tap-ms")
-		if it.Value != "500" || it.Default != "300" || it.Locked || it.Pending != (tc.runtime == "300") || (it.Running != nil) != ok {
+		if it.Value != "500" || it.Default != "300" || it.Pending != (tc.runtime == "300") || (it.Running != nil) != ok {
 			t.Fatalf("pending contract: %+v", it)
 		}
 	}
 	fresh := t.TempDir()
-	if it := item(t, buildSettingsDoc(fresh, noEngine), "shift-tap-ms"); it.Value != "300" || it.Locked {
+	if it := item(t, buildSettingsDoc(fresh, noEngine), "shift-tap-ms"); it.Value != "300" {
 		t.Fatalf("新安裝：%+v", it)
 	}
 }

@@ -403,7 +403,7 @@ impl Session {
     /// 舊推算（字母交給引擎，同 0.2.4 的本地判斷）。不記代數，下一個鍵重新問。英文模式、Ctrl／Alt 組合不會走到這裡（wants_key）。
     pub fn style_shift_space(&mut self) -> bool {
         let _ = self.idle_key("");
-        matches!(self.idle_info.as_ref().and_then(|v| v["input_style_shift_space"].as_str()), Some("fullwidth" | "space" | "single"))
+        matches!(self.idle_info.as_ref().and_then(|v| v["shift_space"].as_str()), Some("fullwidth" | "space" | "single"))
     }
 
     pub fn style_caps_lower(&mut self) -> bool {
@@ -2025,7 +2025,7 @@ mod tests {
                                 "caps_lock_english": caps.load(Ordering::SeqCst).to_string(),
                                 "left_shift": caps.load(Ordering::SeqCst).to_string(),
                                 "right_shift": caps.load(Ordering::SeqCst).to_string(),
-                                "input_style_shift_space": if caps.load(Ordering::SeqCst) { "fullwidth" } else { "disabled" },
+                                "shift_space": if caps.load(Ordering::SeqCst) { "fullwidth" } else { "disabled" },
                                 "input_style_caps_letter": if caps.load(Ordering::SeqCst) { "lower" } else { "platform" },
                                 "start_mode": if start_english { "english" } else { "zhuyin" },
                                 "initial_mode": if start_english { "english" } else { "zhuyin" },

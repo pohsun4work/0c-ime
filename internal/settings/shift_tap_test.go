@@ -76,11 +76,11 @@ func TestShiftTapDefaultsTo300AndPersists(t *testing.T) {
 	}
 }
 
-// 設定程式的「中英切換」頁顯示這一項：選項名稱寫秒數；不用 Shift 切換時不作用（停用、指向中英切換鍵）；
-// 不屬於輸入習慣風格，內建風格也不鎖。中英切換鍵的說明不再寫死 0.3 秒。
+// 設定程式的「中英切換」頁顯示這一項：選項名稱寫秒數；不用 Shift 切換時不作用（停用、指向中英切換鍵）。
+// 中英切換鍵的說明不再寫死 0.3 秒。
 func TestShiftTapItem(t *testing.T) {
 	s := Default()
-	s.setToggleKey(ToggleRight)
+	s.ToggleKey = ToggleRight
 	var tap, toggle *Item
 	items := s.Items()
 	for i := range items {
@@ -94,7 +94,7 @@ func TestShiftTapItem(t *testing.T) {
 	if tap == nil || toggle == nil {
 		t.Fatal("沒有 shift-tap-ms 或 toggle-key")
 	}
-	if tap.Default != "300" || tap.Value != "300" || strings.Join(tap.Values, ",") != "200,300,400,500,600" || tap.Disabled || tap.Locked {
+	if tap.Default != "300" || tap.Value != "300" || strings.Join(tap.Values, ",") != "200,300,400,500,600" || tap.Disabled {
 		t.Fatalf("%+v", *tap)
 	}
 	if tap.ValueLabels["200"] != "0.2 秒" || tap.ValueLabels["300"] != "0.3 秒" || tap.ValueLabels["600"] != "0.6 秒" {
@@ -103,13 +103,8 @@ func TestShiftTapItem(t *testing.T) {
 	if strings.Contains(toggle.Description, "0.3 秒") || !strings.Contains(toggle.Description, "「"+tap.Label+"」") {
 		t.Fatalf("中英切換鍵的說明要指向時限設定，不寫死秒數：%s", toggle.Description)
 	}
-	for _, key := range profileKeys {
-		if key == "shift-tap-ms" {
-			t.Fatal("不屬於輸入習慣風格")
-		}
-	}
 	none := Default()
-	none.setToggleKey(ToggleNone)
+	none.ToggleKey = ToggleNone
 	for _, it := range none.Items() {
 		if it.Key == "shift-tap-ms" && (!it.Disabled || it.DisabledBy != "toggle-key" || it.Value != "300") {
 			t.Fatalf("不用 Shift 時停用並指向中英切換鍵：%+v", it)

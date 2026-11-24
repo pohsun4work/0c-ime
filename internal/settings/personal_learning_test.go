@@ -61,7 +61,7 @@ func TestPersonalLearningDefaultsOnAndPersists(t *testing.T) {
 	}
 	for _, it := range Default().Items() {
 		if it.Key == "personal-learning" {
-			if it.Value != "on" || it.Default != "on" || it.Label != "記住我選的字詞" || it.Locked || it.Disabled ||
+			if it.Value != "on" || it.Default != "on" || it.Label != "記住我選的字詞" || it.Disabled ||
 				!strings.Contains(it.Description, "神經選字") || !strings.Contains(it.Description, "清除學習紀錄") {
 				t.Fatalf("設定程式的項目：%+v", it)
 			}
@@ -69,28 +69,4 @@ func TestPersonalLearningDefaultsOnAndPersists(t *testing.T) {
 		}
 	}
 	t.Fatal("設定程式看不到記住我選的字詞的開關")
-}
-
-// 個人偏好，不屬於輸入習慣風格：選用內建風格時照樣可以單獨關閉，換風格不改這個開關。
-func TestPersonalLearningIsNotLockedByProfiles(t *testing.T) {
-	path := filepath.Join(t.TempDir(), FileName)
-	for _, id := range []string{"0c", "microsoft", "chewing", "mcbopomofo", "macos"} {
-		s := freshSettings()
-		if err := s.ProfileAction("select", id, ""); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.Set("personal-learning", "off"); err != nil {
-			t.Fatalf("%s 風格應可關閉：%v", id, err)
-		}
-		if err := Save(path, s); err != nil {
-			t.Fatal(err)
-		}
-		back, err := Load(path)
-		if err != nil || back.ReadOnly() || back.PersonalLearning || back.ActiveProfile().ID != id {
-			t.Fatalf("%s：重新讀取 %+v %v", id, back.ActiveProfile(), err)
-		}
-		if err := back.ProfileAction("select", "0c", ""); err != nil || back.PersonalLearning {
-			t.Fatalf("%s：換風格不改這個開關：%v", id, err)
-		}
-	}
 }
