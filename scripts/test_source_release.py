@@ -16,6 +16,19 @@ import fetch_assets
 import source_release as release
 
 
+def symlinks_supported():
+    """Windows creates symlinks only with Developer Mode or administrator rights."""
+    with tempfile.TemporaryDirectory() as temp:
+        try:
+            os.symlink("target", os.path.join(temp, "link"))
+        except OSError:
+            return False
+    return True
+
+
+SYMLINKS = symlinks_supported()
+
+
 def fixture_dictionary(directory):
     directory.mkdir()
     source = {"ID": "fixture", "Name": "Fixture", "URL": "https://example.invalid",
@@ -53,6 +66,7 @@ class SourceReleaseTests(unittest.TestCase):
         self.cache = self.work / "cache"
         self.cache.mkdir()
         self.git("init", "-q")
+        self.git("config", "core.autocrlf", "false")  # 雜湊比對 lock 檔的原始位元組：不讓 Windows 的 Git 換行轉換改動它們
         self.git("config", "user.name", "Source Release Test")
         self.git("config", "user.email", "test@example.invalid")
         self.models = {}
@@ -90,14 +104,15 @@ class SourceReleaseTests(unittest.TestCase):
             pair["packages"][role] = {name: {"sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
                                       for name, content in metadata(original["manifest.json"], original["vocab.json"], dictionary).items()}
         (self.repo / PAIR_LOCK).write_bytes(release.json_bytes(pair))
-        (self.repo / "README.md").write_text("Tagged source\n")
+        (self.repo / "README.md").write_bytes(b"Tagged source\n")
         (self.repo / release.RULES).write_text("AGENTS.md\ndocs/\ndata/research/\ndata/lm/bigram/\n")
         (self.repo / "tool.sh").write_text("#!/bin/sh\nexit 0\n")
-        (self.repo / "tool.sh").chmod(0o755)
-        (self.repo / "alias").symlink_to("README.md")
+        if SYMLINKS:
+            (self.repo / "alias").symlink_to("README.md")
         (self.repo / ".gitattributes").write_text("private/ export-ignore\n")
         (self.repo / "private").mkdir()
         (self.repo / "private/note.txt").write_text("not for release")
+        self.git("add", "--chmod=+x", "tool.sh")  # Windows 的檔案沒有執行位元，直接記在 index
         self.commit_tag("v0.2.0")
 
     def git(self, *args):
@@ -119,17 +134,19 @@ class SourceReleaseTests(unittest.TestCase):
     def legacy(self, tarball):
         """A 0.2.2-style tarball: the models inside the source tarball, schema 2."""
         stage = self.work / "legacy-stage"
+        executable = set()
         for archive in (tarball, self.models_of(tarball)):
             with tarfile.open(archive) as source:
                 release.extract(source, stage)
+                executable |= release.executables(source)
         (root,) = stage.iterdir()
         (root / release.MODELS_RECORD).unlink()
         record = json.loads((root / release.RECORD).read_bytes())
-        record.update(schema=2, files=release.inventory(root))
+        record.update(schema=2, files=release.inventory(root, executable))
         (root / release.RECORD).write_bytes(release.json_bytes(record))
         legacy = self.work / "legacy" / tarball.name
         legacy.parent.mkdir()
-        release.pack(root, legacy, record["source_date_epoch"])
+        release.pack(root, legacy, record["source_date_epoch"], executable)
         return legacy
 
     def rewrite(self, tarball, target, change):
@@ -154,7 +171,8 @@ class SourceReleaseTests(unittest.TestCase):
         self.assertEqual(record["schema"], 3)
         self.assertEqual(record["commit"], self.git("rev-parse", "v0.2.0"))
         self.assertEqual(record["files"]["tool.sh"]["mode"], 0o755)
-        self.assertEqual(record["files"]["alias"], {"link": "README.md"})
+        if SYMLINKS:
+            self.assertEqual(record["files"]["alias"], {"link": "README.md"})
         self.assertNotIn("private/note.txt", record["files"])
         self.assertNotIn("untracked.txt", record["files"])
         # The source tarball is DFSG-free: the paired models ship in their own tarball.
@@ -511,11 +529,14 @@ class SourceReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "--release"):
             fetch_assets.default_tag(root)
 
-    def test_rejects_escaping_symlinks_and_traversal(self):
+    @unittest.skipUnless(SYMLINKS, "這個帳號不能建立符號連結")
+    def test_rejects_escaping_symlinks(self):
         (self.repo / "escape").symlink_to("../outside")
         self.commit_tag("v0.2.1")
         with self.assertRaises((ValueError, tarfile.FilterError)):
             self.build(tag="v0.2.1")
+
+    def test_rejects_traversal(self):
         bad = self.work / "traversal.tar"
         with tarfile.open(bad, "w") as archive:
             archive.addfile(tarfile.TarInfo("../outside"), io.BytesIO())

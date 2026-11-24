@@ -22,4 +22,3 @@ docs/oss export-ignore
 docs/acceptance export-ignore
 data/research export-ignore
 migration export-ignore
-Mac-E2E.md export-ignore

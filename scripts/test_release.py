@@ -1,561 +1,28 @@
-"""Check release rejection, tampering and installation recovery in temporary directories."""
+"""Check release rejection and tampering in temporary directories."""
 
-from contextlib import redirect_stderr, redirect_stdout
-import io
 import json
-import os
-import shutil
-import plistlib
 from pathlib import Path
-import stat
+import shutil
 import struct
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-import install_package as installer
-import build_settings_macos
-import macos_version
-import package_macos
-import package_macos_pkg
+import make_installer
 import package_release as packager
 import package_windows
 import package_windows_installer
 import release_feed
 import site_manifest
-import make_installer
-import subprocess
-import upgrade
-
-# 目錄連結只有一般使用者才接受；測試在 root 的容器裡跑時，這些情境要換成拒絕，不必驗。
-skip_as_root = unittest.skipIf(os.getuid() == 0, "root 不接受目錄連結")
 
 
 class ReleaseTests(unittest.TestCase):
-    def add_kimpanel_spacing(self):
-        self.add_status_icons()
-        source = self.bundle / installer.KIMPANEL_SPACING
-        shutil.copy2(packager.PLATFORM / "kimpanel-spacing.js", source)
-        self.release['files'][installer.KIMPANEL_SPACING] = installer.digest(source)
-        self.save_release()
-        indicator = self.home / installer.KIMPANEL_INDICATOR
-        indicator.parent.mkdir(parents=True)
-        original = "class Indicator {\n    _setIcon(property) {\n        this.mainIcon.gicon = property.icon;\n    }\n}\n"
-        indicator.write_text(original)
-        return indicator, original
-
-    def test_kimpanel_spacing_install_repeat_rollback_and_uninstall(self):
-        indicator, original = self.add_kimpanel_spacing()
-        backup = installer.install(self.bundle, self.home, self.release)
-        compact = indicator.read_text()
-        self.assertIn('padding: 0; margin: 0;', compact)
-        self.assertNotIn(installer.KIMPANEL_INDICATOR, json.loads((self.home / installer.RECEIPT).read_text())['files'])
-        second = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(indicator.read_text(), compact)
-        installer.rollback(self.home, second)
-        self.assertEqual(indicator.read_text(), compact)
-        installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), original)
-        installer.install(self.bundle, self.home, self.release)
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), original)
-        self.assertEqual(self.user.read_text(), 'private learning')
-
-    def test_kimpanel_downgrade_removes_patch_and_rollback_restores_it(self):
-        indicator, original = self.add_kimpanel_spacing()
-        installer.install(self.bundle, self.home, self.release)
-        compact = indicator.read_text()
-        (self.bundle / installer.KIMPANEL_SPACING).unlink()
-        del self.release['files'][installer.KIMPANEL_SPACING]
-        self.release['channel'] = 'preview'
-        self.save_release()
-        # Exercise the supported CLI: the new installer verifies and installs an older bundle.
-        with patch.object(installer.sys, 'argv', ['install.py', 'install', '--bundle', str(self.bundle), '--home', str(self.home)]), \
-                patch.object(installer.os, 'getuid', return_value=1000), \
-                patch.object(installer, 'runtime_check'), patch.object(installer, 'require_desktop_stopped'):
-            installer.main()
-        backup = Path(json.loads((self.home / installer.RECEIPT).read_text())['backup'])
-        self.assertEqual(indicator.read_text(), original)
-        installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), compact)
-
-    def test_kimpanel_downgrade_rollback_restores_block_amid_user_edits(self):
-        indicator, original = self.add_kimpanel_spacing()
-        installer.install(self.bundle, self.home, self.release)
-        compact = indicator.read_text()
-        (self.bundle / installer.KIMPANEL_SPACING).unlink()
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(indicator.read_text(), original)
-        edited = original.replace('class Indicator {', 'class Indicator {\n    // user customization') + '// trailing edit\n'
-        indicator.write_text(edited)
-        installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), compact.replace('class Indicator {', 'class Indicator {\n    // user customization') + '// trailing edit\n')
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), edited)
-
-    def apply_make_upgrade_spacing(self, indicator):
-        platform = self.root / 'source-platform'
-        platform.mkdir()
-        shutil.copy2(packager.PLATFORM / 'kimpanel-spacing.js', platform / 'kimpanel-spacing.js')
-        with patch.object(upgrade, 'INSTALL_HOME', self.home), patch.object(upgrade, 'BASE', self.home / '.local/share/zuin'), \
-                patch.object(upgrade, 'PLATFORM', platform):
-            upgrade.install({}, [])
-            self.assertIsNone(upgrade.install({}, []))
-
-    def test_make_upgrade_then_package_downgrade_rollback_and_uninstall(self):
-        indicator, original = self.add_kimpanel_spacing()
-        # Begin with a package that knows nothing about the spacing feature.
-        (self.bundle / installer.KIMPANEL_SPACING).unlink()
-        del self.release['files'][installer.KIMPANEL_SPACING]
-        self.save_release()
-        installer.install(self.bundle, self.home, self.release)
-        receipt = (self.home / installer.RECEIPT).read_bytes()
-        self.apply_make_upgrade_spacing(indicator)
-        compact = indicator.read_text()
-        self.assertNotEqual(compact, original)
-        self.assertEqual((self.home / installer.RECEIPT).read_bytes(), receipt)
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(indicator.read_text(), original)
-        indicator.write_text(original + '// edit after downgrade\n')
-        installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), compact + '// edit after downgrade\n')
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), original + '// edit after downgrade\n')
-        self.assertFalse((self.home / installer.OPTIONAL[installer.KIMPANEL_SPACING]).exists())
-        self.assertEqual(self.user.read_text(), 'private learning')
-
-    def test_make_upgrade_then_package_uninstall_without_downgrade(self):
-        indicator, original = self.add_kimpanel_spacing()
-        (self.bundle / installer.KIMPANEL_SPACING).unlink()
-        del self.release['files'][installer.KIMPANEL_SPACING]
-        self.save_release()
-        installer.install(self.bundle, self.home, self.release)
-        self.apply_make_upgrade_spacing(indicator)
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), original)
-        self.assertFalse((self.home / installer.OPTIONAL[installer.KIMPANEL_SPACING]).exists())
-
-    def test_kimpanel_downgrade_rollback_preserves_updated_hook_or_other_patch(self):
-        indicator, original = self.add_kimpanel_spacing()
-        installer.install(self.bundle, self.home, self.release)
-        compact = indicator.read_text()
-        (self.bundle / installer.KIMPANEL_SPACING).unlink()
-        backup = installer.install(self.bundle, self.home, self.release)
-        for i, changed in enumerate((original.replace('_setIcon(property)', '_newSetIcon(property)'),
-                                     compact.replace('padding: 0;', 'padding: 3px;'))):
-            with self.subTest(changed=changed):
-                if i:
-                    indicator.write_text(compact)
-                    backup = installer.install(self.bundle, self.home, self.release)
-                indicator.write_text(changed)
-                installer.rollback(self.home, backup)
-                self.assertEqual(indicator.read_text(), changed)
-
-    def test_kimpanel_legacy_receipt_without_shared_record_can_remove_patch(self):
-        indicator, original = self.add_kimpanel_spacing()
-        installer.install(self.bundle, self.home, self.release)
-        (self.home / installer.KIMPANEL_RECORD).unlink()
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), original)
-
-    def test_kimpanel_provenance_tracks_actual_fragment_bytes(self):
-        indicator, original = self.add_kimpanel_spacing()
-        source = self.bundle / installer.KIMPANEL_SPACING
-        source.write_bytes(source.read_bytes().replace(b'\n', b'\r\n'))
-        self.release['files'][installer.KIMPANEL_SPACING] = installer.digest(source)
-        self.save_release()
-        installer.verify(self.bundle)
-        installer.install(self.bundle, self.home, self.release)
-        self.assertIsNotNone(installer.owned_kimpanel_snippet(self.home))
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), original)
-
-    def test_kimpanel_altered_provenance_does_not_authorize_patch_removal(self):
-        indicator, original = self.add_kimpanel_spacing()
-        installer.install(self.bundle, self.home, self.release)
-        compact = indicator.read_text()
-        record = self.home / installer.KIMPANEL_RECORD
-        record.write_text('{"schema": 1, "snippet_sha256": "wrong"}')
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), compact)
-        self.assertTrue(record.exists())
-
-    def test_kimpanel_rollback_and_uninstall_preserve_other_extension_edits(self):
-        indicator, original = self.add_kimpanel_spacing()
-        backup = installer.install(self.bundle, self.home, self.release)
-        indicator.write_text(indicator.read_text() + '// user customization\n')
-        installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), original + '// user customization\n')
-        installer.install(self.bundle, self.home, self.release)
-        indicator.write_text(indicator.read_text() + '// another edit\n')
-        installer.uninstall(self.home)
-        self.assertEqual(indicator.read_text(), original + '// user customization\n// another edit\n')
-
-    def test_kimpanel_extension_update_and_edited_patch_survive_rollback(self):
-        indicator, original = self.add_kimpanel_spacing()
-        backup = installer.install(self.bundle, self.home, self.release)
-        upgraded = original.replace('_setIcon', '_newSetIcon')
-        indicator.write_text(upgraded)
-        installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), upgraded)
-        indicator.write_text(original)
-        backup = installer.install(self.bundle, self.home, self.release)
-        customized = indicator.read_text().replace('padding: 0;', 'padding: 2px;')
-        indicator.write_text(customized)
-        installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), customized)
-
-    def test_kimpanel_failed_install_restores_extension_and_programs(self):
-        indicator, original = self.add_kimpanel_spacing()
-        real_copy = installer.atomic_copy
-        def fail_receipt(src, dst):
-            if dst == self.home / installer.RECEIPT:
-                raise OSError('receipt failure')
-            return real_copy(src, dst)
-        with patch.object(installer, 'atomic_copy', side_effect=fail_receipt):
-            with self.assertRaisesRegex(OSError, 'receipt failure'):
-                installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(indicator.read_text(), original)
-        self.assertFalse((self.home / installer.OPTIONAL[installer.KIMPANEL_SPACING]).exists())
-
-    def test_kimpanel_unknown_structure_and_absent_extension_are_untouched(self):
-        indicator, original = self.add_kimpanel_spacing()
-        unknown = original.replace('_setIcon(property)', '_setIcon(data)')
-        indicator.write_text(unknown)
-        installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(indicator.read_text(), unknown)
-        indicator.unlink()
-        installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(indicator.exists())
-
-    def test_legacy_bundle_does_not_inspect_unrelated_kimpanel_symlink(self):
-        indicator = self.home / installer.KIMPANEL_INDICATOR
-        indicator.parent.mkdir(parents=True)
-        external = self.root / 'indicator.js'
-        external.write_text('unrelated extension')
-        indicator.symlink_to(external)
-        installer.install(self.bundle, self.home, self.release)
-        installer.uninstall(self.home)
-        self.assertEqual(external.read_text(), 'unrelated extension')
-
-    def test_kimpanel_symlink_is_rejected_without_modifying_target(self):
-        indicator, original = self.add_kimpanel_spacing()
-        indicator.unlink()
-        external = self.root / 'indicator.js'
-        external.write_text(original)
-        indicator.symlink_to(external)
-        with self.assertRaisesRegex(ValueError, '符號連結'):
-            installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(external.read_text(), original)
-        self.assertFalse((self.home / installer.RECEIPT).exists())
-
-    def test_kimpanel_tampered_replacement_backup_rejected(self):
-        indicator, original = self.add_kimpanel_spacing()
-        backup = installer.install(self.bundle, self.home, self.release)
-        indicator.write_text(indicator.read_text() + '// user customization\n')
-        current = indicator.read_text()
-        (backup / 'new-indicator.js').write_text('tampered')
-        with self.assertRaisesRegex(ValueError, '備份雜湊'):
-            installer.rollback(self.home, backup)
-        self.assertEqual(indicator.read_text(), current)
-
-    def add_legacy_status_icons(self):
-        self.add_status_icons()
-        for name in installer.LEGACY_STATUS_ICONS:
-            target = self.bundle / name
-            target.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>\n')
-            self.release['files'][name] = installer.digest(target)
-        self.save_release()
-
-    def remove_legacy_status_icons(self):
-        for name in installer.LEGACY_STATUS_ICONS:
-            (self.bundle / name).unlink()
-            del self.release['files'][name]
-        self.save_release()
-
-    def test_color_icons_remove_old_symbolic_and_support_rollback_and_downgrade(self):
-        self.add_legacy_status_icons()
-        installer.verify(self.bundle)
-        installer.install(self.bundle, self.home, self.release)
-        old = {name: (self.home / name).read_bytes() for name in installer.LEGACY_STATUS_ICONS.values()}
-        self.remove_legacy_status_icons()
-        installer.verify(self.bundle)
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertTrue(all(not (self.home / name).exists() for name in old))
-        receipt = json.loads((self.home / installer.RECEIPT).read_text())
-        self.assertTrue(all(name not in receipt['files'] for name in old))
-        self.assertTrue(all((self.home / name).is_file() for name in installer.STATUS_ICONS.values()))
-        installer.rollback(self.home, backup)
-        self.assertEqual({name: (self.home / name).read_bytes() for name in old}, old)
-        installer.install(self.bundle, self.home, self.release)
-        self.add_legacy_status_icons()
-        installer.verify(self.bundle)
-        installer.install(self.bundle, self.home, self.release)
-        self.assertEqual({name: (self.home / name).read_bytes() for name in old}, old)
-        installer.uninstall(self.home)
-        self.assertTrue(all(not (self.home / name).exists() for name in old))
-        self.assertEqual(self.user.read_text(), 'private learning')
-
-    def test_icon_changes_refresh_running_gnome_icon_theme(self):
-        theme = self.home / installer.ICON_THEME
-        applications = self.home / installer.APPLICATIONS
-        self.add_legacy_status_icons()
-        installer.install(self.bundle, self.home, self.release)
-        applications.mkdir(parents=True)
-        def age():
-            for path in (theme, applications):
-                os.utime(path, (1_000_000, 1_000_000))
-        age()
-        # 同樣的圖示重裝：不動目錄時間，桌面不必重讀。
-        before = installer.icon_files(self.home)
-        installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(installer.refresh_icon_theme(self.home, before))
-        self.assertEqual([p.stat().st_mtime for p in (theme, applications)], [1_000_000] * 2)
-        # 移除單色圖：hicolor 與應用程式目錄都要換時間，GNOME Shell 才會重讀並改用彩色圖。
-        self.remove_legacy_status_icons()
-        before = installer.icon_files(self.home)
-        installer.install(self.bundle, self.home, self.release)
-        self.assertTrue(installer.refresh_icon_theme(self.home, before))
-        self.assertTrue(all(p.stat().st_mtime > 1_000_000 for p in (theme, applications)))
-
-    def test_failed_color_icon_upgrade_restores_removed_symbolic_icons(self):
-        self.add_legacy_status_icons()
-        installer.install(self.bundle, self.home, self.release)
-        old = {name: (self.home / name).read_bytes() for name in installer.LEGACY_STATUS_ICONS.values()}
-        self.remove_legacy_status_icons()
-        real_copy = installer.atomic_copy
-        def fail_receipt(src, dst):
-            if dst == self.home / installer.RECEIPT and src.name == 'new-receipt.json':
-                raise OSError('receipt write failure')
-            return real_copy(src, dst)
-        with patch.object(installer, 'atomic_copy', side_effect=fail_receipt):
-            with self.assertRaisesRegex(OSError, 'receipt write failure'):
-                installer.install(self.bundle, self.home, self.release)
-        self.assertEqual({name: (self.home / name).read_bytes() for name in old}, old)
-        self.assertEqual(self.user.read_text(), 'private learning')
-
-    def test_kde_icon_refresh_only_targets_installing_users_session(self):
-        with patch.object(installer.Path, 'home', return_value=self.home), \
-             patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/private-test-bus'}), \
-             patch.object(installer.shutil, 'which', return_value='/usr/bin/busctl'), \
-             patch.object(installer.subprocess, 'run') as run:
-            run.return_value.returncode = 0
-            self.assertFalse(installer.refresh_kde_icons(self.home / 'other-user', run))
-            with patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': ''}):
-                self.assertFalse(installer.refresh_kde_icons(self.home, run))
-            run.assert_not_called()
-            self.assertTrue(installer.refresh_kde_icons(self.home, run))
-            run.assert_called_once_with(
-                ['busctl', '--user', 'emit', '/KIconLoader', 'org.kde.KIconLoader', 'iconChanged', 'i', '0'],
-                capture_output=True, timeout=3)
-            run.reset_mock()
-            with patch.object(installer.shutil, 'which', side_effect=lambda name: '/usr/bin/dbus-send' if name == 'dbus-send' else None):
-                self.assertTrue(installer.refresh_kde_icons(self.home, run))
-            self.assertEqual(run.call_args.args[0], [
-                'dbus-send', '--session', '--type=signal', '/KIconLoader', 'org.kde.KIconLoader.iconChanged', 'int32:0'])
-            run.side_effect = subprocess.TimeoutExpired('busctl', 3)
-            self.assertFalse(installer.refresh_kde_icons(self.home, run))
-
-    def test_icon_refresh_notifies_kde_only_when_icons_change(self):
-        with patch.object(installer, 'refresh_kde_icons') as notify:
-            self.assertFalse(installer.refresh_icon_theme(self.home, installer.icon_files(self.home)))
-            notify.assert_not_called()
-            before = installer.icon_files(self.home)
-            icon = self.home / next(iter(installer.STATUS_ICONS.values()))
-            icon.parent.mkdir(parents=True, exist_ok=True)
-            icon.write_text('<svg/>')
-            self.assertTrue(installer.refresh_icon_theme(self.home, before))
-            notify.assert_called_once_with(self.home)
-
-    def test_after_install_runs_the_installed_updater_only_for_a_direct_install(self):
-        # #276：直接執行 install.py install 不經過 0c-update 的 afterInstall，排程與選單項目要由這裡請 0c-update 建立。
-        updater = self.home / installer.PAYLOAD['bin/0c-update']
-        run = unittest.mock.Mock()
-        run.return_value.returncode = 0
-        clean = {k: v for k, v in os.environ.items() if k not in ('ZC_UPDATER', 'ZC_MANAGED_RELOAD', 'ZC_NO_SCHEDULE')}
-        with patch.object(installer.Path, 'home', return_value=self.home), patch.dict(os.environ, clean, clear=True):
-            self.assertFalse(installer.after_install(self.home, run), '還沒裝好 0c-update 就不呼叫')
-            updater.parent.mkdir(parents=True, exist_ok=True)
-            updater.write_text('updater')
-            self.assertTrue(installer.after_install(self.home, run))
-            run.assert_called_once_with([str(updater), 'after-install'], capture_output=True, timeout=60)
-            run.reset_mock()
-            for env in ({'ZC_UPDATER': '1'}, {'ZC_MANAGED_RELOAD': '1'}, {'ZC_NO_SCHEDULE': '1'}):
-                with patch.dict(os.environ, env):
-                    self.assertFalse(installer.after_install(self.home, run), f'{env}：由 0c-update 接著處理，或測試環境')
-            self.assertFalse(installer.after_install(self.home / 'other-user', run), '裝到別的 --home 不碰目前使用者的排程與選單')
-            run.assert_not_called()
-            run.side_effect = subprocess.TimeoutExpired('0c-update', 30)
-            self.assertFalse(installer.after_install(self.home, run), '失敗不影響安裝')
-
-    def test_direct_install_creates_the_menu_entry_before_refreshing_icons(self):
-        # 設定程式的圖示由同一個動作寫入；要在通知桌面重讀圖示之前，KDE 的啟動器才會顯示它，不是空白圖示。
-        icon = self.home / installer.DESKTOP_ICON
-        def entry(home):
-            self.assertEqual(home, self.home)
-            icon.parent.mkdir(parents=True, exist_ok=True)
-            icon.write_bytes(b'png')
-            return True
-        self.release['channel'] = 'internal-preview'
-        self.save_release()
-        with patch.object(installer.sys, 'argv', ['install.py', 'install', '--bundle', str(self.bundle), '--home', str(self.home)]), \
-                patch.object(installer.os, 'getuid', return_value=1000), \
-                patch.object(installer, 'runtime_check'), patch.object(installer, 'require_desktop_stopped'), \
-                patch.object(installer, 'first_install', return_value=True), \
-                patch.object(installer, 'clear_session_addon_dirs'), patch.object(installer, 'settings_dependencies'), \
-                patch.object(installer, 'report_fcitx_addon', return_value=True), \
-                patch.object(installer, 'after_install', side_effect=entry) as after_install, \
-                patch.object(installer, 'refresh_kde_icons') as notify, redirect_stdout(io.StringIO()):
-            installer.main()
-        after_install.assert_called_once()
-        notify.assert_called_once_with(self.home.resolve())
-
-    def add_status_icons(self):
-        for name in installer.STATUS_ICONS:
-            target = self.bundle / name
-            target.parent.mkdir(exist_ok=True)
-            shutil.copy2(packager.PLATFORM / name, target)
-            self.release["files"][name] = installer.digest(target)
-        self.save_release()
-
-    def test_status_icons_upgrade_downgrade_rollback_and_uninstall(self):
-        preference = self.home / ".config/fcitx5/conf/classicui.conf"
-        preference.parent.mkdir(parents=True)
-        preference.write_text("PreferTextIcon=True\n")
-        # A receipt from before the icons existed remains usable.
-        installer.install(self.bundle, self.home, self.release)
-        self.add_status_icons()
-        installer.verify(self.bundle)
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(preference.read_text(), "PreferTextIcon=False\n")
-        targets = [self.home / name for name in installer.STATUS_ICONS.values()]
-        expected = [path.read_bytes() for path in targets]
-        installer.rollback(self.home, backup)
-        self.assertEqual(preference.read_text(), "PreferTextIcon=True\n")
-        self.assertTrue(all(not path.exists() for path in targets))
-        installer.install(self.bundle, self.home, self.release)
-        for name in installer.STATUS_ICONS:
-            (self.bundle / name).unlink()
-            del self.release["files"][name]
-        self.save_release()
-        installer.verify(self.bundle)
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertTrue(all(not path.exists() for path in targets))
-        installer.rollback(self.home, backup)
-        self.assertEqual([path.read_bytes() for path in targets], expected)
-        installer.uninstall(self.home)
-        self.assertTrue(all(not path.exists() for path in targets))
-        self.assertEqual(preference.read_text(), "PreferTextIcon=False\n")
-        self.assertEqual(self.user.read_text(), "private learning")
-
-    def test_icon_preference_created_and_removed_on_rollback(self):
-        self.add_status_icons()
-        preference = self.home / installer.CLASSIC_UI
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(preference.read_text(), "PreferTextIcon=False\n")
-        self.assertNotIn(installer.CLASSIC_UI, json.loads((self.home / installer.RECEIPT).read_text())["files"])
-        installer.rollback(self.home, backup)
-        self.assertFalse(preference.exists())
-
-    def test_both_panel_preferences_are_transactional(self):
-        self.add_status_icons()
-        for relative in installer.UI_CONFIGS:
-            path = self.home / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("# local\nPreferTextIcon=True\n")
-        backup = installer.install(self.bundle, self.home, self.release)
-        for relative in installer.UI_CONFIGS:
-            self.assertEqual((self.home / relative).read_text(), "# local\nPreferTextIcon=False\n")
-        installer.rollback(self.home, backup)
-        for relative in installer.UI_CONFIGS:
-            self.assertEqual((self.home / relative).read_text(), "# local\nPreferTextIcon=True\n")
-
-    def test_second_panel_failure_restores_first_panel_and_programs(self):
-        self.add_status_icons()
-        for relative in installer.UI_CONFIGS:
-            path = self.home / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("PreferTextIcon=True\n")
-        real_copy = installer.atomic_copy
-        def fail_second_panel(src, dst):
-            if dst == self.home / installer.UI_CONFIGS[1]:
-                raise OSError("second panel disk failure")
-            real_copy(src, dst)
-        with patch.object(installer, "atomic_copy", side_effect=fail_second_panel):
-            with self.assertRaisesRegex(OSError, "second panel"):
-                installer.install(self.bundle, self.home, self.release)
-        for relative in installer.UI_CONFIGS:
-            self.assertEqual((self.home / relative).read_text(), "PreferTextIcon=True\n")
-        self.assertFalse((self.home / installer.RECEIPT).exists())
-        self.assertTrue(all(not (self.home / name).exists() for name in installer.STATUS_ICONS.values()))
-
-    def test_icon_preference_preserves_sections_and_comments(self):
-        self.add_status_icons()
-        preference = self.home / installer.CLASSIC_UI
-        preference.parent.mkdir(parents=True)
-        original = b"# theme\r\nTheme=Yaru-dark\r\n# PreferTextIcon=True\r\n[Font]\r\nPreferTextIcon=True\r\n"
-        preference.write_bytes(original)
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(preference.read_bytes(), original.replace(b"[Font]", b"PreferTextIcon=False\r\n[Font]"))
-        installer.rollback(self.home, backup)
-        self.assertEqual(preference.read_bytes(), original)
-
-    def test_icon_rollback_preserves_later_theme_or_preference_changes(self):
-        self.add_status_icons()
-        preference = self.home / installer.CLASSIC_UI
-        preference.parent.mkdir(parents=True)
-        for changed, expected in (("Theme=New\nPreferTextIcon=False\n", "Theme=New\nPreferTextIcon=True\n"),
-                                  ("Theme=New\nPreferTextIcon=True\n", "Theme=New\nPreferTextIcon=True\n")):
-            with self.subTest(changed=changed):
-                preference.write_text("Theme=Old\nPreferTextIcon=True\n")
-                backup = installer.install(self.bundle, self.home, self.release)
-                preference.write_text(changed)
-                installer.rollback(self.home, backup)
-                self.assertEqual(preference.read_text(), expected)
-
-    def test_icon_preference_failure_restores_programs_and_original_config(self):
-        installer.install(self.bundle, self.home, self.release)
-        self.add_status_icons()
-        preference = self.home / installer.CLASSIC_UI
-        preference.parent.mkdir(parents=True)
-        original = "Theme=Original\nPreferTextIcon=True\n"
-        preference.write_text(original)
-        real_copy = installer.atomic_copy
-        def fail_receipt(src, dst):
-            if dst == self.home / installer.RECEIPT and src.name == "new-receipt.json":
-                raise OSError("disk full after preference")
-            return real_copy(src, dst)
-        with patch.object(installer, "atomic_copy", side_effect=fail_receipt):
-            with self.assertRaisesRegex(OSError, "disk full"):
-                installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(preference.read_text(), original)
-        self.assertTrue(all(not (self.home / name).exists() for name in installer.STATUS_ICONS.values()))
-        self.assertEqual(self.user.read_text(), "private learning")
-
-    def test_icon_preference_symlink_rejected_before_install(self):
-        self.add_status_icons()
-        preference = self.home / installer.CLASSIC_UI
-        preference.parent.mkdir(parents=True)
-        external = self.root / "external.conf"
-        external.write_text("PreferTextIcon=True\n")
-        preference.symlink_to(external)
-        with self.assertRaisesRegex(ValueError, "符號連結"):
-            installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(external.read_text(), "PreferTextIcon=True\n")
-        self.assertFalse((self.home / installer.RECEIPT).exists())
-
-    def test_status_icons_partial_or_tampered_bundle_rejected(self):
-        self.add_status_icons()
-        name = next(iter(installer.STATUS_ICONS))
-        (self.bundle / name).write_text("tampered")
-        with self.assertRaisesRegex(ValueError, "雜湊"):
-            installer.verify(self.bundle)
-        del self.release["files"][name]
-        (self.bundle / name).unlink()
-        self.save_release()
-        with self.assertRaisesRegex(ValueError, "狀態圖示"):
-            installer.verify(self.bundle)
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
 
     @staticmethod
     def data_snapshot(stage):
@@ -585,21 +52,21 @@ class ReleaseTests(unittest.TestCase):
         data.mkdir(parents=True)
         for name in ("lexicon.bin", "lm.bin"):
             (data / name).write_bytes(("fixture " + name).encode())
-            manifest["files"][name] = {"sha256": installer.digest(data / name), "size": (data / name).stat().st_size}
+            manifest["files"][name] = {"sha256": packager.digest(data / name), "size": (data / name).stat().st_size}
         (data / "report.txt").write_text("fixture\n")
         (data / "manifest.json").write_bytes(packager.json_bytes(manifest))
         notice = self.source_notice(manifest["sources"])
         if not public:
             notice += "研究來源：" + json.dumps(source, ensure_ascii=False) + "\n"
         (data / "NOTICE.txt").write_text(notice, encoding="utf-8")
-        old = installer.digest(data / "manifest.json")
+        old = packager.digest(data / "manifest.json")
         for kind in ("select", "punct"):
             (neural / kind).mkdir(parents=True)
             (neural / kind / "model.onnx").write_bytes(kind.encode())
             (neural / kind / "vocab.json").write_bytes(packager.json_bytes(
                 {"schema": "zuin-phonetic-v1", "characters": ["一", "ㄅ"], "dictionary_sha256": old}))
-            model = {"schema": kind, "files": {"model.onnx": installer.digest(neural / kind / "model.onnx"),
-                                               "vocab.json": installer.digest(neural / kind / "vocab.json")}}
+            model = {"schema": kind, "files": {"model.onnx": packager.digest(neural / kind / "model.onnx"),
+                                               "vocab.json": packager.digest(neural / kind / "vocab.json")}}
             if kind == "select":
                 model["dictionary_sha256"] = old
             (neural / kind / "manifest.json").write_bytes(packager.json_bytes(model))
@@ -623,7 +90,7 @@ class ReleaseTests(unittest.TestCase):
         (data / "manifest.json").write_bytes(packager.json_bytes(manifest))
         (data / "NOTICE.txt").write_text(self.source_notice(sources, statements), encoding="utf-8")
         before = self.data_snapshot(data)
-        self.assertEqual(packager.prepare_shipped_data(data), installer.digest(data / "manifest.json"))
+        self.assertEqual(packager.prepare_shipped_data(data), packager.digest(data / "manifest.json"))
         self.assertEqual(self.data_snapshot(data), before)
 
     def test_ledger_sources_have_complete_public_notices(self):
@@ -690,7 +157,7 @@ class ReleaseTests(unittest.TestCase):
                 vocab["dictionary_sha256"] = "d" * 64
                 (neural / kind / "vocab.json").write_bytes(packager.json_bytes(vocab))
                 model = json.loads((neural / kind / "manifest.json").read_text(encoding="utf-8"))
-                model["files"]["vocab.json"] = installer.digest(neural / kind / "vocab.json")
+                model["files"]["vocab.json"] = packager.digest(neural / kind / "vocab.json")
                 (neural / kind / "manifest.json").write_bytes(packager.json_bytes(model))
                 before = snapshot(stage)
                 with self.assertRaisesRegex(ValueError, "不配對"):
@@ -720,10 +187,12 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(self.data_snapshot(stage), before)
 
     def test_english_staging_keeps_chinese_hash_and_detects_tampering(self):
-        source = self.bundle / "data"
-        before = installer.digest(source / "manifest.json")
+        source = self.root / "data"
+        source.mkdir()
+        (source / "manifest.json").write_text("chinese dictionary manifest")
+        before = packager.digest(source / "manifest.json")
         packager.copy_english(source, source, "go")
-        self.assertEqual(installer.digest(source / "manifest.json"), before)
+        self.assertEqual(packager.digest(source / "manifest.json"), before)
         manifest = packager.check_english(source)
         self.assertEqual(manifest["words"], 82015)
         copied = self.root / "copied-data"
@@ -731,918 +200,27 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(packager.subprocess, "run", side_effect=AssertionError("Existing packs must be copied")):
             packager.copy_english(source, copied, "go")
         for name in packager.ENGLISH_FILES:
-            self.assertEqual(installer.digest(source / "english" / name), installer.digest(copied / "english" / name))
+            self.assertEqual(packager.digest(source / "english" / name), packager.digest(copied / "english" / name))
         (copied / "english/words.bin").write_bytes(b"tampered")
         with self.assertRaisesRegex(ValueError, "雜湊"):
             packager.check_english(copied)
 
-    def test_english_install_downgrade_rollback_and_uninstall_keep_user_data(self):
-        data = self.bundle / "data"
-        packager.copy_english(data, data, "go")
-        english = data / "english"
-        for name in packager.ENGLISH_FILES:
-            relative = "data/english/" + name
-            self.release["files"][relative] = installer.digest(english / name)
-        self.save_release()
-        installer.verify(self.bundle)
-        installer.install(self.bundle, self.home, self.release)
-        installed = self.home / ".local/share/zuin/data/english"
-        expected = {name: (installed / name).read_bytes() for name in packager.ENGLISH_FILES}
-        self.assertEqual(expected["words.bin"], (english / "words.bin").read_bytes())
-        # A package without optional English files must remove the previous pack,
-        # and rollback must restore all of it with the existing transaction.
-        shutil.rmtree(english)
-        self.release["files"] = {k: v for k, v in self.release["files"].items() if not k.startswith("data/english/")}
-        self.save_release()
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(any(installed.iterdir()))
-        installer.rollback(self.home, backup)
-        for name, content in expected.items():
-            self.assertEqual((installed / name).read_bytes(), content)
-        installer.uninstall(self.home)
-        self.assertTrue((installed / "words.bin").exists())
-        self.assertEqual(self.user.read_text(), "private learning")
-
-    def test_partial_english_pack_rejected_before_install(self):
-        name = "data/english/words.bin"
-        path = self.bundle / name
-        path.parent.mkdir()
-        path.write_bytes(b"partial")
-        self.release["files"][name] = installer.digest(path)
-        self.save_release()
-        with self.assertRaisesRegex(ValueError, "英文資料包"):
-            installer.verify(self.bundle)
-
     def test_one_line_installer_pins_bootstrap_and_rejects_unsafe_values(self):
-        with tempfile.TemporaryDirectory() as temp:
-            boot = Path(temp) / "0c-update"
-            boot.write_bytes(b"bootstrap")
-            out = make_installer.generate(Path(temp) / "out", "https://example.test/feeds", "https://example.test/feeds/public-beta.json",
-                                          "public-beta", {"linux_amd64": (boot, "https://example.test/releases/v/0c-update")})
-            sh = out["install.sh"].read_text()
-            self.assertIn(make_installer.sha256(boot), sh)
-            self.assertIn("Darwin-arm64) URL=''", sh)
-            self.assertIn("Darwin-x86_64) URL=''", sh)
-            self.assertIn("sysctl.proc_translated", sh)  # Rosetta 終端機在 Apple 晶片上也回報 x86_64
-            subprocess.run(["sh", "-n", str(out["install.sh"])], check=True)
-            self.assertIn(b"\r\n", out["install.cmd"].read_bytes())
-            with self.assertRaises(ValueError):
-                make_installer.generate(Path(temp) / "bad", "https://example.test/feeds", "https://x/'; rm -rf ~", "public-beta", {})
-
-    def test_first_install_allowed_in_running_desktop_only_without_earlier_install(self):
-        with tempfile.TemporaryDirectory() as temp:
-            home = Path(temp)
-            self.assertTrue(installer.first_install(home))
-            (home / ".local/lib/fcitx5").mkdir(parents=True)
-            (home / ".local/lib/fcitx5/libzuin.so").write_text("old")
-            self.assertFalse(installer.first_install(home))
-
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
-        self.bundle = self.root / "bundle"
-        self.home = self.root / "home"
-        self.home.mkdir()
-        for name in (*installer.PAYLOAD, "install.py"):
-            path = self.bundle / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("new " + name)
-        shutil.copy2(packager.PLATFORM / "0c-addon.conf", self.bundle / installer.ADDON_CONF)
-        self.release = {"schema": 1, "product": "0c", "version": "0.1.0-beta.1", "files": {
-            str(p.relative_to(self.bundle)): installer.digest(p) for p in self.bundle.rglob("*") if p.is_file()}}
-        self.save_release()
-        self.user = self.home / ".local/share/zuin/user.json"
-        self.user.parent.mkdir(parents=True)
-        self.user.write_text("private learning")
-
-    def save_release(self):
-        (self.bundle / "release.json").write_text(json.dumps(self.release))
-
-    def test_verify_rejects_tampering_missing_files_and_traversal(self):
-        installer.verify(self.bundle)
-        binary = self.bundle / "bin/0c-server"
-        binary.write_text("tampered")
-        with self.assertRaisesRegex(ValueError, "雜湊"):
-            installer.verify(self.bundle)
-        binary.unlink()
-        with self.assertRaisesRegex(ValueError, "一般檔案"):
-            installer.verify(self.bundle)
-        self.release["files"] = {"../escape": "0"}
-        self.save_release()
+        boot = self.root / "0c-update.exe"
+        boot.write_bytes(b"bootstrap")
+        url = "https://example.test/releases/v/0c-update.exe"
+        out = make_installer.generate(self.root / "out", "https://example.test/feeds", "https://example.test/feeds/public-beta.json",
+                                      "public-beta", (boot, url))
+        ps1 = out["install.ps1"].read_text(encoding="utf-8")
+        self.assertIn(make_installer.sha256(boot), ps1)
+        self.assertIn(url, ps1)
+        # irm | iex 以 UTF-8 取得腳本；ParseFile 在 Windows PowerShell 5.1 會把沒有 BOM 的檔案當 ANSI 讀
+        check = ("$e = $null; [void][System.Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText("
+                 f"'{out['install.ps1']}', [Text.Encoding]::UTF8), [ref]$null, [ref]$e); if ($e) {{ $e; exit 1 }}")
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", check], check=True)
+        self.assertIn(b"\r\n", out["install.cmd"].read_bytes())
         with self.assertRaises(ValueError):
-            installer.verify(self.bundle)
-
-    def test_install_update_and_uninstall_keep_learning_and_dictionary(self):
-        installer.install(self.bundle, self.home, self.release)
-        server = self.home / ".local/bin/0c-server"
-        old = server.read_bytes()
-        (self.bundle / "bin/0c-server").write_text("updated engine")
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual((backup / ".local/bin/0c-server").read_bytes(), old)
-        self.assertEqual(server.read_text(), "updated engine")
-        local = self.home / ".local/share/fcitx5/inputmethod/zuin.conf"
-        local.write_text("user customization")
-        retained = installer.uninstall(self.home)
-        self.assertFalse(server.exists())
-        self.assertIn(str(local.relative_to(self.home)), retained)
-        self.assertEqual(local.read_text(), "user customization")
-        self.assertEqual(self.user.read_text(), "private learning")
-        self.assertTrue((self.home / ".local/share/zuin/data/manifest.json").exists())
-
-    def test_failed_update_rolls_back_without_changing_learning(self):
-        installer.install(self.bundle, self.home, self.release)
-        before = {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file() and "backups" not in p.parts}
-        real_copy = installer.atomic_copy
-        count = 0
-        def fail_third(src, dst):
-            nonlocal count
-            count += 1
-            if count == 3:
-                raise OSError("disk full")
-            real_copy(src, dst)
-        with patch.object(installer, "atomic_copy", side_effect=fail_third):
-            with self.assertRaisesRegex(OSError, "disk full"):
-                installer.install(self.bundle, self.home, self.release)
-        for path, content in before.items():
-            self.assertEqual(path.read_bytes(), content)
-
-    @skip_as_root
-    def test_target_symlink_is_rejected_before_writes(self):
-        # 連結屬於自己也不行：檔案會「安裝」到解開的套件裡，套件目錄一清掉安裝就沒了。
-        self.bundle.chmod(0o755)
-        (self.bundle / "bin").chmod(0o755)
-        (self.home / ".local/bin").symlink_to(self.bundle / "bin")
-        with self.assertRaisesRegex(ValueError, "符號連結.*套件目錄"):
-            installer.install(self.bundle, self.home, self.release)
-        self.assertFalse((self.home / ".local/share/zuin/backups").exists())
-        self.assertEqual((self.bundle / "bin/0c-server").read_text(), "new bin/0c-server")
-
-    def link_dotdirs(self, *names):
-        """~/.local、~/.config 是指到另一顆磁碟的目錄連結（#250）；回傳連結指到的磁碟目錄。"""
-        disk = self.root / "disk"
-        disk.mkdir(exist_ok=True)
-        disk.chmod(0o755)
-        for name in names or (".local", ".config"):
-            link = self.home / name
-            real = disk / name
-            if link.exists():
-                link.rename(real)
-            else:
-                real.mkdir()
-            real.chmod(0o755)
-            link.symlink_to(real)
-        return disk
-
-    def assert_link_rejected(self, relative, reason):
-        with self.assertRaisesRegex(ValueError, "符號連結.*" + reason):
-            installer.destination(self.home, relative)
-
-    @skip_as_root
-    def test_install_update_rollback_and_uninstall_through_linked_dotdirs(self):
-        # #250：一行安裝與自動更新都卡在「安裝目標不接受符號連結」。檔案要真的落在連結指向的磁碟上。
-        disk = self.link_dotdirs()
-        (self.bundle / "neural").mkdir()
-        (self.bundle / "neural/model.onnx").write_text("first model")
-        first = installer.install(self.bundle, self.home, self.release)
-        self.assertTrue((self.home / ".local").is_symlink())
-        self.assertEqual((disk / ".local/bin/0c-server").read_text(), "new bin/0c-server")
-        self.assertEqual((disk / ".local/share/zuin/neural/model.onnx").read_text(), "first model")
-        # addon 的 Library 走家目錄的路徑：連結換了掛載點也不必重裝。
-        conf = (disk / ".local/share/fcitx5/addon/0c.conf").read_text()
-        self.assertIn(f"Library={self.home.resolve()}/.local/lib/fcitx5/lib0c\n", conf)
-
-        (self.bundle / "bin/0c-server").write_text("next engine")
-        (self.bundle / "neural/model.onnx").write_text("next model")
-        second = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual((second / ".local/bin/0c-server").read_text(), "new bin/0c-server")
-        self.assertEqual((second / installer.NEURAL / "model.onnx").read_text(), "first model")
-        self.assertEqual(installer.prune_backups(self.home.resolve(), second), [first])
-
-        # 收據記的是家目錄的路徑；回復時兩種寫法都認（以 HOME 指向實際路徑繞過去裝的也會記實際路徑）。
-        real_backup = disk / ".local/share/zuin/backups" / second.name
-        installer.rollback(self.home, real_backup)
-        self.assertEqual((disk / ".local/bin/0c-server").read_text(), "new bin/0c-server")
-        self.assertEqual((disk / ".local/share/zuin/neural/model.onnx").read_text(), "first model")
-        self.assertEqual(self.user.read_text(), "private learning")
-
-        backup = installer.install(self.bundle, self.home, self.release)
-        kept = installer.rollback(self.home, backup, restore_user=True)
-        self.assertEqual((kept / installer.SAVED_USER).read_text(), "private learning")
-        installer.install(self.bundle, self.home, self.release)
-        installer.uninstall(self.home)
-        self.assertFalse((disk / ".local/bin/0c-server").exists())
-        self.assertTrue((self.home / ".local").is_symlink())
-
-    @skip_as_root
-    def test_relative_chained_and_nested_directory_links_are_accepted(self):
-        # dotfiles 常見的寫法：相對連結、連結再接連結、只連 ~/.local/share 或整個個人資料目錄。
-        disk = self.link_dotdirs(".local")
-        (self.home / ".config").symlink_to("../disk/config-chain")
-        (disk / "config-chain").symlink_to("config-real")
-        (disk / "config-real").mkdir(mode=0o755)
-        (disk / "share-real").mkdir(mode=0o755)
-        (disk / ".local/share").rename(disk / "share-real/share")
-        (disk / ".local/share").symlink_to(disk / "share-real/share")
-        (disk / "share-real/share").chmod(0o755)
-        (disk / "share-real/share/zuin").rename(disk / "share-real/moved-zuin")
-        (disk / "share-real/moved-zuin").chmod(0o755)
-        (disk / "share-real/share/zuin").symlink_to(disk / "share-real/moved-zuin")
-        installer.install(self.bundle, self.home, self.release)
-        self.assertTrue((disk / "share-real/moved-zuin/install-receipt.json").is_file())
-        self.assertEqual(installer.destination(self.home, ".config/fcitx5/conf/classicui.conf"),
-                         self.home / ".config/fcitx5/conf/classicui.conf")
-
-    @skip_as_root
-    def test_linked_target_inside_home_and_sticky_parent_are_accepted(self):
-        (self.home / "data").mkdir(mode=0o755)
-        (self.home / "data/config").mkdir(mode=0o755)
-        (self.home / ".config").symlink_to(self.home / "data/config")
-        installer.destination(self.home, ".config/fcitx5/profile")
-        shared = self.root / "tmp-like"
-        shared.mkdir()
-        shared.chmod(0o1777)
-        (shared / "mine").mkdir(mode=0o755)
-        (self.home / ".cache").symlink_to(shared / "mine")
-        installer.destination(self.home, ".cache/x")
-
-    def test_end_file_links_stay_rejected_under_linked_directories(self):
-        disk = self.link_dotdirs()
-        elsewhere = self.root / "elsewhere"
-        elsewhere.write_text("not ours")
-        library = disk / ".local/lib/fcitx5"
-        library.mkdir(parents=True)
-        (library / "lib0c.so").symlink_to(elsewhere)
-        with self.assertRaisesRegex(ValueError, "符號連結"):
-            installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(elsewhere.read_text(), "not ours")
-        self.assertFalse((self.home / ".local/share/zuin/backups").exists())
-        (self.home / installer.NEURAL).symlink_to(self.root)
-        with self.assertRaisesRegex(ValueError, "符號連結"):
-            installer.tree_destination(self.home, installer.NEURAL)
-
-    def test_links_inside_the_installers_own_directory_stay_rejected(self):
-        # 更新與回復靠同一個檔案系統上的改名，清理舊備份會刪內容（#179）；連到別處就不成立。
-        real = self.root / "external"
-        real.mkdir(mode=0o755)
-        zuin = self.home / ".local/share/zuin"
-        for name in ("backups", "neural", "data", "bin", "update"):
-            target = zuin / name
-            target.symlink_to(real)
-            with self.assertRaisesRegex(ValueError, "符號連結.*安裝工具自己的目錄"):
-                installer.destination(self.home, f".local/share/zuin/{name}/file")
-            target.unlink()
-
-    @skip_as_root
-    def test_rollback_refuses_a_linked_backup_directory_under_linked_dotdirs(self):
-        disk = self.link_dotdirs()
-        installer.install(self.bundle, self.home, self.release)
-        backup = installer.install(self.bundle, self.home, self.release)
-        backups = disk / ".local/share/zuin/backups"
-        backups.rename(disk / "moved-backups")
-        backups.symlink_to(disk / "moved-backups")
-        with self.assertRaisesRegex(ValueError, "符號連結"):
-            installer.rollback(self.home, backup)
-        with self.assertRaisesRegex(ValueError, "符號連結"):
-            installer.restore_user_store(self.home, backup)
-
-    @skip_as_root
-    def test_rollback_saved_files_do_not_follow_links_inside_the_backup(self):
-        disk = self.link_dotdirs()
-        installer.install(self.bundle, self.home, self.release)
-        backup = installer.install(self.bundle, self.home, self.release)
-        saved = disk / ".local/share/zuin/backups" / backup.name / ".local/bin"
-        moved = disk / "saved-bin"
-        moved.mkdir(mode=0o755)
-        for entry in saved.iterdir():
-            entry.rename(moved / entry.name)
-        saved.rmdir()
-        saved.symlink_to(moved)
-        with self.assertRaisesRegex(ValueError, "符號連結"):
-            installer.rollback(self.home, backup)
-
-    @skip_as_root
-    def test_directory_links_others_can_redirect_are_rejected(self):
-        disk = self.link_dotdirs(".local")
-        link = self.home / ".config"
-        target = disk / "config"
-        target.mkdir(mode=0o755)
-        link.symlink_to(target)
-        relative = ".config/fcitx5/profile"
-        installer.destination(self.home, relative)
-
-        # 指向的目錄 world／group 可寫
-        with patch.object(installer, "private_group", return_value=False):
-            for mode in (0o777, 0o775, 0o757, 0o1777):
-                target.chmod(mode)
-                self.assert_link_rejected(relative, "chmod go-w")
-        # 群組只有自己一個人（Debian、Ubuntu 預設 umask 002）：群組可寫不算別人可寫，其他人可寫照舊拒絕
-        with patch.object(installer, "private_group", return_value=True):
-            target.chmod(0o775)
-            installer.destination(self.home, relative)
-            target.chmod(0o777)
-            self.assert_link_rejected(relative, "chmod go-w")
-        target.chmod(0o755)
-
-        # 指向的目錄的上層別人可寫：可以把目錄整個換掉。黏著位（/tmp）不能。
-        with patch.object(installer, "private_group", return_value=False):
-            disk.chmod(0o775)
-            self.assert_link_rejected(relative, "chmod go-w")
-        disk.chmod(0o777)
-        self.assert_link_rejected(relative, "chmod go-w")
-        disk.chmod(0o1777)
-        installer.destination(self.home, relative)
-        disk.chmod(0o755)
-
-        # 連結本身不屬於目前使用者
-        real_uid = os.getuid()
-        with patch.object(installer.os, "getuid", return_value=real_uid + 1):
-            self.assert_link_rejected(relative, "其他使用者")
-
-        # 指向別人的目錄（系統目錄屬於 root）
-        link.unlink()
-        link.symlink_to("/usr/share")
-        self.assert_link_rejected(relative, "其他使用者")
-
-        # 中途的連結屬於別人：對方隨時能改指向。
-        hop = disk / "hop"
-        hop.symlink_to(target)
-        link.unlink()
-        link.symlink_to(hop)
-        installer.destination(self.home, relative)
-        real_lstat = os.lstat
-        def foreign_hop(path, *args, **kwargs):
-            info = real_lstat(path, *args, **kwargs)
-            if str(path) != str(hop):
-                return info
-            fields = list(info)
-            fields[stat.ST_UID] = real_uid + 1
-            return os.stat_result(fields)
-        with patch.object(installer.os, "lstat", side_effect=foreign_hop):
-            self.assert_link_rejected(relative, "其他使用者")
-        hop.unlink()
-
-        # 指向的東西不存在（例如磁碟沒掛上）、不是目錄、連結成環
-        link.unlink()
-        link.symlink_to(self.root / "not-mounted")
-        self.assert_link_rejected(relative, "不存在")
-        link.unlink()
-        (disk / "file").write_text("x")
-        link.symlink_to(disk / "file")
-        self.assert_link_rejected(relative, "不是目錄")
-        link.unlink()
-        link.symlink_to(link)
-        self.assert_link_rejected(relative, "太多層")
-
-    def test_private_group_has_only_this_user(self):
-        users = [SimpleNamespace(pw_name="me", pw_uid=1000, pw_gid=1000), SimpleNamespace(pw_name="bob", pw_uid=1001, pw_gid=1001),
-                 SimpleNamespace(pw_name="carol", pw_uid=1002, pw_gid=2000)]
-        groups = {1000: [], 1001: [], 2000: ["me"], 2001: ["me", "bob"], 2002: ["me"], 2003: []}
-        def getgrgid(gid):
-            if gid not in groups:
-                raise KeyError(gid)
-            return SimpleNamespace(gr_mem=groups[gid])
-        def getpwuid(uid):
-            return next(user for user in users if user.pw_uid == uid)
-        with patch("pwd.getpwall", return_value=users), patch("pwd.getpwuid", side_effect=getpwuid), patch("grp.getgrgid", side_effect=getgrgid):
-            self.assertTrue(installer.private_group(1000, 1000))   # 私人群組
-            self.assertTrue(installer.private_group(2002, 1000))   # 只有自己一個成員
-            self.assertFalse(installer.private_group(1001, 1000))  # 別人的私人群組
-            self.assertFalse(installer.private_group(2000, 1000))  # 還有人以它為主要群組
-            self.assertFalse(installer.private_group(2001, 1000))  # 還有別的成員
-            self.assertFalse(installer.private_group(2003, 1000))  # 沒有成員的群組：自己也不在裡面
-            self.assertFalse(installer.private_group(3000, 1000))  # 查不到的群組
-
-    def test_root_never_follows_directory_links(self):
-        # 以 root 執行時不放寬：安裝器本來就拒絕 root，這裡也不留後路。
-        self.link_dotdirs()
-        with patch.object(installer.os, "getuid", return_value=0):
-            with self.assertRaisesRegex(ValueError, "符號連結.*root"):
-                installer.destination(self.home, ".local/bin/0c-server")
-
-    @skip_as_root
-    def test_loaded_shell_is_found_through_linked_dotdirs(self):
-        # /proc/PID/maps 記的是解開連結後的路徑；比對家目錄的路徑會誤報「還沒載入」。
-        disk = self.link_dotdirs()
-        library = disk / ".local/lib/fcitx5/lib0c.so"
-        library.parent.mkdir(parents=True)
-        library.write_text("shell")
-        proc = self.root / "proc/1234"
-        proc.mkdir(parents=True)
-        (proc / "maps").write_text(f"7f0000-7f1000 r-xp 00000000 08:01 42   {library}\n")
-        said = []
-        with patch.object(installer, "user_processes", return_value=[("fcitx5", proc)]):
-            self.assertTrue(installer.report_fcitx_addon(self.home, show=said.append))
-        self.assertEqual(said, ["Fcitx5 已載入靈犀注音外殼。"])
-
-    def test_install_keeps_only_the_new_backup(self):
-        # #179：每份安裝備份都含整個舊神經模型，以前從不刪。安裝成功後只留收據記錄的這一份，回復照常。
-        backups = self.home / ".local/share/zuin/backups"
-        first = installer.install(self.bundle, self.home, self.release)
-        installer.install(self.bundle, self.home, self.release)
-        (backups / "0c-install-old_old1" / "neural").mkdir(parents=True)
-        (backups / "0c-install-old_old1" / "neural/model.onnx").write_text("old model")
-        for name in ("upgrade-20261011-025419-t7yd75aw", "manual-dev39-20261003", "0c-user-abcd1234", "0c-install-notours"):
-            (backups / name).mkdir()
-        (backups / "user.json.pre-hint").write_text("hand-made copy")
-        elsewhere = self.root / "elsewhere"
-        elsewhere.mkdir()
-        (elsewhere / "keep").write_text("not ours")
-        (backups / "0c-install-linked01").symlink_to(elsewhere)
-        (self.bundle / "bin/0c-server").write_text("next engine")
-        self.release["files"]["bin/0c-server"] = installer.digest(self.bundle / "bin/0c-server")
-        self.release["channel"] = "internal-preview"
-        self.save_release()
-        with patch.object(installer.sys, "argv", ["install.py", "install", "--bundle", str(self.bundle), "--home", str(self.home)]), \
-                patch.object(installer.os, "getuid", return_value=1000), \
-                patch.dict(installer.os.environ, {"ZC_MANAGED_RELOAD": "1"}), \
-                patch.object(installer, "runtime_check"), patch.object(installer, "require_desktop_stopped"), \
-                patch.object(installer, "clear_session_addon_dirs"), patch.object(installer, "settings_dependencies"), \
-                patch.object(installer, "first_install", return_value=True), redirect_stdout(io.StringIO()):
-            installer.main()
-        backup = Path(json.loads((self.home / installer.RECEIPT).read_text())["backup"])
-        self.assertEqual(sorted(p.name for p in backups.iterdir()), sorted([
-            backup.name, "upgrade-20261011-025419-t7yd75aw", "manual-dev39-20261003", "0c-user-abcd1234",
-            "0c-install-notours", "user.json.pre-hint", "0c-install-linked01"]))
-        self.assertFalse(first.exists())
-        self.assertEqual((elsewhere / "keep").read_text(), "not ours")
-        installer.rollback(self.home, backup)
-        self.assertEqual((self.home / ".local/bin/0c-server").read_text(), "new bin/0c-server")
-        self.assertEqual(self.user.read_text(), "private learning")
-
-    def test_backup_pruning_refuses_a_linked_backup_directory(self):
-        real = self.root / "external"
-        (real / "0c-install-abcdefgh").mkdir(parents=True)
-        backups = self.home / ".local/share/zuin/backups"
-        backups.symlink_to(real)
-        with redirect_stderr(io.StringIO()):
-            self.assertEqual(installer.prune_backups(self.home, backups / "0c-install-new12345"), [])
-        self.assertTrue((real / "0c-install-abcdefgh").exists())
-
-    def test_rollback_restores_paired_data_and_keeps_learning(self):
-        first = installer.install(self.bundle, self.home, self.release)
-        before = {target: (self.home / target).read_bytes() for target in installer.PAYLOAD.values()}
-        (self.bundle / "data/lm.bin").write_text("next dictionary")
-        (self.bundle / "bin/0c-server").write_text("next engine")
-        self.release["version"] = "0.2.0"
-        second = installer.install(self.bundle, self.home, self.release)
-        installer.rollback(self.home, second)
-        for target, content in before.items():
-            self.assertEqual((self.home / target).read_bytes(), content)
-        self.assertEqual(self.user.read_text(), "private learning")
-        installer.rollback(self.home, first)
-        self.assertFalse((self.home / installer.RECEIPT).exists())
-        self.assertEqual(self.user.read_text(), "private learning")
-
-    def test_addon_library_is_absolute_without_environment_file(self):
-        # dev.59 以前的套件附有 environment.conf；新安裝器（含降版）一律不再安裝它。
-        old_env = self.bundle / "config/environment.conf"
-        old_env.write_text("FCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\n")
-        self.release["files"]["config/environment.conf"] = installer.digest(old_env)
-        self.save_release()
-        installer.install(self.bundle, self.home, self.release)
-        conf = self.home / ".local/share/fcitx5/addon/0c.conf"
-        library = [line for line in conf.read_text().splitlines() if line.startswith("Library=")]
-        self.assertEqual(library, [f"Library={self.home.resolve()}/.local/lib/fcitx5/lib0c"])
-        self.assertIn("Type=SharedLibrary", conf.read_text())  # 其他設定照套件
-        self.assertFalse((self.home / installer.ADDON_ENV).exists())
-        receipt = json.loads((self.home / installer.RECEIPT).read_text())
-        self.assertEqual(receipt["files"][".local/share/fcitx5/addon/0c.conf"], installer.digest(conf))
-        installer.uninstall(self.home)
-        self.assertFalse(conf.exists())
-
-    def test_addon_library_rejects_home_fcitx_cannot_express(self):
-        content = (packager.PLATFORM / "0c-addon.conf").read_bytes()
-        for home in ("/home/a;b", '/home/a"b', "/home/a\\b", "/home/a\nb"):
-            with self.assertRaisesRegex(ValueError, "家目錄"):
-                installer.addon_conf(content, Path(home))
-        with self.assertRaisesRegex(ValueError, "Library"):
-            installer.addon_conf(b"[Addon]\nName=x\n", self.home)
-        self.assertIn(b"Library=/home/\xe7\x8e\x8b/.local/lib/fcitx5/lib0c\n", installer.addon_conf(content, Path("/home/王")))
-
-    def test_old_addon_dirs_are_recognized_without_touching_user_directories(self):
-        home = Path("/home/u")
-        for value in ("${HOME}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5",  # dev.59 以前（Debian 建置機）
-                      "${HOME}/.local/lib/fcitx5:/usr/lib64/fcitx5",  # #92 使用者自己改成 Fedora 路徑
-                      "/home/u/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5:/usr/lib64/fcitx5",
-                      '"$HOME/.local/lib/fcitx5:/usr/lib/fcitx5/"', "/home/u/.local/lib/fcitx5"):
-            self.assertTrue(installer.obsolete_addon_dirs(value, home), value)
-        for value in ("/usr/lib64/fcitx5", "", "${HOME}/.local/lib/fcitx5:/opt/my-addons/fcitx5",
-                      "/home/other/.local/lib/fcitx5:/usr/lib/fcitx5", "${HOME}/build/fcitx5:/usr/lib/fcitx5"):
-            self.assertFalse(installer.obsolete_addon_dirs(value, home), value)
-
-    def test_install_removes_only_the_old_addon_path_and_rollback_restores_it(self):
-        env = self.home / installer.ADDON_ENV
-        env.parent.mkdir(parents=True)
-        cases = {
-            # dev.59 的套件內容：整個檔案是舊版寫的，移除。
-            "# 靈犀注音 Fcitx5 外殼路徑；重新登入後生效。\nFCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\n": None,
-            # #92：使用者把系統目錄改成 Fedora 的，仍是外殼路徑，移除。
-            "FCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/usr/lib64/fcitx5\n# fixed\n": None,
-            # 同一檔另有使用者自己的設定：只拿掉舊路徑與它的註解。
-            "# 讓 Fcitx 5 在使用者目錄找 Zuin 的 addon（其餘 addon 仍在系統目錄）。需重新登入才生效。\n"
-            "FCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\nGTK_IM_MODULE=fcitx\n": "GTK_IM_MODULE=fcitx\n",
-            # 使用者自訂的 addon 目錄：不是舊版寫的，不動。
-            "FCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/opt/addons:/usr/lib64/fcitx5\n": "same",
-        }
-        for before, after in cases.items():
-            with self.subTest(before=before):
-                env.write_text(before)
-                backup = installer.install(self.bundle, self.home, self.release)
-                if after is None:
-                    self.assertFalse(env.exists())
-                else:
-                    self.assertEqual(env.read_text(), before if after == "same" else after)
-                installer.rollback(self.home, backup)
-                self.assertEqual(env.read_text(), before)
-
-    def test_rollback_to_a_release_that_needs_the_addon_path_restores_the_session(self):
-        # dev.59：相對的 Library，靠 90-0c.conf 的 FCITX_ADDON_DIRS 找外殼。
-        conf = self.home / ".local/share/fcitx5/addon/0c.conf"
-        conf.parent.mkdir(parents=True)
-        conf.write_text("[Addon]\nName=0c\nType=SharedLibrary\nLibrary=lib0c\n")
-        env = self.home / installer.ADDON_ENV
-        env.parent.mkdir(parents=True)
-        env.write_text("# 靈犀注音 Fcitx5 外殼路徑；重新登入後生效。\n"
-                       "FCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\n")
-        calls, tools = [], {"dbus-update-activation-environment", "systemctl"}
-        run = lambda args, **kwargs: calls.append(args) or subprocess.CompletedProcess(args, 0, "", "")
-        for p in (patch.object(installer.Path, "home", return_value=self.home),
-                  patch.object(installer.shutil, "which", side_effect=lambda name: "/usr/bin/" + name if name in tools else None)):
-            p.start()
-            self.addCleanup(p.stop)
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(env.exists())
-        self.assertIsNone(installer.restore_session_addon_dirs(self.home, run))  # 新版是絕對路徑，不必設定
-        self.assertEqual(calls, [])
-        # 安裝時已把 D-Bus 啟動環境改成只有系統目錄；回復後依放回的 90-0c.conf 設回，D-Bus 啟動的 Fcitx5 才找得到外殼。
-        installer.rollback(self.home, backup)
-        value = f"{self.home.resolve()}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5"
-        self.assertEqual(installer.restore_session_addon_dirs(self.home, run), value)
-        self.assertEqual(calls, [["dbus-update-activation-environment", "--systemd", f"FCITX_ADDON_DIRS={value}"]])
-        calls.clear()
-        tools.discard("dbus-update-activation-environment")
-        installer.restore_session_addon_dirs(self.home, run)
-        self.assertEqual(calls, [["systemctl", "--user", "set-environment", f"FCITX_ADDON_DIRS={value}"]])
-        # 安裝給別的家目錄時不碰目前的桌面。
-        with patch.object(installer.Path, "home", return_value=self.root / "other"):
-            self.assertIsNone(installer.restore_session_addon_dirs(self.home, lambda *a, **k: self.fail("touched session")))
-        # 0.1.0-dev.15 以前：zuin.conf 與 90-zuin.conf。
-        conf.unlink()
-        env.unlink()
-        (conf.parent / "zuin.conf").write_text("[Addon]\nLibrary=libzuin\n")
-        (env.parent / "90-zuin.conf").write_text('FCITX_ADDON_DIRS="$HOME/.local/lib/fcitx5:/usr/lib/fcitx5"\n')
-        self.assertEqual(installer.restored_addon_dirs(self.home.resolve()), f"{self.home.resolve()}/.local/lib/fcitx5:/usr/lib/fcitx5")
-        (env.parent / "90-zuin.conf").write_text("FCITX_ADDON_DIRS=${XDG_DATA_HOME}/fcitx5:/usr/lib/fcitx5\n")
-        self.assertIsNone(installer.restored_addon_dirs(self.home.resolve()))  # 展開不了，不設定錯的值
-
-    def test_rollback_command_resets_the_session_addon_path(self):
-        backup = installer.install(self.bundle, self.home, self.release)
-        with patch.object(installer.sys, "argv", ["install.py", "rollback", "--backup", str(backup), "--home", str(self.home)]), \
-                patch.object(installer.os, "getuid", return_value=1000), \
-                patch.object(installer, "require_desktop_stopped"), \
-                patch.object(installer, "restore_session_addon_dirs") as restored:
-            installer.main()
-        restored.assert_called_once_with(self.home)
-
-    def dev59_addon_setup(self):
-        """dev.59 的安裝：相對的 Library，靠 90-0c.conf 的 FCITX_ADDON_DIRS 找外殼。"""
-        self.release["channel"] = "public-beta"
-        self.save_release()
-        conf = self.home / ".local/share/fcitx5/addon/0c.conf"
-        conf.parent.mkdir(parents=True, exist_ok=True)
-        conf.write_text("[Addon]\nName=0c\nType=SharedLibrary\nLibrary=lib0c\nOnDemand=False\n")
-        env = self.home / installer.ADDON_ENV
-        env.parent.mkdir(parents=True, exist_ok=True)
-        env.write_text("# 靈犀注音 Fcitx5 外殼路徑；重新登入後生效。\n"
-                       "FCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\n")
-        return conf, env
-
-    def test_only_a_fcitx_that_cannot_find_the_old_shell_counts_as_stuck(self):
-        conf, env = self.dev59_addon_setup()
-        home = self.home.resolve()
-        library = home / ".local/lib/fcitx5/lib0c.so"
-        found = f"FCITX_ADDON_DIRS={home}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\0".encode()
-        stuck = self.fake_process("fcitx5", environ=b"DISPLAY=:0\0")  # #93：D-Bus 啟動，拿不到登入環境的變數
-        self.assertTrue(installer.stuck_without_shell(home, [stuck[1]]))
-        # 系統目錄是別的發行版的也一樣找不到外殼。
-        other = self.fake_process("fcitx5", environ=b"FCITX_ADDON_DIRS=/usr/lib64/fcitx5\0")
-        self.assertTrue(installer.stuck_without_shell(home, [other[1]]))
-        for name, procs in {
-            "沒有 Fcitx5 在執行": [],
-            # 找得到外殼卻沒載入：例如使用者在 Fcitx5 停用了這個 addon，是使用者的選擇。
-            "環境帶著外殼目錄": [self.fake_process("fcitx5", environ=found)[1]],
-            "環境寫 $HOME": [self.fake_process("fcitx5", environ=b"FCITX_ADDON_DIRS=$HOME/.local/lib/fcitx5/\0")[1]],
-            # #92：外殼有載入，zuin 一直留在清單裡。使用者自己拿掉靈犀注音時外殼也照樣載入（OnDemand=False）。
-            "外殼已映射": [self.fake_process("fcitx5", maps=f"7f00-7f10 r-xp 00000000 08:02 1 {library}\n")[1]],
-            "其中一個已映射": [stuck[1], self.fake_process("fcitx5", maps=f"7f00-7f10 r-xp 00000000 08:02 1 {library}\n")[1]],
-        }.items():
-            with self.subTest(name):
-                self.assertFalse(installer.stuck_without_shell(home, procs))
-        unreadable = self.fake_process("fcitx5")
-        (unreadable[1] / "maps").unlink()
-        self.assertFalse(installer.stuck_without_shell(home, [unreadable[1]]))  # 讀不到 maps：當成已映射
-        # 不靠 FCITX_ADDON_DIRS 的安裝：新版的絕對 Library，或 90-0c.conf 沒有舊版寫的那行。
-        conf.write_text(f"[Addon]\nName=0c\nLibrary={home}/.local/lib/fcitx5/lib0c\n")
-        self.assertFalse(installer.stuck_without_shell(home, [stuck[1]]))
-        self.dev59_addon_setup()
-        env.write_text("FCITX_ADDON_DIRS=/opt/addons:/usr/lib64/fcitx5\n")
-        self.assertFalse(installer.stuck_without_shell(home, [stuck[1]]))
-        env.unlink()
-        self.assertFalse(installer.stuck_without_shell(home, [stuck[1]]))
-        self.dev59_addon_setup()
-        conf.unlink()
-        self.assertFalse(installer.stuck_without_shell(home, [stuck[1]]))
-
-    def test_stuck_install_leaves_a_one_time_todo_to_restore_the_input_method(self):
-        _, env = self.dev59_addon_setup()
-        stuck = self.fake_process("fcitx5", environ=b"DISPLAY=:0\0")
-        marker = self.home / installer.ZUIN_RESTORE
-        processes = {"fcitx5": [stuck]}
-
-        def main(*argv, **environ):
-            with patch.object(installer.sys, "argv", ["install.py", *argv, "--bundle", str(self.bundle), "--home", str(self.home)]), \
-                    patch.object(installer.os, "getuid", return_value=1000), \
-                    patch.dict(installer.os.environ, {"ZC_MANAGED_RELOAD": "1", **environ}), \
-                    patch.object(installer.Path, "home", return_value=self.home), \
-                    patch.object(installer, "user_processes", side_effect=lambda names: [p for n in names for p in processes.get(n, [])]), \
-                    patch.object(installer, "runtime_check"), patch.object(installer, "require_desktop_stopped"), \
-                    patch.object(installer, "clear_session_addon_dirs"), patch.object(installer, "restore_session_addon_dirs"), patch.object(installer, "settings_dependencies"):
-                installer.main()
-
-        # 0c-update 的 installUnusedShell（dev.60 更新器）以 ZC_SHELL_UNUSED=1 執行新套件的 install.py。
-        main("install", ZC_SHELL_UNUSED="1")
-        self.assertFalse(env.exists())  # 舊設定照常移除；判斷在移除之前
-        todo = json.loads(marker.read_text())
-        self.assertEqual((todo["schema"], todo["version"]), (1, self.release["version"]))
-        # 已換成絕對路徑：之後的安裝不再判定卡住，也不清掉還沒完成的待辦（可能還沒重新登入）。
-        main("install", ZC_SHELL_UNUSED="1")
-        self.assertTrue(marker.exists())
-        # 回復、移除後待辦作廢，免得日後把使用者自己拿掉的靈犀注音加回去。
-        backup = Path(json.loads((self.home / installer.RECEIPT).read_text())["backup"])
-        main("rollback", "--backup", str(backup))
-        self.assertFalse(marker.exists())
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("{}")
-        main("uninstall")
-        self.assertFalse(marker.exists())
-
-    def test_install_outside_the_stuck_state_leaves_no_restore_todo(self):
-        marker = self.home / installer.ZUIN_RESTORE
-        home = self.home.resolve()
-        found = f"FCITX_ADDON_DIRS={home}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\0".encode()
-        for name, (environ, process) in {
-            "一行安裝自己設定輸入法清單": ({"ZC_INPUT_SETUP": "1"}, b"DISPLAY=:0\0"),
-            "Fcitx5 找得到外殼": ({"ZC_SHELL_UNUSED": "1"}, found),
-        }.items():
-            with self.subTest(name):
-                self.dev59_addon_setup()
-                proc = self.fake_process("fcitx5", environ=process)
-                with patch.object(installer.sys, "argv", ["install.py", "install", "--bundle", str(self.bundle), "--home", str(self.home)]), \
-                        patch.object(installer.os, "getuid", return_value=1000), \
-                        patch.dict(installer.os.environ, {"ZC_MANAGED_RELOAD": "1", **environ}), \
-                        patch.object(installer.Path, "home", return_value=self.home), \
-                        patch.object(installer, "user_processes", return_value=[proc]), \
-                        patch.object(installer, "runtime_check"), patch.object(installer, "require_desktop_stopped"), \
-                        patch.object(installer, "clear_session_addon_dirs"), patch.object(installer, "settings_dependencies"):
-                    installer.main()
-                self.assertFalse(marker.exists())
-        # 安裝給別的家目錄（--home）時不看目前桌面的 Fcitx5。
-        self.dev59_addon_setup()
-        with patch.object(installer.Path, "home", return_value=self.root / "other"), \
-                patch.object(installer, "user_processes", side_effect=AssertionError("looked at the desktop")):
-            self.assertFalse(installer.zuin_restore_needed(self.home))
-
-    def test_uninstall_removes_the_environment_file_an_old_release_installed(self):
-        installer.install(self.bundle, self.home, self.release)
-        env = self.home / installer.ADDON_ENV
-        env.parent.mkdir(parents=True)
-        env.write_text("FCITX_ADDON_DIRS=${HOME}/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\n")
-        receipt = json.loads((self.home / installer.RECEIPT).read_text())
-        receipt["files"][installer.ADDON_ENV] = installer.digest(env)  # dev.59 的收據
-        (self.home / installer.RECEIPT).write_text(json.dumps(receipt))
-        installer.uninstall(self.home)
-        self.assertFalse(env.exists())
-
-    def fake_process(self, name, environ=b"", maps=""):
-        proc = self.root / "proc" / str(len(list((self.root / "proc").glob("*"))) if (self.root / "proc").exists() else 0)
-        proc.mkdir(parents=True)
-        (proc / "environ").write_bytes(environ)
-        (proc / "maps").write_text(maps)
-        return name, proc
-
-    def test_blocked_reinstall_says_how_to_stop_instead_of_pointing_to_finish(self):
-        with patch.object(installer, "user_processes", return_value=[("0c-server", Path("/proc/2")), ("fcitx5", Path("/proc/1"))]):
-            with self.assertRaises(ValueError) as caught:
-                installer.require_desktop_stopped()
-        message = str(caught.exception)
-        self.assertIn("pkill -x fcitx5; pkill -x 0c-server", message)  # 先停框架，引擎才不會被重新啟動
-        self.assertIn("登出再登入", message)
-        self.assertNotIn("0c-update finish", message)
-        with patch.object(installer, "user_processes", return_value=[("0c-ibus", Path("/proc/3"))]):
-            with self.assertRaisesRegex(ValueError, "切回「靈犀注音」") as caught:
-                installer.require_desktop_stopped()
-        self.assertNotIn("登出", str(caught.exception))
-        with patch.object(installer, "user_processes", return_value=[("0c-server", Path("/proc/2"))]):
-            with self.assertRaisesRegex(ValueError, "不能直接移除。"):  # #280：解除安裝時不說「覆蓋」
-                installer.require_desktop_stopped(verb="移除")
-        with patch.object(installer, "user_processes", return_value=[]):
-            installer.require_desktop_stopped()
-
-    def test_reinstall_proceeds_when_running_fcitx_does_not_use_the_shell(self):
-        library = self.home.resolve() / ".local/lib/fcitx5/lib0c.so"
-        unused = self.fake_process("fcitx5")  # #93：D-Bus 啟動的 Fcitx5 沒載入外殼
-        loaded = self.fake_process("fcitx5", maps=f"7f00-7f10 r-xp 00000000 08:02 1 {library}\n")
-        owner = {"value": "b true"}
-        run = lambda args, **kwargs: subprocess.CompletedProcess(args, 0, owner["value"], "")
-        which = patch.object(installer.shutil, "which", side_effect=lambda name: "/usr/bin/" + name)
-        with which:
-            with patch.object(installer, "user_processes", return_value=[unused]):
-                installer.require_desktop_stopped(self.home, run)
-            with patch.object(installer, "user_processes", return_value=[unused, ("0c-server", Path("/proc/9"))]):
-                with self.assertRaisesRegex(ValueError, "pkill -x 0c-server 結束") as caught:
-                    installer.require_desktop_stopped(self.home, run)
-            self.assertNotIn("fcitx5", str(caught.exception))
-            with patch.object(installer, "user_processes", return_value=[loaded]):
-                with self.assertRaisesRegex(ValueError, "pkill -x fcitx5"):
-                    installer.require_desktop_stopped(self.home, run)
-                # #92：外殼載入了，但 Fcitx5 沒有自己的 D-Bus 名稱（系統 addon 載不到），沒人能打字。
-                owner["value"] = "b false"
-                installer.require_desktop_stopped(self.home, run)
-                owner["value"] = ""  # 查不出來：當成使用中
-                with self.assertRaises(ValueError):
-                    installer.require_desktop_stopped(self.home, run)
-                with patch.dict(installer.os.environ, {"ZC_SHELL_UNUSED": "1"}):  # 0c-update 已確認
-                    installer.require_desktop_stopped(self.home, run)
-                with self.assertRaises(ValueError):  # 解除安裝、回復不放寬
-                    installer.require_desktop_stopped()
-
-    def test_replaced_legacy_or_unreadable_shell_still_counts_as_in_use(self):
-        # 上次更新換了 lib0c.so 但 Fcitx5 沒重新啟動：使用者還在用舊外殼打字，重跑安裝不能跳過組字保護。
-        core = "7f00-7f10 r-xp 00000000 08:01 7 /usr/lib64/libFcitx5Core.so.7\n"
-        home = self.home.resolve()
-        cases = {
-            "目前路徑": (f"7f20-7f30 r-xp 00000000 08:02 1234 {home}/.local/lib/fcitx5/lib0c.so\n", True),
-            "已被取代": (f"7f20-7f30 r-xp 00000000 08:02 1234 {home}/.local/lib/fcitx5/lib0c.so (deleted)\n", True),
-            "別的 inode": ("7f20-7f30 r-xp 00000000 08:02 99 /var/home/u/.local/lib/fcitx5/lib0c.so\n", True),
-            "dev.15 以前的 libzuin.so": (f"7f20-7f30 r-xp 00000000 08:02 5 {home}/.local/lib/fcitx5/libzuin.so (deleted)\n", True),
-            "家目錄含空白": ("7f20-7f30 r-xp 00000000 08:02 5 /home/u v/.local/lib/fcitx5/lib0c.so\n", True),
-            "沒有外殼（#93）": ("7f20-7f30 r-xp 00000000 08:02 6 /usr/lib64/fcitx5/libdbus.so\n", False),
-            "名字相近": ("7f20-7f30 r-xp 00000000 08:02 6 /opt/x/lib0c.so.bak\n", False),
-        }
-        run = lambda args, **kwargs: subprocess.CompletedProcess(args, 0, "b true", "")
-        with patch.object(installer.shutil, "which", side_effect=lambda name: "/usr/bin/" + name):
-            for name, (maps, mapped) in cases.items():
-                with self.subTest(name):
-                    proc = self.fake_process("fcitx5", maps=core + maps)
-                    self.assertEqual(installer.maps_shell(proc[1]), mapped)
-                    with patch.object(installer, "user_processes", return_value=[proc]):
-                        if mapped:
-                            with self.assertRaisesRegex(ValueError, "pkill -x fcitx5"):
-                                installer.require_desktop_stopped(self.home, run)
-                        else:
-                            installer.require_desktop_stopped(self.home, run)
-            unreadable = self.fake_process("fcitx5")
-            (unreadable[1] / "maps").unlink()  # 讀不到 maps：當成使用中
-            self.assertTrue(installer.maps_shell(unreadable[1]))
-            with patch.object(installer, "user_processes", return_value=[unreadable]):
-                with self.assertRaisesRegex(ValueError, "pkill -x fcitx5"):
-                    installer.require_desktop_stopped(self.home, run)
-
-    def test_system_addon_dir_follows_the_linked_fcitx_library(self):
-        lib = self.root / "usr/lib64"
-        (lib / "fcitx5").mkdir(parents=True)
-        (lib / "libFcitx5Core.so.5.1.23").write_text("core")
-        (lib / "libFcitx5Core.so.7").symlink_to("libFcitx5Core.so.5.1.23")
-        out = f"\tlibFcitx5Utils.so.2 => {lib}/libFcitx5Utils.so.2 (0x1)\n\tlibFcitx5Core.so.7 => {lib}/libFcitx5Core.so.7 (0x2)\n"
-        run = lambda *a, **k: subprocess.CompletedProcess(a[0], 0, out, "")
-        with patch.object(installer.shutil, "which", return_value="/usr/bin/fcitx5"):
-            self.assertIsNone(installer.system_addon_dir(run))  # 目錄裡沒有 addon
-            (lib / "fcitx5/libdbus.so").write_text("addon")
-            self.assertEqual(installer.system_addon_dir(run), lib / "fcitx5")
-        with patch.object(installer.shutil, "which", return_value=None):
-            self.assertIsNone(installer.system_addon_dir(run))
-
-    def test_session_drops_the_old_addon_path(self):
-        calls, systemd = [], {"FCITX_ADDON_DIRS": str(self.home.resolve()) + "/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5"}
-        def run(args, **kwargs):
-            calls.append(args)
-            if args[:3] == ["systemctl", "--user", "show-environment"]:
-                return subprocess.CompletedProcess(args, 0, "".join(f"{k}={v}\n" for k, v in systemd.items()), "")
-            if args[:3] == ["systemctl", "--user", "unset-environment"]:
-                systemd.pop(args[3], None)
-            if args[0] == "dbus-update-activation-environment":
-                systemd["FCITX_ADDON_DIRS"] = args[1].partition("=")[2]  # dbus-broker 轉給 systemd
-            return subprocess.CompletedProcess(args, 0, "", "")
-        patches = (patch.object(installer.Path, "home", return_value=self.home),
-                   patch.object(installer, "user_processes", return_value=[]),
-                   patch.object(installer, "system_addon_dir", return_value=Path("/usr/lib64/fcitx5")),
-                   patch.object(installer.shutil, "which", return_value="/usr/bin/dbus-update-activation-environment"))
-        for p in patches:
-            p.start()
-            self.addCleanup(p.stop)
-        self.assertTrue(installer.clear_session_addon_dirs(self.home, run=run))
-        # dbus-daemon 的啟動環境刪不掉變數：改成這台電腦的系統目錄，與沒設定時相同；systemd 那邊拿掉。
-        self.assertIn(["dbus-update-activation-environment", "FCITX_ADDON_DIRS=/usr/lib64/fcitx5"], calls)
-        self.assertEqual(calls[-1], ["systemctl", "--user", "unset-environment", "FCITX_ADDON_DIRS"])
-        self.assertNotIn("FCITX_ADDON_DIRS", systemd)
-        # 管理員沒帶舊值，但這次移除了舊的 90-0c.conf：D-Bus 可能載入過它，同樣更正。
-        calls.clear()
-        self.assertTrue(installer.clear_session_addon_dirs(self.home, stale=True, run=run))
-        self.assertIn(["dbus-update-activation-environment", "FCITX_ADDON_DIRS=/usr/lib64/fcitx5"], calls)
-        self.assertNotIn("FCITX_ADDON_DIRS", systemd)
-        # 使用者自己的路徑不動。
-        calls.clear()
-        systemd["FCITX_ADDON_DIRS"] = "/opt/mine:/usr/lib64/fcitx5"
-        self.assertFalse(installer.clear_session_addon_dirs(self.home, run=run))
-        self.assertEqual(calls, [["systemctl", "--user", "show-environment"]])
-        # 安裝給別的家目錄（測試、--home）時不碰目前的桌面。
-        with patch.object(installer.Path, "home", return_value=self.root / "other"):
-            self.assertFalse(installer.clear_session_addon_dirs(self.home, True, lambda *a, **k: self.fail("touched session")))
-
-    def test_running_fcitx_is_asked_to_load_the_new_addon(self):
-        library = self.home.resolve() / ".local/lib/fcitx5/lib0c.so"
-        mapped = f"7f00-7f10 r-xp 00000000 08:02 1234 {library}\n"
-        shown = []
-        proc = self.fake_process("fcitx5")
-        refreshed = []
-        def run(args, **kwargs):
-            refreshed.append(args)
-            (proc[1] / "maps").write_text(mapped)  # Refresh 之後 Fcitx5 載入了 addon
-            return subprocess.CompletedProcess(args, 0, "", "")
-        with patch.object(installer, "user_processes", return_value=[proc]), \
-             patch.object(installer.shutil, "which", side_effect=lambda name: "/usr/bin/" + name):
-            self.assertTrue(installer.report_fcitx_addon(self.home, run, wait=1, show=shown.append))
-            self.assertEqual(refreshed[0][:3], ["busctl", "--user", "--auto-start=no"])
-            self.assertIn("不必重新登入", shown[-1])
-            refreshed.clear()
-            self.assertTrue(installer.report_fcitx_addon(self.home, run, wait=1, show=shown.append))
-            self.assertEqual(refreshed, [])  # 已載入就不打擾
-        with patch.object(installer, "user_processes", return_value=[]):
-            self.assertIsNone(installer.report_fcitx_addon(self.home, run, show=shown.append))
-
-    def test_refresh_never_starts_another_fcitx_over_dbus(self):
-        calls = []
-        def run(args, **kwargs):
-            calls.append(args)
-            owned = "boolean false" if self.owner is False else "boolean true"
-            return subprocess.CompletedProcess(args, 0, owned if "org.freedesktop.DBus.NameHasOwner" in args else "", "")
-        # 沒有 busctl（例如精簡的 Ubuntu 容器）時改用 dbus-send，名稱沒有人持有就不呼叫，免得 D-Bus 另外啟動 Fcitx5。
-        with patch.object(installer.shutil, "which", side_effect=lambda name: None if name == "busctl" else "/usr/bin/" + name):
-            self.owner = False
-            self.assertFalse(installer.refresh_fcitx(run))
-            self.assertFalse(any("org.fcitx.Fcitx.Controller1.Refresh" in args for args in calls))
-            self.owner = True
-            self.assertTrue(installer.refresh_fcitx(run))
-            self.assertIn("org.fcitx.Fcitx.Controller1.Refresh", calls[-1])
-
-    def test_fcitx_that_cannot_load_the_addon_gets_restart_hint(self):
-        shown = []
-        # #92：Fcitx5 以只含 Debian 路徑的 FCITX_ADDON_DIRS 啟動，連 D-Bus addon 都沒載入，Refresh 也失敗。
-        proc = self.fake_process("fcitx5", b"FCITX_ADDON_DIRS=/h/.local/lib/fcitx5:/usr/lib/x86_64-linux-gnu/fcitx5\0")
-        fail = lambda args, **kwargs: subprocess.CompletedProcess(args, 1, "", "")
-        with patch.object(installer, "user_processes", return_value=[proc]), \
-             patch.object(installer, "system_addon_dir", return_value=Path("/usr/lib64/fcitx5")), \
-             patch.object(installer.shutil, "which", side_effect=lambda name: "/usr/bin/" + name):
-            self.assertFalse(installer.report_fcitx_addon(self.home, fail, wait=0.2, show=shown.append))
-        self.assertIn("請登出再登入", shown[0])
-        self.assertIn("/usr/lib64/fcitx5", shown[1])
-
-    def add_settings_program(self, content="settings program"):
-        path = self.bundle / "bin/0c-settings"
-        path.write_text(content)
-        self.release["files"]["bin/0c-settings"] = installer.digest(path)
-        self.save_release()
-
-    def drop_settings_program(self):
-        (self.bundle / "bin/0c-settings").unlink()
-        del self.release["files"]["bin/0c-settings"]
-        self.save_release()
-
-    def test_packaging_checks_the_prebuilt_settings_program(self):
-        def elf(machine):
-            return b"\x7fELF" + bytes(14) + machine.to_bytes(2, "little") + bytes(40)
-        def prebuilt(body, notices="Tauri 授權文字"):
-            directory = self.root / f"prebuilt-{len(list(self.root.glob('prebuilt-*')))}"
-            directory.mkdir()
-            (directory / "0c-settings").write_bytes(body)
-            (directory / "NOTICES.txt").write_text(notices)
-            return directory
-        stage = self.root / "stage"
-        text = packager.add_settings(stage, prebuilt(elf(62)), machine="x86_64")
-        self.assertEqual(text, "Tauri 授權文字")
-        target = stage / "bin/0c-settings"
-        self.assertEqual(target.read_bytes(), elf(62))
-        self.assertTrue(os.access(target, os.X_OK))
-        with self.assertRaisesRegex(ValueError, "x86_64"):
-            packager.add_settings(self.root / "wrong-arch", prebuilt(elf(183)), machine="x86_64")
-        packager.add_settings(self.root / "arm", prebuilt(elf(183)), machine="aarch64")
-        with self.assertRaisesRegex(ValueError, "Linux 執行檔"):
-            packager.add_settings(self.root / "not-elf", prebuilt(b"#!/bin/sh\n" + bytes(30)), machine="x86_64")
-        with self.assertRaisesRegex(ValueError, "授權聲明"):
-            packager.add_settings(self.root / "no-notices", prebuilt(elf(62), notices="  \n"), machine="x86_64")
-        with self.assertRaisesRegex(ValueError, "一般檔案"):
-            packager.add_settings(self.root / "missing", self.root / "does-not-exist", machine="x86_64")
+            make_installer.generate(self.root / "bad", "https://example.test/feeds", "https://x/'; rm -rf ~", "public-beta")
 
     def test_windows_packaging_checks_the_prebuilt_settings_program(self):
         def pe(machine=b"\x64\x86"):
@@ -1682,672 +260,6 @@ class ReleaseTests(unittest.TestCase):
             return target
         self.assertEqual(package_windows.pe_subsystem(with_subsystem(2)), package_windows.PE_SUBSYSTEM_GUI)
         self.assertEqual(package_windows.pe_subsystem(with_subsystem(3)), 3)
-
-    def test_macos_packaging_checks_the_prebuilt_settings_app(self):
-        arm64 = package_macos.MACHO_ARM64 + bytes(40)
-
-        def prebuilt(name, body=arm64, notices="Tauri 授權文字", plist="<plist/>"):
-            directory = self.root / name
-            app = directory / "0c-settings.app/Contents"
-            (app / "MacOS").mkdir(parents=True)
-            (app / "Info.plist").write_text(plist)
-            (app / "MacOS/0c-settings").write_bytes(body)
-            (directory / "NOTICES.txt").write_text(notices)
-            return directory
-        app, notices = package_macos.check_settings(prebuilt("mac-ok"))
-        self.assertEqual((app.name, notices), ("0c-settings.app", "Tauri 授權文字"))
-        x86_64 = bytes.fromhex("cffaedfe") + bytes.fromhex("07000001") + bytes(40)
-        with self.assertRaisesRegex(ValueError, "arm64"):
-            package_macos.check_settings(prebuilt("mac-x86", x86_64))
-        with self.assertRaisesRegex(ValueError, "arm64"):
-            package_macos.check_settings(prebuilt("mac-script", b"#!/bin/sh\n" + bytes(30)))
-        with self.assertRaisesRegex(ValueError, "授權聲明"):
-            package_macos.check_settings(prebuilt("mac-notices", notices=" \n"))
-        with self.assertRaisesRegex(ValueError, "Info.plist"):
-            package_macos.check_settings(prebuilt("mac-plist", plist=""))
-        linked = prebuilt("mac-link")
-        (linked / "0c-settings.app/Contents/Resources").symlink_to("/etc")
-        with self.assertRaisesRegex(ValueError, "符號連結"):
-            package_macos.check_settings(linked)
-        with self.assertRaisesRegex(ValueError, "找不到設定程式"):
-            package_macos.check_settings(self.root / "does-not-exist")
-        # Intel 版套件只收 x86_64 的設定程式。
-        app, _ = package_macos.check_settings(prebuilt("mac-intel", x86_64), "amd64")
-        self.assertEqual(app.name, "0c-settings.app")
-        with self.assertRaisesRegex(ValueError, "amd64"):
-            package_macos.check_settings(prebuilt("mac-intel-arm", arm64), "amd64")
-
-    def test_macos_settings_app_metadata_matches_what_the_packager_and_updater_expect(self):
-        plist = build_settings_macos.info_plist("0.1.0-dev.43")
-        self.assertEqual(plist["CFBundleExecutable"], package_macos.SETTINGS_EXECUTABLE)
-        self.assertEqual(build_settings_macos.APP_NAME, package_macos.SETTINGS_BUNDLE)
-        self.assertEqual(plist["CFBundleShortVersionString"], "0.1.0")
-        self.assertEqual(plist["CFBundleVersion"], "100.1.3043000")
-        self.assertEqual(plist["CFBundleIdentifier"], "com.biggo.0c.settings")
-        self.assertTrue(plist["LSMultipleInstancesProhibited"])
-        self.assertNotIn("LSUIElement", plist)  # 設定程式是一般視窗程式，要出現在 Dock
-        with self.assertRaises(ValueError):
-            build_settings_macos.info_plist("dev")
-
-    def test_macos_intel_pkg_stops_on_apple_silicon(self):
-        # Intel 版的 pkg 讓 Apple 晶片原生跑安裝程式（不先要求 Rosetta），才能擋下並說明改下載 Apple 晶片版。
-        import xml.dom.minidom
-        doc = xml.dom.minidom.parseString(package_macos_pkg.distribution("0.2.8", "amd64").encode("utf-8"))
-        self.assertEqual(doc.getElementsByTagName("options")[0].getAttribute("hostArchitectures"), "x86_64,arm64")
-        self.assertEqual(doc.getElementsByTagName("installation-check")[0].getAttribute("script"),
-                         "checkIntelMac() && checkInstalledVersion()")
-        script = doc.getElementsByTagName("script")[0].firstChild.data
-        self.assertIn('system.sysctl("hw.optional.arm64") != 1', script)
-        self.assertIn("function checkInstalledVersion()", script)
-        arm = xml.dom.minidom.parseString(package_macos_pkg.distribution("0.2.8").encode("utf-8"))
-        self.assertEqual(arm.getElementsByTagName("options")[0].getAttribute("hostArchitectures"), "arm64")
-        self.assertNotIn("checkIntelMac", arm.toxml())
-
-    def test_macos_pkg_refuses_downgrade_before_installing(self):
-        # 已安裝較新的版本時，安裝程式在開始前就說明原因（postinstall 失敗只會顯示通用的「安裝失敗」）。
-        # 比的是 CFBundleVersion，跟 App 的 Info.plist 用同一個公式。
-        import xml.dom.minidom
-        text = package_macos_pkg.distribution("0.2.0")
-        xml.dom.minidom.parseString(text.encode("utf-8"))
-        self.assertIn('<installation-check script="checkInstalledVersion()"/>', text)
-        self.assertIn(f'"{macos_version.bundle_version("0.2.0")}"', text)
-        self.assertIn("/Library/Input Methods/0c.app", text)
-        self.assertIn("這個安裝檔是 0.2.0", text)
-        self.assertIn('\\"$HOME/Library/Application Support/0c/bin/0c-update\\" rollback', text)
-        self.assertIn("<title>靈犀注音 0.2.0</title>", text)
-
-    def test_macos_pkg_pages_do_not_ask_upgraders_to_log_out(self):
-        # #170：安裝時已結束舊的輸入法程式，升級不必登出；第一次安裝找不到輸入來源時才請使用者重新登入。
-        self.assertIn("不必登出", package_macos_pkg.WELCOME)
-        self.assertIn("從舊版升級時不必登出", package_macos_pkg.CONCLUSION)
-        self.assertNotIn("登出再登入後全面生效", package_macos_pkg.CONCLUSION)
-        self.assertIn("登出目前帳號再重新登入", package_macos_pkg.CONCLUSION)
-
-    def test_macos_bundle_version_increases_with_every_release(self):
-        # 舊版一律寫 1；新版號必須都比 1 新，且依 semver 順序遞增，LaunchServices 才會選最新的 App（#77）。
-        order = ["0.1.0-alpha.1", "0.1.0-beta.2", "0.1.0-dev.58", "0.1.0-dev.58.1", "0.1.0-dev.59", "0.1.0-rc.1",
-                 "0.1.0", "0.1.1-dev.1", "0.2.0-dev.1", "1.0.0"]
-        key = lambda v: tuple(int(x) for x in macos_version.bundle_version(v).split("."))
-        self.assertEqual([key(v) for v in order], sorted(key(v) for v in order))
-        self.assertGreater(key("0.1.0-dev.59"), (1,))
-        self.assertEqual(macos_version.bundle_version("0.1.0-dev.59"), "100.1.3059000")
-        self.assertEqual(macos_version.short_version("0.1.0-dev.59"), "0.1.0")
-        for bad in ["dev", "0.1.0-foo.1", "0.1.0-dev.1000", "0.1.0-dev"]:
-            with self.assertRaises(ValueError):
-                macos_version.bundle_version(bad)
-
-    def test_macos_signing_seals_nested_apps_before_the_outer_app(self):
-        outer = self.root / "0c.app"
-        files = ["Contents/MacOS/0c", "Contents/MacOS/0c-update", "Contents/MacOS/0c-mcp", "Contents/Resources/data/lexicon.bin",
-                 "Contents/Helpers/0c-settings.app/Contents/MacOS/0c-settings",
-                 "Contents/Helpers/0c-settings.app/Contents/Info.plist",
-                 package_macos.SETTINGS_LAUNCHER + "/Contents/MacOS/0c-settings-launcher",
-                 package_macos.SETTINGS_LAUNCHER + "/Contents/Info.plist"]
-        for name in files:
-            path = outer / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"x")
-        nested = outer / "Contents/Helpers/0c-settings.app"
-        launcher = outer / package_macos.SETTINGS_LAUNCHER
-        machos = {outer / "Contents/MacOS/0c", outer / "Contents/MacOS/0c-update", outer / "Contents/MacOS/0c-mcp", nested / "Contents/MacOS/0c-settings",
-                  launcher / "Contents/MacOS/0c-settings-launcher"}
-        order = package_macos.signing_order(outer, lambda p: p in machos)
-        self.assertEqual(order[-1], outer)
-        self.assertEqual(set(order[-3:-1]), {nested, launcher})
-        self.assertEqual(set(order[:-3]), machos)
-        for app, exe in ((nested, "0c-settings"), (launcher, "0c-settings-launcher")):
-            self.assertLess(order.index(app / "Contents/MacOS" / exe), order.index(app))
-        self.assertNotIn(outer / "Contents/Resources/data/lexicon.bin", order)
-        single = self.root / "0c-update"
-        single.write_bytes(b"x")
-        self.assertEqual(package_macos.signing_order(single, lambda p: True), [single])
-
-    def test_macos_launcher_has_independent_identity_and_searchable_names(self):
-        self.assertEqual(package_macos.SETTINGS_LAUNCHER, "Contents/Helpers/0c-settings-launcher.app", "must use a standard nested-code location so stapling does not break the outer seal")
-        info = plistlib.loads((packager.ROOT / "platforms/macos/SettingsLauncher/Info.plist").read_bytes())
-        self.assertEqual(info["CFBundleIdentifier"], "com.biggo.0c.settings-launcher")
-        self.assertNotEqual(info["CFBundleIdentifier"], build_settings_macos.info_plist("0.1.0-dev.55")["CFBundleIdentifier"])
-        self.assertEqual(info["CFBundleExecutable"], "0c-settings-launcher")
-        self.assertIn("靈犀注音", info["CFBundleDisplayName"])
-        self.assertIn("0c", info["CFBundleDisplayName"])
-        self.assertTrue(info["LSUIElement"])
-        self.assertTrue(info["0cManagedSettingsLauncher"])
-        self.assertEqual(info["LSMinimumSystemVersion"], "13.0")
-
-    def test_macos_notarization_staples_and_assesses_the_launcher_and_outer_app(self):
-        stage, temp = self.root / "stage", self.root / "notary"
-        (stage / "0c.app" / package_macos.SETTINGS_LAUNCHER).mkdir(parents=True)
-        def run(args, **kwargs):
-            if "submit" in args:
-                return subprocess.CompletedProcess(args, 0, '{"id":"test-ticket","status":"Accepted"}', "")
-            return subprocess.CompletedProcess(args, 0, "", "source=Notarized Developer ID")
-        with patch.object(package_macos.subprocess, "run", side_effect=run) as mocked:
-            package_macos.notarize(stage, temp, "test-profile")
-        calls = [c.args[0] for c in mocked.call_args_list]
-        for app in (stage / "0c.app" / package_macos.SETTINGS_LAUNCHER, stage / "0c.app"):
-            for action in ("staple", "validate"):
-                self.assertIn(["xcrun", "stapler", action, str(app)], calls)
-            self.assertIn(["spctl", "--assess", "--type", "execute", "-vv", str(app)], calls)
-        self.assertIn(["codesign", "--verify", "--deep", "--strict", str(stage / "0c.app")], calls)
-
-    def test_optional_settings_program_installs_updates_and_uninstalls(self):
-        program = self.home / ".local/bin/0c-settings"
-        installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(program.exists(), "套件沒帶設定程式就不裝")
-        self.add_settings_program()
-        installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(program.read_text(), "settings program")
-        receipt = json.loads((self.home / installer.RECEIPT).read_text())
-        self.assertEqual(receipt["files"][".local/bin/0c-settings"], installer.digest(program), "收據要記錄雜湊，啟動前才能核對")
-        self.add_settings_program("newer settings program")
-        installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(program.read_text(), "newer settings program")
-        entry = self.home / installer.DESKTOP_ENTRY
-        entry.parent.mkdir(parents=True)
-        entry.write_text("[Desktop Entry]\n" + installer.DESKTOP_MARKER + "\n")
-        icon = self.home / installer.DESKTOP_ICON
-        icon.parent.mkdir(parents=True)
-        icon.write_bytes(b"png")
-        installer.uninstall(self.home)
-        self.assertFalse(program.exists())
-        self.assertFalse(entry.exists(), "解除安裝要一併移除 0c-update 建立的選單項目")
-        self.assertFalse(icon.exists(), "以及它一起寫入的圖示")
-
-    def add_ibus_shell(self):
-        path = self.bundle / "bin/0c-ibus"
-        path.write_text("ibus shell")
-        self.release["files"]["bin/0c-ibus"] = installer.digest(path)
-        self.save_release()
-
-    def register_ibus(self, name=installer.IBUS_COMPONENT_NAME):
-        component = self.home / installer.IBUS_COMPONENT
-        component.parent.mkdir(parents=True, exist_ok=True)
-        component.write_text(f"<component>{name}</component>")
-        for relative in (*installer.IBUS_ENV, installer.IBUS_CACHE):
-            (self.home / relative).parent.mkdir(parents=True, exist_ok=True)
-            (self.home / relative).write_text("x")
-        return component
-
-    def test_ibus_shell_is_optional_and_uninstall_removes_its_registration(self):
-        program = self.home / installer.OPTIONAL["bin/0c-ibus"]
-        self.add_ibus_shell()
-        installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(program.read_text(), "ibus shell")
-        receipt = json.loads((self.home / installer.RECEIPT).read_text())
-        self.assertIn(".local/bin/0c-ibus", receipt["files"])
-        component = self.register_ibus()
-        installer.uninstall(self.home)
-        self.assertFalse(program.exists())
-        for relative in (installer.IBUS_COMPONENT, *installer.IBUS_ENV, installer.IBUS_CACHE):
-            self.assertFalse((self.home / relative).exists(), f"解除安裝要撤銷 IBus 登錄：{relative}")
-        # 不是靈犀注音的元件檔不動。
-        foreign = self.register_ibus("<name>org.example.Other</name>")
-        installer.uninstall(self.home)
-        self.assertTrue(foreign.exists())
-        self.assertFalse(component.exists() and installer.IBUS_COMPONENT_NAME in component.read_text())
-
-    def test_rollback_to_a_package_without_the_ibus_shell_drops_the_registration(self):
-        installer.install(self.bundle, self.home, self.release)
-        self.add_ibus_shell()
-        with_ibus = installer.install(self.bundle, self.home, self.release)
-        self.register_ibus()
-        second = installer.install(self.bundle, self.home, self.release)
-        installer.rollback(self.home, second)
-        self.assertTrue((self.home / installer.IBUS_COMPONENT).exists(), "外殼還在就保留登錄")
-        installer.rollback(self.home, with_ibus)
-        self.assertFalse((self.home / installer.OPTIONAL["bin/0c-ibus"]).exists())
-        self.assertFalse((self.home / installer.IBUS_COMPONENT).exists(), "外殼不在了，IBus 不能再列出啟動不了的輸入法")
-        self.assertFalse((self.home / installer.IBUS_ENV[0]).exists())
-
-    def test_runtime_check_accepts_ibus_without_fcitx(self):
-        self.release["machine"] = installer.platform.machine()
-        self.add_ibus_shell()
-        ran = []
-        def which(name):
-            return {"ibus-daemon": "/usr/bin/ibus-daemon"}.get(name)
-        def run(args, **kwargs):
-            ran.append(args)
-            return subprocess.CompletedProcess(args, 0, "", "")
-        with patch.object(installer.shutil, "which", which), patch.object(installer.subprocess, "run", run):
-            installer.runtime_check(self.bundle, self.release)
-        self.assertIn([str(self.bundle / "bin/0c-ibus"), "-version"], ran)
-        self.assertFalse(any(args[0] == "ldd" for args in ran), "沒有 Fcitx5 時不檢查它的外殼函式庫")
-        with patch.object(installer.shutil, "which", lambda name: None), patch.object(installer.subprocess, "run", run):
-            with self.assertRaisesRegex(ValueError, "IBus"):
-                installer.runtime_check(self.bundle, self.release)
-        (self.bundle / "bin/0c-ibus").unlink()
-        with patch.object(installer.shutil, "which", which), patch.object(installer.subprocess, "run", run):
-            with self.assertRaisesRegex(ValueError, "Fcitx5"):
-                installer.runtime_check(self.bundle, self.release)
-
-    def test_runtime_check_rejects_shell_needing_newer_fcitx(self):
-        # Ubuntu 24.04 的 Fcitx5 5.1.7：函式庫都找得到，只有 ldd -r 才看得出缺 5.1.9 的符號。
-        self.release["machine"] = installer.platform.machine()
-        ran = []
-        def run(args, **kwargs):
-            ran.append(args)
-            out = ("\tlibFcitx5Core.so.7 => /usr/lib/x86_64-linux-gnu/libFcitx5Core.so.7\n"
-                   "undefined symbol: _ZN5fcitx8Instance15eventDispatcherEv\t(lib/lib0c.so)\n") if args[0] == "ldd" else ""
-            return subprocess.CompletedProcess(args, 0, out, "")
-        with patch.object(installer.shutil, "which", lambda name: "/usr/bin/fcitx5" if name == "fcitx5" else None), \
-                patch.object(installer.subprocess, "run", run):
-            with self.assertRaisesRegex(ValueError, "Fcitx5 版本不相容(.|\n)*eventDispatcher"):
-                installer.runtime_check(self.bundle, self.release)
-        self.assertIn(["ldd", "-r", str(self.bundle / "lib/lib0c.so")], ran)
-
-    def test_ibus_unregister_only_clears_the_toolkit_settings_it_made(self):
-        gtk, qt = installer.IBUS_TOOLKIT_ENV
-        user = self.home / ".config/environment.d/50-im.conf"
-        cases = (("我們的設定", {gtk: "GTK_IM_MODULE=ibus\n", qt: "# x\nQT_IM_MODULES=ibus;wayland\n"}, None, {"GTK_IM_MODULE", "QT_IM_MODULES"}),
-                 ("只有停用記號", {gtk: "# 已停用\n", qt: "# 已停用\n"}, None, set()),
-                 ("沒有檔案", {}, None, set()),
-                 ("使用者也指定了 Qt", {gtk: "GTK_IM_MODULE=ibus\n", qt: "QT_IM_MODULES=ibus;wayland\n"}, "export QT_IM_MODULES=fcitx\n", {"GTK_IM_MODULE"}))
-        for label, files, mine, cleared in cases:
-            with self.subTest(label):
-                component = self.register_ibus()
-                for relative in installer.IBUS_TOOLKIT_ENV:
-                    (self.home / relative).unlink()
-                for relative, text in files.items():
-                    (self.home / relative).write_text(text)
-                user.unlink(missing_ok=True)
-                if mine:
-                    user.write_text(mine)
-                calls = []
-                def run(args, **kwargs):
-                    calls.append(args)
-                    out = "[('xkb', 'us'), ('ibus', '0c')]\n" if args[:2] == ["gsettings", "get"] else ""
-                    return subprocess.CompletedProcess(args, 0, out, "")
-                with patch.object(installer.Path, "home", lambda: self.home), \
-                        patch.object(installer, "ETC", self.home / "etc"):
-                    self.assertTrue(installer.ibus_unregister(self.home, run=run))
-                self.assertFalse(component.exists())
-                self.assertIn(["gsettings", "set", "org.gnome.desktop.input-sources", "sources", "[('xkb', 'us')]"], calls)
-                unset = {args[3] for args in calls if args[:3] == ["systemctl", "--user", "unset-environment"]}
-                self.assertEqual(unset - {"IBUS_COMPONENT_PATH"}, cleared)
-                for relative in installer.IBUS_ENV:
-                    self.assertFalse((self.home / relative).exists(), relative)
-                self.assertEqual(user.exists(), bool(mine), "使用者自己的設定檔不動")
-
-    def test_ibus_unregister_cleans_cinnamon_and_xsessionrc(self):
-        # #237：Cinnamon 等 X11 桌面的登錄另有 Cinnamon 輸入來源與 ~/.xsessionrc 的一段。
-        rc = self.home / installer.IBUS_SESSION_RC
-        block = f"{installer.IBUS_SESSION_BEGIN}說明\ncase x in *) ;; esac\n{installer.IBUS_SESSION_END}\n"
-        for label, before, after in (("只有我們那一段", block, None),
-                                     ("使用者自己的內容", "export A=1\n" + block + "export B=2\n", "export A=1\nexport B=2\n"),
-                                     ("沒有結尾標記", "export A=1\n" + installer.IBUS_SESSION_BEGIN + "\n", "export A=1\n" + installer.IBUS_SESSION_BEGIN + "\n")):
-            with self.subTest(label):
-                self.register_ibus()
-                rc.write_text(before)
-                calls = []
-                def run(args, **kwargs):
-                    calls.append(args)
-                    out = "[('xkb', 'tw'), ('ibus', '0c')]\n" if args[:2] == ["gsettings", "get"] else ""
-                    return subprocess.CompletedProcess(args, 0, out, "")
-                with patch.object(installer.Path, "home", lambda: self.home), \
-                        patch.object(installer, "ETC", self.home / "etc"):
-                    self.assertTrue(installer.ibus_unregister(self.home, run=run))
-                for schema in installer.IBUS_SOURCE_SCHEMAS:
-                    self.assertIn(["gsettings", "set", schema, "sources", "[('xkb', 'tw')]"], calls)
-                if after is None:
-                    self.assertFalse(rc.exists())
-                else:
-                    self.assertEqual(rc.read_text(), after)
-                rc.unlink(missing_ok=True)
-
-    def test_ibus_source_is_removed_without_touching_other_sources(self):
-        for before, after in (("[('xkb', 'us'), ('ibus', '0c')]", "[('xkb', 'us')]"),
-                              ("[('ibus', '0c'), ('xkb', 'tw')]", "[('xkb', 'tw')]"),
-                              ("[('ibus', '0c')]", "[]"),
-                              ("[('xkb', 'us'), ('ibus', 'chewing')]", "[('xkb', 'us'), ('ibus', 'chewing')]")):
-            self.assertEqual(installer.without_ibus_source(before), after)
-
-    def test_stable_updater_copy_follows_the_installed_updater(self):
-        # 自動更新由舊更新器代為安裝，它只會把自己複製成排程用的穩定副本；穩定副本停在舊版，
-        # 選單的新子命令（open-settings）就沒有反應。安裝工具要把它換成這次套件的版本。
-        stable = self.home / installer.STABLE_UPDATER
-        installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(stable.exists(), "沒有排程（沒有穩定副本）就不建立")
-        stable.parent.mkdir(parents=True)
-        stable.write_text("old updater")
-        stable.chmod(0o700)
-        (self.bundle / "bin/0c-update").write_text("newer updater")
-        self.release["files"]["bin/0c-update"] = installer.digest(self.bundle / "bin/0c-update")
-        self.save_release()
-        installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(stable.read_text(), "newer updater")
-        self.assertEqual(stable.stat().st_mode & 0o777, 0o700, "穩定副本只給使用者執行")
-        self.assertEqual((self.home / ".local/bin/0c-update").read_text(), "newer updater")
-        self.assertFalse(installer.refresh_stable_updater(self.bundle, self.home), "相同就不動")
-        stable.unlink()
-        stable.symlink_to(self.root / "elsewhere")
-        installer.install(self.bundle, self.home, self.release)  # 符號連結不跟隨；失敗也不能讓安裝失敗
-        self.assertTrue(stable.is_symlink())
-        self.assertFalse((self.root / "elsewhere").exists())
-
-    def test_uninstall_keeps_a_settings_program_or_menu_entry_it_does_not_own(self):
-        self.add_settings_program()
-        installer.install(self.bundle, self.home, self.release)
-        program = self.home / ".local/bin/0c-settings"
-        program.write_text("replaced by someone")
-        entry = self.home / installer.DESKTOP_ENTRY
-        entry.parent.mkdir(parents=True)
-        entry.write_text("[Desktop Entry]\nName=mine\n")
-        retained = installer.uninstall(self.home)
-        self.assertIn(".local/bin/0c-settings", retained)
-        self.assertEqual(program.read_text(), "replaced by someone")
-        self.assertTrue(entry.exists(), "不是我們建立的選單項目不動")
-
-    def test_rollback_works_in_both_directions_around_the_optional_program(self):
-        program = self.home / ".local/bin/0c-settings"
-        without = installer.install(self.bundle, self.home, self.release)
-        self.add_settings_program()
-        with_settings = installer.install(self.bundle, self.home, self.release)
-        self.assertTrue(program.exists())
-        # 回復到沒有設定程式的那一版：新裝的設定程式要移除。
-        installer.rollback(self.home, with_settings)
-        self.assertFalse(program.exists())
-        # 先裝有設定程式的，再裝沒帶的新版：舊的移除（不留沒人更新的檔案），回復時放回。
-        with_again = installer.install(self.bundle, self.home, self.release)
-        self.drop_settings_program()
-        dropped = installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(program.exists(), "套件沒帶設定程式時，先前裝的舊版要移除")
-        installer.rollback(self.home, dropped)
-        self.assertEqual(program.read_text(), "settings program")
-        # 依序倒退到最初沒有設定程式的安裝：選用檔案不屬於必備清單，整條鏈都回得去。
-        installer.rollback(self.home, with_again)
-        self.assertFalse(program.exists())
-        installer.rollback(self.home, without)
-        self.assertFalse((self.home / installer.RECEIPT).exists())
-
-    def test_old_transaction_without_the_optional_entry_still_rolls_back(self):
-        first = installer.install(self.bundle, self.home, self.release)
-        (self.bundle / "bin/0c-server").write_text("next engine")
-        self.release["files"]["bin/0c-server"] = installer.digest(self.bundle / "bin/0c-server")
-        second = installer.install(self.bundle, self.home, self.release)
-        transaction = json.loads((second / "transaction.json").read_text())
-        for relative in installer.OPTIONAL.values():
-            transaction.pop(relative, None)  # 模擬舊版安裝器寫的交易紀錄
-        (second / "transaction.json").write_text(json.dumps(transaction))
-        installer.rollback(self.home, second)
-        self.assertEqual((self.home / ".local/bin/0c-server").read_text(), "new bin/0c-server")
-        self.assertTrue(first.exists())
-
-    def test_webkit_install_command_follows_the_distribution(self):
-        for release, command in (
-                ("ID=ubuntu\nID_LIKE=debian\n", ["sudo", "apt", "install", "libwebkit2gtk-4.1-0"]),
-                ('ID="linuxmint"\nID_LIKE="ubuntu debian"\n', ["sudo", "apt", "install", "libwebkit2gtk-4.1-0"]),
-                ("ID=fedora\n", ["sudo", "dnf", "install", "webkit2gtk4.1"]),
-                ('ID=rocky\nID_LIKE="rhel centos fedora"\n', ["sudo", "dnf", "install", "webkit2gtk4.1"]),
-                ("ID=arch\n", ["sudo", "pacman", "-S", "webkit2gtk-4.1"]),
-                ('ID=opensuse-tumbleweed\nID_LIKE="opensuse suse"\n', ["sudo", "zypper", "install", "libwebkit2gtk-4_1-0"]),
-                ("ID=nixos\n", None), ("ID=archive\n", None), ("", None)):
-            self.assertEqual(installer.webkit_install_command(release), command, release)
-
-    def test_missing_webkit_is_explained_and_only_installed_with_consent(self):
-        self.add_settings_program()
-        installer.install(self.bundle, self.home, self.release)
-        lines, ran = [], []
-        class Done:
-            returncode = 0
-        def settle(interactive, answer, **extra):
-            lines.clear()
-            ran.clear()
-            with patch.object(installer, "missing_libraries", return_value=["libwebkit2gtk-4.1.so.0"]):
-                return installer.settings_dependencies(
-                    self.home, interactive=interactive, ask=lambda prompt: answer, run=lambda cmd: ran.append(cmd) or Done(),
-                    show=lines.append, os_release="ID=ubuntu\n", **extra)
-        self.assertTrue(settle(False, "y"))
-        self.assertEqual(ran, [], "非互動環境（排程、管線）只說明，不執行 sudo")
-        text = "\n".join(lines)
-        self.assertIn("libwebkit2gtk-4.1.so.0", text)
-        self.assertIn("sudo apt install libwebkit2gtk-4.1-0", text)
-        self.assertIn("0c-update settings", text, "要告訴使用者沒有它也能用文字命令設定")
-        settle(True, "n")
-        self.assertEqual(ran, [], "使用者不同意就不執行")
-        settle(True, "")
-        self.assertEqual(ran, [], "直接按 Enter 視為不同意")
-        settle(True, "y")
-        self.assertEqual(ran, [["sudo", "apt", "install", "libwebkit2gtk-4.1-0"]])
-        # 認不得的發行版：只說明要裝什麼，不猜指令。
-        with patch.object(installer, "missing_libraries", return_value=["libwebkit2gtk-4.1.so.0"]):
-            lines.clear()
-            installer.settings_dependencies(self.home, interactive=True, ask=lambda p: "y", run=lambda c: ran.append(c), show=lines.append, os_release="ID=nixos\n")
-        self.assertIn("WebKitGTK 4.1", "\n".join(lines))
-        # 函式庫齊全或沒有設定程式：什麼都不說。
-        lines.clear()
-        with patch.object(installer, "missing_libraries", return_value=[]):
-            self.assertFalse(installer.settings_dependencies(self.home, interactive=False, show=lines.append))
-        self.assertEqual(lines, [])
-
-    def test_sudo_failure_never_breaks_the_install(self):
-        self.add_settings_program()
-        installer.install(self.bundle, self.home, self.release)
-        def broken(command):
-            raise OSError("sudo: not found")
-        with patch.object(installer, "missing_libraries", return_value=["libwebkit2gtk-4.1.so.0"]):
-            self.assertTrue(installer.settings_dependencies(
-                self.home, interactive=True, ask=lambda p: "y", run=broken, show=lambda line: None, os_release="ID=ubuntu\n"))
-
-    def test_upgrade_from_zuin_release_removes_old_files_and_rolls_back(self):
-        # Files as installed by the zuin-* installers through 0.1.0-dev.15.
-        old = {".local/bin/zuin-server": "old engine", ".local/bin/zuin-trace": "old trace",
-               ".local/lib/fcitx5/libzuin.so": "old addon", ".local/share/fcitx5/addon/zuin.conf": "Library=libzuin",
-               ".local/share/fcitx5/inputmethod/zuin.conf": "Addon=zuin",
-               ".config/environment.d/90-zuin.conf": "FCITX_ADDON_DIRS=old",
-               ".local/share/zuin/tools/install.py": "old installer", ".local/bin/0c-update": "old updater",
-               **{f".local/share/zuin/data/{name}": "old " + name for name in
-                  ("lexicon.bin", "lm.bin", "manifest.json", "NOTICE.txt", "report.txt")},
-               installer.RECEIPT: '{"version": "0.1.0-dev.15", "active": true}'}
-        for relative, content in old.items():
-            (self.home / relative).parent.mkdir(parents=True, exist_ok=True)
-            (self.home / relative).write_text(content)
-        backup = installer.install(self.bundle, self.home, self.release)
-        for relative in installer.LEGACY:
-            self.assertFalse((self.home / relative).exists(), relative)
-        self.assertEqual((self.home / ".local/bin/0c-server").read_text(), "new bin/0c-server")
-        self.assertEqual((self.home / ".local/share/fcitx5/inputmethod/zuin.conf").read_text(), "new config/0c-im.conf")
-        installer.rollback(self.home, backup)
-        for relative, content in old.items():
-            self.assertEqual((self.home / relative).read_text(), content, relative)
-        for relative in (".local/bin/0c-server", ".local/bin/0c-trace", ".local/lib/fcitx5/lib0c.so", ".local/share/fcitx5/addon/0c.conf",
-                         ".config/environment.d/90-0c.conf"):
-            self.assertFalse((self.home / relative).exists(), relative)
-        self.assertEqual(self.user.read_text(), "private learning")
-        # The old release can be upgraded again after rolling back.
-        installer.install(self.bundle, self.home, self.release)
-        self.assertFalse((self.home / ".local/bin/zuin-server").exists())
-
-    def test_rollback_can_restore_saved_user_store_and_undo_it(self):
-        first = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual((first / installer.SAVED_USER).read_text(), "private learning")
-        self.user.write_text("written by newer version")
-        (self.bundle / "bin/0c-server").write_text("next engine")
-        second = installer.install(self.bundle, self.home, self.release)
-        self.user.write_text("newer format")
-        installer.rollback(self.home, second)
-        self.assertEqual(self.user.read_text(), "newer format")  # default keeps learning
-        installer.install(self.bundle, self.home, self.release)
-        third = installer.install(self.bundle, self.home, self.release)
-        kept = installer.rollback(self.home, third, restore_user=True)
-        self.assertEqual(self.user.read_text(), "newer format")  # snapshot of third == state before it
-        self.user.write_text("after third")
-        (self.bundle / "bin/0c-server").write_text("fourth engine")
-        fourth = installer.install(self.bundle, self.home, self.release)
-        self.user.write_text("written by fourth")
-        kept = installer.rollback(self.home, fourth, restore_user=True)
-        self.assertEqual(self.user.read_text(), "after third")
-        self.assertEqual((kept / installer.SAVED_USER).read_text(), "written by fourth")
-        undo = installer.restore_user_store(self.home, kept)
-        self.assertEqual(self.user.read_text(), "written by fourth")
-        self.assertEqual((undo / installer.SAVED_USER).read_text(), "after third")
-
-    def test_vocab_store_follows_user_store(self):
-        # #127：自訂詞彙跟 user.json 一起備份；預設回復保留目前的詞，-restore-user 一起還原並可撤回；
-        # 升級前還沒有自訂詞彙時，還原不刪掉後來加的詞。
-        vocab = self.home / ".local/share/zuin/vocab.json"
-        first = installer.install(self.bundle, self.home, self.release)
-        self.assertFalse((first / installer.SAVED_VOCAB).exists())
-        vocab.write_text("words added later")
-        (self.bundle / "bin/0c-server").write_text("next engine")
-        second = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual((second / installer.SAVED_VOCAB).read_text(), "words added later")
-        installer.rollback(self.home, second)
-        self.assertEqual(vocab.read_text(), "words added later")  # default keeps everything
-        third = installer.install(self.bundle, self.home, self.release)
-        vocab.write_text("more words")
-        kept = installer.rollback(self.home, third, restore_user=True)
-        self.assertEqual(vocab.read_text(), "words added later")
-        self.assertEqual((kept / installer.SAVED_VOCAB).read_text(), "more words")
-        installer.restore_user_store(self.home, kept)
-        self.assertEqual(vocab.read_text(), "more words")
-        # A snapshot without vocab.json leaves the current file alone.
-        installer.restore_user_store(self.home, first)
-        self.assertEqual(vocab.read_text(), "more words")
-
-    def test_restore_user_without_snapshot_changes_nothing(self):
-        self.user.unlink()
-        backup = installer.install(self.bundle, self.home, self.release)
-        before = {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file() and "backups" not in p.parts}
-        with self.assertRaisesRegex(ValueError, "一般檔案"):
-            installer.rollback(self.home, backup, restore_user=True)
-        self.assertEqual(before, {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file() and "backups" not in p.parts})
-        with self.assertRaisesRegex(ValueError, "備份目錄"):
-            installer.restore_user_store(self.home, self.root)
-
-    def write_neural(self, label):
-        for name in ("python/bin/python3", "sequence_runtime.py", "select/manifest.json", "select/model.onnx"):
-            path = self.bundle / "neural" / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"{label} {name}")
-        self.release["files"] = {str(p.relative_to(self.bundle)): installer.digest(p)
-                                 for p in self.bundle.rglob("*") if p.is_file() and p.name != "release.json"}
-        self.save_release()
-
-    def test_neural_tree_installs_upgrades_rolls_back_and_uninstalls(self):
-        neural = self.home / installer.NEURAL
-        self.write_neural("v1")
-        first = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual((neural / "select/model.onnx").read_text(), "v1 select/model.onnx")
-        v1 = installer.tree_digest(neural)
-        self.write_neural("v2")
-        second = installer.install(self.bundle, self.home, self.release)
-        self.assertEqual((neural / "select/model.onnx").read_text(), "v2 select/model.onnx")
-        self.assertEqual(installer.tree_digest(second / installer.NEURAL), v1)
-        installer.rollback(self.home, second)
-        self.assertEqual(installer.tree_digest(neural), v1)
-        installer.rollback(self.home, first)
-        self.assertFalse(neural.exists())
-        installer.install(self.bundle, self.home, self.release)
-        (neural / "select/model.onnx").write_text("locally modified")
-        self.assertIn(installer.NEURAL, installer.uninstall(self.home))
-        self.assertTrue(neural.exists())
-        (neural / "select/model.onnx").write_text("v2 select/model.onnx")
-        installer.install(self.bundle, self.home, self.release)
-        installer.uninstall(self.home)
-        self.assertFalse(neural.exists())
-        self.assertEqual(self.user.read_text(), "private learning")
-
-    def test_failed_install_restores_previous_neural_tree(self):
-        neural = self.home / installer.NEURAL
-        self.write_neural("v1")
-        installer.install(self.bundle, self.home, self.release)
-        before = installer.tree_digest(neural)
-        self.write_neural("v2")
-        real = installer.atomic_copy
-        def fail_receipt(src, dst):
-            if dst.name == "install-receipt.json":
-                raise OSError("disk full")
-            real(src, dst)
-        with patch.object(installer, "atomic_copy", side_effect=fail_receipt):
-            with self.assertRaisesRegex(OSError, "disk full"):
-                installer.install(self.bundle, self.home, self.release)
-        self.assertEqual(installer.tree_digest(neural), before)
-        self.assertEqual([p.name for p in neural.parent.iterdir() if p.name.startswith(".neural-")], [])
-
-    def test_rollback_rejects_modified_neural_tree(self):
-        neural = self.home / installer.NEURAL
-        self.write_neural("v1")
-        installer.install(self.bundle, self.home, self.release)
-        self.write_neural("v2")
-        backup = installer.install(self.bundle, self.home, self.release)
-        (neural / "sequence_runtime.py").write_text("patched")
-        with self.assertRaisesRegex(ValueError, "已變更"):
-            installer.rollback(self.home, backup)
-        self.assertEqual((neural / "sequence_runtime.py").read_text(), "patched")
-
-    def test_rollback_rejects_reappeared_legacy_file(self):
-        legacy = self.home / ".local/bin/zuin-server"
-        legacy.parent.mkdir(parents=True)
-        legacy.write_text("old engine")
-        backup = installer.install(self.bundle, self.home, self.release)
-        legacy.write_text("someone else's file")
-        with self.assertRaisesRegex(ValueError, "又出現"):
-            installer.rollback(self.home, backup)
-        self.assertEqual(legacy.read_text(), "someone else's file")
-
-    def test_rollback_after_core_update_restores_previous_pointer(self):
-        # 完整安裝後的核心更新會重新寫入引擎指標；回復完整安裝時改回安裝前的狀態。
-        pointer = self.home / installer.POINTER
-        pointer.write_text('{"directory": "versions/old", "version": "0.1.0-dev.1"}')
-        backup = installer.install(self.bundle, self.home, self.release)
-        self.assertFalse(pointer.exists())
-        pointer.write_text('{"directory": "versions/core", "version": "0.1.0-beta.2"}')
-        installer.rollback(self.home, backup)
-        self.assertIn("versions/old", pointer.read_text())
-
-        # 安裝前沒有指標：回復時刪除核心更新寫入的指標。
-        pointer.unlink()
-        backup = installer.install(self.bundle, self.home, self.release)
-        pointer.write_text('{"directory": "versions/core", "version": "0.1.0-beta.2"}')
-        installer.rollback(self.home, backup)
-        self.assertFalse(pointer.exists())
-
-        # 指標位置不是一般檔案：拒絕，且不動其他檔案。
-        backup = installer.install(self.bundle, self.home, self.release)
-        pointer.mkdir()
-        with self.assertRaisesRegex(ValueError, "一般檔案"):
-            installer.rollback(self.home, backup)
-        self.assertTrue((self.home / ".local/bin/0c-server").exists())
-
-    def test_rollback_rejects_modified_installation_and_backup(self):
-        installer.install(self.bundle, self.home, self.release)
-        backup = installer.install(self.bundle, self.home, self.release)
-        server = self.home / ".local/bin/0c-server"
-        content = server.read_bytes()
-        server.write_text("local modification")
-        with self.assertRaisesRegex(ValueError, "已變更"):
-            installer.rollback(self.home, backup)
-        server.write_bytes(content)
-        (backup / ".local/bin/0c-server").write_text("damaged backup")
-        with self.assertRaisesRegex(ValueError, "備份雜湊"):
-            installer.rollback(self.home, backup)
-        self.assertEqual(server.read_bytes(), content)
-
-    def test_failed_rollback_restores_current_files(self):
-        installer.install(self.bundle, self.home, self.release)
-        (self.bundle / "bin/0c-server").write_text("next engine")
-        backup = installer.install(self.bundle, self.home, self.release)
-        before = {p: p.read_bytes() for p in self.home.rglob("*") if p.is_file() and "backups" not in p.parts}
-        real_copy = installer.atomic_copy
-        failed = False
-        def fail_once(src, dst):
-            nonlocal failed
-            if str(src).startswith(str(backup)) and dst.name == "0c-server" and not failed:
-                failed = True
-                raise OSError("disk full")
-            real_copy(src, dst)
-        with patch.object(installer, "atomic_copy", side_effect=fail_once):
-            with self.assertRaisesRegex(OSError, "disk full"):
-                installer.rollback(self.home, backup)
-        self.assertTrue(failed)
-        for path, content in before.items():
-            self.assertEqual(path.read_bytes(), content)
-
-    def test_concurrent_mutations_are_rejected(self):
-        with installer.mutation_lock(self.home):
-            with self.assertRaisesRegex(ValueError, "正在執行"):
-                with installer.mutation_lock(self.home):
-                    self.fail("second lock acquired")
 
     def test_windows_binary_architecture_validation(self):
         import struct
@@ -2544,14 +456,11 @@ Successfully verified: 0c-update.exe
                 self.assertFalse(stage.exists())
                 path.write_text("fixture license")
 
-    def test_notices_cover_shipped_go_and_bundled_headers(self):
+    def test_notices_cover_shipped_go_and_rust(self):
         import collect_notices
-        goroot = subprocess.run(["go", "env", "GOROOT"], capture_output=True, text=True).stdout.strip()
-        if collect_notices.go_license(goroot) is None:
-            self.skipTest(f"GOROOT {goroot} 沒有 LICENSE（例如 Debian 的 golang-go）")
-        text = collect_notices.collect("linux-amd64")
+        text = collect_notices.collect()
         self.assertIn("Go 工具鏈與標準函式庫", text)
-        self.assertIn("nlohmann/json", text)
+        self.assertIn("Rust crate windows ", text)  # Windows 外殼的 crate
         self.assertIn("TERMS.md", text)
         self.assertIn("LICENSE", text)
         self.assertIn("legal/README.md", text)
@@ -2591,15 +500,14 @@ Successfully verified: 0c-update.exe
     BASE = "https://s3.biggo.com/0c-releases/releases/0.1.0-dev.39/"
 
     def site_feed(self, withdrawn=None):
-        assets = [("linux", "amd64", "0c-0.1.0-dev.39-linux-amd64.tar.gz", 30), ("windows", "amd64", "0c-0.1.0-dev.39-windows-amd64.zip", 20),
-                  ("darwin", "arm64", "0c-0.1.0-dev.39-macos-arm64.tar.gz", 10)]
+        name = "0c-0.1.0-dev.39-windows-amd64.zip"
         return {"version": "0.1.0-dev.39", "channel": "public-beta", "withdrawn": withdrawn,
-                "assets": [{"os": o, "arch": a, "url": self.BASE + n, "sha256": n[-8:] * 8, "size": z} for o, a, n, z in assets]}
+                "assets": [{"os": "windows", "arch": "amd64", "url": self.BASE + name, "sha256": "b" * 64, "size": 20}]}
 
     def site_uploads(self, feed):
         uploads = [(a["url"].rsplit("/", 1)[1], a["url"], a["sha256"], a["size"]) for a in feed["assets"]]
-        for name in ("0c-0.1.0-dev.39-windows-amd64-setup.exe", "0c-0.1.0-dev.39-macos-arm64.pkg"):
-            uploads.append((name, self.BASE + name, "e" * 64, 5))
+        name = "0c-0.1.0-dev.39-windows-amd64-setup.exe"
+        uploads.append((name, self.BASE + name, "e" * 64, 5))
         return uploads
 
     def test_changelog_public_summary(self):
@@ -2622,31 +530,20 @@ Successfully verified: 0c-update.exe
         changelog = site_manifest.parse_changelog(self.CHANGELOG)
         site = site_manifest.build(feed, self.site_uploads(feed), changelog, "2026-10-03T08:00:00Z")
         self.assertEqual((site["schema"], site["version"], site["withdrawn"], site["changelog"]), (1, "0.1.0-dev.39", None, changelog))
-        self.assertEqual(list(site["platforms"]), ["windows-amd64", "linux-amd64", "macos-arm64"])
-        self.assertEqual(site["platforms"]["linux-amd64"], {"installer": {"url": feed["assets"][0]["url"], "size": 30, "sha256": feed["assets"][0]["sha256"]}})
-        self.assertTrue(site["platforms"]["windows-amd64"]["installer"]["url"].endswith("-setup.exe"))
-        self.assertTrue(site["platforms"]["macos-arm64"]["installer"]["url"].endswith(".pkg"))
+        self.assertEqual(site["platforms"], {"windows-amd64": {
+            "installer": {"url": self.BASE + "0c-0.1.0-dev.39-windows-amd64-setup.exe", "size": 5, "sha256": "e" * 64},
+            "archive": {"url": feed["assets"][0]["url"], "size": 20, "sha256": "b" * 64}}})
         uploads = self.site_uploads(feed)
-        uploads[1] = (uploads[1][0], uploads[1][1], "0" * 64, uploads[1][3])  # ZIP 與已簽章索引不符
+        uploads[0] = (uploads[0][0], uploads[0][1], "0" * 64, uploads[0][3])  # ZIP 與已簽章索引不符
         with self.assertRaises(ValueError):
             site_manifest.build(feed, uploads, changelog, "t")
-        with self.assertRaises(ValueError):  # Windows 沒有 setup.exe
-            site_manifest.build(feed, self.site_uploads(feed)[:3] + self.site_uploads(feed)[4:], changelog, "t")
+        with self.assertRaises(ValueError):  # 沒有 setup.exe
+            site_manifest.build(feed, self.site_uploads(feed)[:1], changelog, "t")
+        linux = dict(feed, assets=feed["assets"] + [dict(feed["assets"][0], os="linux")])
+        with self.assertRaisesRegex(ValueError, "linux/amd64"):  # 只收 Windows
+            site_manifest.build(linux, self.site_uploads(feed), changelog, "t")
         with self.assertRaises(ValueError):  # CHANGELOG 最新的已上架版本不是索引版本
             site_manifest.build(feed, self.site_uploads(feed), changelog[1:], "t")
-
-    def test_site_manifest_lists_intel_mac_after_apple_silicon(self):
-        feed = self.site_feed()
-        feed["assets"].append({"os": "darwin", "arch": "amd64", "url": self.BASE + "0c-0.1.0-dev.39-macos-amd64.tar.gz",
-                               "sha256": "c" * 64, "size": 11})
-        uploads = self.site_uploads(feed) + [("0c-0.1.0-dev.39-macos-amd64.pkg", self.BASE + "0c-0.1.0-dev.39-macos-amd64.pkg", "d" * 64, 12)]
-        site = site_manifest.build(feed, uploads, site_manifest.parse_changelog(self.CHANGELOG), "t")
-        self.assertEqual(list(site["platforms"]), ["windows-amd64", "linux-amd64", "macos-arm64", "macos-amd64"])
-        self.assertEqual(site["platforms"]["macos-amd64"], {
-            "installer": {"url": self.BASE + "0c-0.1.0-dev.39-macos-amd64.pkg", "size": 12, "sha256": "d" * 64},
-            "archive": {"url": self.BASE + "0c-0.1.0-dev.39-macos-amd64.tar.gz", "size": 11, "sha256": "c" * 64}})
-        with self.assertRaisesRegex(ValueError, "macos-amd64"):  # Intel 版沒有 pkg
-            site_manifest.build(feed, uploads[:-1], site_manifest.parse_changelog(self.CHANGELOG), "t")
 
     def test_site_manifest_withdrawn(self):
         feed = self.site_feed(withdrawn=["0.1.0-dev.39"])
@@ -2658,14 +555,13 @@ Successfully verified: 0c-update.exe
         with self.assertRaises(ValueError):  # 沒有撤回卻填理由
             site_manifest.build(self.site_feed(), self.site_uploads(feed), changelog, "t", "理由")
 
-    def old_platforms(self, version="0.1.0-dev.38", mac_installer=True):
-        base = f"https://s3.biggo.com/0c-releases/releases/{version}/0c-{version}"
+    def old_platforms(self, version="0.1.0-dev.38", setup=True):
+        base = f"https://s3.biggo.com/0c-releases/releases/{version}/0c-{version}-windows-amd64"
         f = lambda suffix, size: {"url": base + suffix, "size": size, "sha256": "a" * 64}
-        mac = {"archive": f("-macos-arm64.tar.gz", 7)}
-        if mac_installer:
-            mac["installer"] = f("-macos-arm64.pkg", 8)
-        return {"windows-amd64": {"installer": f("-windows-amd64-setup.exe", 9), "archive": f("-windows-amd64.zip", 6)},
-                "linux-amd64": {"installer": f("-linux-amd64.tar.gz", 5)}, "macos-arm64": mac}
+        windows = {"archive": f(".zip", 6)}
+        if setup:
+            windows["installer"] = f("-setup.exe", 9)
+        return {"windows-amd64": windows}
 
     def test_site_manifest_carries_past_downloads(self):
         # #81：舊版的下載資料從線上清單帶下來；上一版取線上清單最上層；目前版本不附。
@@ -2676,7 +572,6 @@ Successfully verified: 0c-update.exe
         site = site_manifest.build(feed, self.site_uploads(feed), changelog, "t", history=history)
         self.assertNotIn("platforms", site["changelog"][0])
         self.assertEqual(site["changelog"][1]["platforms"], self.old_platforms())
-        self.assertEqual(list(site["changelog"][1]["platforms"]), ["windows-amd64", "linux-amd64", "macos-arm64"])
         # 之後的版本：已在 changelog 裡的資料原樣保留，即使它已不是線上清單的最上層。
         later = {"version": "0.1.0-dev.39", "platforms": site["platforms"], "changelog": site["changelog"]}
         again = site_manifest.build(feed, self.site_uploads(feed), changelog, "t", history=later)
@@ -2684,10 +579,10 @@ Successfully verified: 0c-update.exe
         # 沒有線上清單時與以前相同：各版只有說明。
         plain = site_manifest.build(feed, self.site_uploads(feed), changelog, "t")
         self.assertEqual(plain["changelog"], changelog)
-        # backfill 只補線上清單沒有的版本；只有 archive 的平台照列。
+        # backfill 只補線上清單沒有的版本；只有 archive 的舊版照列。
         filled = site_manifest.build(feed, self.site_uploads(feed), changelog, "t",
-                                     backfill={"0.1.0-dev.38": self.old_platforms(mac_installer=False)})
-        self.assertEqual(filled["changelog"][1]["platforms"]["macos-arm64"], {"archive": self.old_platforms()["macos-arm64"]["archive"]})
+                                     backfill={"0.1.0-dev.38": self.old_platforms(setup=False)})
+        self.assertEqual(filled["changelog"][1]["platforms"], {"windows-amd64": {"archive": self.old_platforms()["windows-amd64"]["archive"]}})
         self.assertEqual(site_manifest.build(feed, self.site_uploads(feed), changelog, "t", history=history,
                                              backfill={"0.1.0-dev.38": {}})["changelog"][1]["platforms"], self.old_platforms())
 
@@ -2707,15 +602,16 @@ Successfully verified: 0c-update.exe
             edit(platforms)
             with self.assertRaises(ValueError):
                 site_manifest.build(feed, self.site_uploads(feed), changelog, "t", backfill={"0.1.0-dev.38": platforms})
-        bad(lambda p: p["linux-amd64"]["installer"].update(url=p["linux-amd64"]["installer"]["url"].replace("dev.38", "dev.37")))
-        bad(lambda p: p["linux-amd64"]["installer"].update(url=p["linux-amd64"]["installer"]["url"].replace("https", "http")))
+        setup = lambda p: p["windows-amd64"]["installer"]
+        bad(lambda p: setup(p).update(url=setup(p)["url"].replace("dev.38", "dev.37")))
+        bad(lambda p: setup(p).update(url=setup(p)["url"].replace("https", "http")))
         bad(lambda p: p["windows-amd64"].update(installer=p["windows-amd64"]["archive"]))  # 角色與檔名不符
-        bad(lambda p: p["linux-amd64"]["installer"].update(size=0))
-        bad(lambda p: p["linux-amd64"]["installer"].update(size=True))
-        bad(lambda p: p["linux-amd64"]["installer"].update(sha256="A" * 64))
-        bad(lambda p: p.update({"freebsd-amd64": p["linux-amd64"]}))
-        bad(lambda p: p.update({"linux-amd64": {}}))
-        bad(lambda p: p["linux-amd64"].update(extra=p["linux-amd64"]["installer"]))
+        bad(lambda p: setup(p).update(size=0))
+        bad(lambda p: setup(p).update(size=True))
+        bad(lambda p: setup(p).update(sha256="A" * 64))
+        bad(lambda p: p.update({"linux-amd64": p["windows-amd64"]}))  # 只收 Windows
+        bad(lambda p: p.update({"windows-amd64": {}}))
+        bad(lambda p: p["windows-amd64"].update(extra=setup(p)))
 
     def test_repository_changelog_has_public_summaries(self):
         entries = site_manifest.parse_changelog((Path(__file__).resolve().parents[1] / "CHANGELOG.md").read_text(encoding="utf-8"))
@@ -2745,45 +641,41 @@ Successfully verified: 0c-update.exe
                     packager.check_release_docs(external)
                 (external / name).write_bytes(original)
 
-    def test_all_platforms_require_external_docs_before_building(self):
-        from types import SimpleNamespace
+    def test_windows_build_requires_external_docs_before_building(self):
         data, _, _, _ = self.write_paired_data(self.root / "external-docs-gate", public=True)
         out = self.root / "output"
-        args = SimpleNamespace(version="0.2.0", preview=False, data=data, out=out, release_docs=None, arch="arm64")
-        for module, system, machine in ((packager, "linux", "x86_64"),
-                                         (package_windows, "win32", "AMD64"),
-                                         (package_macos, "darwin", "arm64")):
-            with self.subTest(platform=system), patch.object(module.sys, "platform", system), \
-                    patch.object(module.platform, "machine", return_value=machine), \
-                    patch.object(subprocess, "run") as run, patch.object(subprocess, "check_output") as output:
-                with self.assertRaisesRegex(ValueError, "--release-docs"):
-                    module.build(args)
-                run.assert_not_called()
-                output.assert_not_called()
-                self.assertFalse(out.exists())
+        args = SimpleNamespace(version="0.2.0", preview=False, data=data, out=out, release_docs=None)
+        with patch.object(package_windows.sys, "platform", "win32"), \
+                patch.object(package_windows.platform, "machine", return_value="AMD64"), \
+                patch.object(subprocess, "run") as run, patch.object(subprocess, "check_output") as output:
+            with self.assertRaisesRegex(ValueError, "--release-docs"):
+                package_windows.build(args)
+        run.assert_not_called()
+        output.assert_not_called()
+        self.assertFalse(out.exists())
 
     def test_update_feed_preserves_hashes_and_rejects_mixed_versions(self):
         import zipfile
-        def archive(version, os_name):
-            file = self.root / (os_name + ".zip")
+        def archive(name, version, os_name="windows"):
+            file = self.root / (name + ".zip")
             release = {"schema": 1, "product": "0c", "version": version,
                        "channel": "internal-preview", "os": os_name, "arch": "amd64"}
             with zipfile.ZipFile(file, "w") as package:
                 package.writestr("bundle/release.json", json.dumps(release))
             return file
-        windows = archive("0.1.0", "windows")
-        linux = archive("0.1.0", "linux")
-        assets = [(windows, "https://example.org/windows.zip"), (linux, "https://example.org/linux.tar.gz")]
-        feed = release_feed.make_feed(assets)
-        self.assertEqual(feed["assets"][0]["sha256"], installer.digest(windows))
-        self.assertEqual(feed["assets"][1]["size"], linux.stat().st_size)
-        archive("0.2.0", "linux")
+        windows = archive("windows", "0.1.0")
+        feed = release_feed.make_feed([(windows, "https://example.org/windows.zip")])
+        self.assertEqual(feed["assets"], [{"os": "windows", "arch": "amd64", "url": "https://example.org/windows.zip",
+                                           "sha256": packager.digest(windows), "size": windows.stat().st_size}])
+        newer = archive("newer", "0.2.0")
         with self.assertRaisesRegex(ValueError, "版本"):
-            release_feed.make_feed(assets)
+            release_feed.make_feed([(windows, "https://example.org/windows.zip"), (newer, "https://example.org/newer.zip")])
         with self.assertRaisesRegex(ValueError, "重複"):
-            release_feed.make_feed([assets[0], assets[0]])
+            release_feed.make_feed([(windows, "https://example.org/windows.zip")] * 2)
         with self.assertRaisesRegex(ValueError, "HTTPS"):
             release_feed.make_feed([(windows, "http://example.org/windows.zip")])
+        with self.assertRaisesRegex(ValueError, "平台"):
+            release_feed.make_feed([(archive("linux", "0.1.0", "linux"), "https://example.org/linux.zip")])
 
     def test_public_data_rejects_incomplete_or_private_provenance(self):
         data, _, baseline, _ = self.write_paired_data(self.root / "data-gate", public=True)
@@ -2852,33 +744,29 @@ Successfully verified: 0c-update.exe
                 packager.prepare_shipped_data(data)
             self.assertEqual(self.data_snapshot(data), before)
 
-    def test_all_platform_builds_reject_private_data_before_building(self):
-        from types import SimpleNamespace
+    def test_windows_build_rejects_private_data_before_building(self):
         data, _, manifest, _ = self.write_paired_data(self.root / "platform-gate", public=True)
         manifest["sources"][0]["Distributable"] = False
         (data / "manifest.json").write_bytes(packager.json_bytes(manifest))
         before = self.data_snapshot(data)
         out = self.root / "output"
-        args = SimpleNamespace(version="0.2.0", preview=False, data=data, out=out, arch="arm64")
-        for module, system, machine in ((packager, "linux", "x86_64"),
-                                         (package_windows, "win32", "AMD64"),
-                                         (package_macos, "darwin", "arm64")):
-            with self.subTest(platform=system), patch.object(module.sys, "platform", system), \
-                    patch.object(module.platform, "machine", return_value=machine), \
-                    patch.object(subprocess, "run") as run, patch.object(subprocess, "check_output") as output:
-                with self.assertRaisesRegex(ValueError, "不可散布"):
-                    module.build(args)
-                run.assert_not_called()
-                output.assert_not_called()
-                self.assertFalse(out.exists())
-                self.assertEqual(self.data_snapshot(data), before)
+        args = SimpleNamespace(version="0.2.0", preview=False, data=data, out=out)
+        with patch.object(package_windows.sys, "platform", "win32"), \
+                patch.object(package_windows.platform, "machine", return_value="AMD64"), \
+                patch.object(subprocess, "run") as run, patch.object(subprocess, "check_output") as output:
+            with self.assertRaisesRegex(ValueError, "不可散布"):
+                package_windows.build(args)
+        run.assert_not_called()
+        output.assert_not_called()
+        self.assertFalse(out.exists())
+        self.assertEqual(self.data_snapshot(data), before)
 
     def test_windows_neural_bundles_cpp_runtime_next_to_python(self):
         # #80：onnxruntime 需要 MSVCP140.dll／MSVCP140_1.dll，沒裝 Visual C++ 可轉散發套件的 Windows 載入失敗。
         import collect_notices
         import prepare_neural
         import zipfile
-        url, sha256, names = prepare_neural.RUNTIMES["windows-amd64"]["crt"]
+        url, sha256, names = prepare_neural.RUNTIME["crt"]
         self.assertEqual(names, package_windows.NEURAL_CRT)
         self.assertTrue(url.endswith("-cp314-cp314-win_amd64.whl"))
         with tempfile.TemporaryDirectory() as temp:
@@ -2894,60 +782,20 @@ Successfully verified: 0c-update.exe
             self.assertEqual(sorted(p.name for p in python.glob("*.dll")), ["msvcp140.dll", "msvcp140_1.dll"])
             self.assertEqual((python / "msvcp140.dll").read_text(), "msvcp140.dll")
             (python / "LICENSE.txt").write_text("PSF")
-            text = "\n".join(collect_notices.python_sections(temp / "neural", "windows-amd64"))
+            text = "\n".join(collect_notices.python_sections(temp / "neural"))
             self.assertIn("Microsoft Visual C++ 執行階段（msvcp140.dll、msvcp140_1.dll）", text)
             with zipfile.ZipFile(wheel, "a") as z:
                 z.writestr("other.data/data/msvcp140.dll", "duplicate")
             with self.assertRaisesRegex(ValueError, "msvcp140.dll"):
                 prepare_neural.install_crt(wheel, names, python)
 
-    def test_intel_mac_neural_runtime_matches_its_python(self):
-        # onnxruntime 1.30.0 沒有 Intel Mac wheel：Intel 版用 1.23.2 與 CPython 3.13，wheel 的 ABI 與架構要一致。
-        import collect_notices
-        import prepare_neural
-        import tarfile
-        runtime = prepare_neural.RUNTIMES["macos-amd64"]
-        self.assertEqual(runtime["version"], "3.13")
-        self.assertIn("cpython-3.13.", runtime["python"][0])
-        self.assertTrue(runtime["python"][0].endswith("-x86_64-apple-darwin-install_only_stripped.tar.gz"))
-        names = [url.rsplit("/", 1)[1] for url, _ in runtime["wheels"]]
-        self.assertEqual([n.split("-")[0] for n in names], ["numpy", "onnxruntime"])
-        for name in names:
-            self.assertTrue(name.endswith("_x86_64.whl") and "-cp313-cp313-" in name, name)
-        self.assertIn("-x86_64-unknown-linux-gnu-", prepare_neural.COMPILERS["3.13"][0])
-        self.assertIn("cpython-3.13.", prepare_neural.COMPILERS["3.13"][0])
-        for platform, entry in prepare_neural.RUNTIMES.items():
-            self.assertIn(entry["version"], prepare_neural.COMPILERS, platform)
-        with tempfile.TemporaryDirectory() as temp:
-            temp = Path(temp)
-            archive = temp / "python.tar.gz"
-            with tarfile.open(archive, "w:gz") as tar:
-                for name, body in (("python/bin/python3.13", "interpreter"), ("python/bin/pip3", "pip"),
-                                   ("python/lib/python3.13/LICENSE.txt", "PSF 3.13"), ("python/lib/python3.13/os.py", ""),
-                                   ("python/lib/python3.13/site-packages/pip/__init__.py", ""),
-                                   ("python/lib/python3.13/tkinter/__init__.py", ""), ("python/lib/tcl9.0/init.tcl", "")):
-                    data = body.encode()
-                    info = tarfile.TarInfo(name)
-                    info.size = len(data)
-                    tar.addfile(info, io.BytesIO(data))
-            site = prepare_neural.install_python("macos-amd64", archive, temp / "neural/python")
-            self.assertEqual(site, temp / "neural/python/lib/python3.13/site-packages")
-            self.assertEqual(sorted(p.name for p in (temp / "neural/python/bin").iterdir()), ["python3"])
-            for gone in ("lib/python3.13/site-packages/pip", "lib/python3.13/tkinter", "lib/tcl9.0"):
-                self.assertFalse((temp / "neural/python" / gone).exists(), gone)
-            text = "\n".join(collect_notices.python_sections(temp / "neural", "macos-amd64"))
-            self.assertIn("CPython 3.13", text)
-            self.assertIn("PSF 3.13", text)
-
     def test_bundle_name_is_not_rebound_while_packaging(self):
         # dev.60 前 #80 的迴圈 `for name in NEURAL_CRT` 蓋掉了套件名稱，Windows ZIP 的頂層目錄變成 msvcp140_1.dll/。
         import ast
-        for module in ("package_windows", "package_macos", "package_release"):
-            path = Path(__file__).resolve().parent / f"{module}.py"
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            build = next(f for f in tree.body if isinstance(f, ast.FunctionDef) and f.name == "build")
-            binds = [n.lineno for n in ast.walk(build) if isinstance(n, ast.Name) and n.id == "name" and isinstance(n.ctx, ast.Store)]
-            self.assertLessEqual(len(binds), 1, f"{module}.build() 重新指派了套件名稱 name：第 {binds} 行")
+        tree = ast.parse(Path(package_windows.__file__).read_text(encoding="utf-8"))
+        build = next(f for f in tree.body if isinstance(f, ast.FunctionDef) and f.name == "build")
+        binds = [n.lineno for n in ast.walk(build) if isinstance(n, ast.Name) and n.id == "name" and isinstance(n.ctx, ast.Store)]
+        self.assertLessEqual(len(binds), 1, f"package_windows.build() 重新指派了套件名稱 name：第 {binds} 行")
 
     def test_settings_ui_script_parses(self):
         # dev.60 前曾重複宣告 const REASON，整支設定程式畫面載入失敗；node 可用時檢查語法。
@@ -3014,30 +862,6 @@ Successfully verified: 0c-update.exe
         result = subprocess.run([node, "--test", str(test)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_system_install_puts_ibus_component_where_ibus_daemon_reads(self):
-        # #181：ibus-daemon 只讀它自己的元件目錄（IBus 1.5.34 實測不讀 /usr/local/share/ibus/component），
-        # 所以 make install PREFIX=/usr/local 也要把 0c.xml 放到 ibus 的目錄；明確指定 IBUS_COMPONENTDIR 時照指定。
-        if not shutil.which("make") or not shutil.which("pkg-config"):
-            self.skipTest("沒有 make 或 pkg-config")
-        root = Path(__file__).resolve().parents[1]
-
-        def component_dir(pc_dir, *extra):
-            env = {**os.environ, "PKG_CONFIG_LIBDIR": pc_dir, "PKG_CONFIG_PATH": ""}
-            result = subprocess.run(["make", "-s", "-n", "-C", str(root), "install", "PREFIX=/usr/local", "VERSION=0.0.0",
-                                     "DESTDIR=/stage", "FCITX5=0", "SETTINGS=0", *extra], capture_output=True, text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            dests = [line.split()[-1] for line in result.stdout.splitlines() if line.split() and line.split()[-1].endswith("/0c.xml")]
-            self.assertEqual(len(dests), 1, result.stdout)
-            return str(Path(dests[0]).parent)
-
-        with tempfile.TemporaryDirectory() as empty, tempfile.TemporaryDirectory() as pc:
-            self.assertEqual(component_dir(empty), "/stage/usr/share/ibus/component")  # 沒有 libibus-1.0-dev
-            Path(pc, "ibus-1.0.pc").write_text("prefix=/opt/ibus\ndatadir=${prefix}/share\nName: ibus-1.0\n"
-                                               "Description: t\nVersion: 1.5.34\n", encoding="utf-8")
-            self.assertEqual(component_dir(pc), "/stage/opt/ibus/share/ibus/component")
-            self.assertEqual(component_dir(empty, "IBUS_COMPONENTDIR=/usr/local/share/ibus/component"),
-                             "/stage/usr/local/share/ibus/component")
-
     def test_pairing_lock_matches_0c_ime_pair_models(self):
         # #180：發版產生的 pairing.lock 與 0c-ime 以 scripts/pair_models.py 產生的逐位元組相同（兩份不同的字典）。
         import pairing_lock
@@ -3046,93 +870,6 @@ Successfully verified: 0c-update.exe
             expected = (testdata / name).read_bytes()
             dictionary = json.loads(expected)["dictionary_manifest_sha256"]
             self.assertEqual(pairing_lock.pairing_lock(dictionary), expected, name)
-        with tempfile.TemporaryDirectory() as temp:
-            data = Path(temp, "data")
-            data.mkdir()
-            (data / "manifest.json").write_bytes(b'{"x": 1}\n')
-            out = Path(temp, "neural/pairing.lock.json")
-            dictionary = pairing_lock.write_pairing_lock(data, out)
-            self.assertEqual(json.loads(out.read_bytes())["dictionary_manifest_sha256"], installer.digest(data / "manifest.json"))
-            self.assertEqual(dictionary, installer.digest(data / "manifest.json"))
-
-    def test_system_install_ships_pairing_lock_and_model_download_switch(self):
-        # #180：make install 把配對清單放在字典旁的 neural/；MODEL_DOWNLOAD=0 寫進 distribution.json 關掉下載與提醒。
-        if not shutil.which("make"):
-            self.skipTest("沒有 make")
-        root = Path(__file__).resolve().parents[1]
-        lock = root / "internal/models/testdata/0c-ime-dfsg-pairing.lock.json"
-
-        def dry_run(*extra):
-            result = subprocess.run(["make", "-s", "-n", "-C", str(root), "install", "PREFIX=/usr", "VERSION=0.0.0", "DESTDIR=/stage",
-                                     "FCITX5=0", "IBUS=0", "SETTINGS=0", *extra], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return result.stdout
-
-        out = dry_run(f"PAIRING_LOCK={lock}")
-        self.assertIn(f"install -Dm644 '{lock}' /stage/usr/share/0c/neural/pairing.lock.json", out)
-        self.assertIn('"version":"%s"}', out)
-        self.assertNotIn("model_download", out)
-        self.assertIn('"model_download":false}', dry_run(f"PAIRING_LOCK={lock}", "MODEL_DOWNLOAD=0"))
-        self.assertNotIn("neural/pairing.lock.json\n", dry_run("PAIRING_LOCK=/nonexistent/pairing.lock.json"))
-
-    def test_system_install_puts_0c_update_on_path_with_man_pages(self):
-        # #239：系統安裝把 libexec 的 0c-update 以相對連結放到 BINDIR、裝上 0c-update(1)／0c-mcp(1)；uninstall 一併收回。
-        # 真的跑 make install：install -D、cp --no-preserve、ln -r、readlink -m 只有 GNU coreutils 有（macOS 上略過）。
-        if not shutil.which("make"):
-            self.skipTest("沒有 make")
-        if "GNU coreutils" not in subprocess.run(["ln", "--version"], capture_output=True, text=True).stdout:
-            self.skipTest("不是 GNU coreutils")
-        root = Path(__file__).resolve().parents[1]
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            build, data, stage = tmp / "build", tmp / "data", tmp / "stage"
-            for name in ["0c-server", "0c-update", "0c-mcp"]:
-                (build / name).parent.mkdir(parents=True, exist_ok=True)
-                (build / name).write_text("#!/bin/sh\n")
-                (build / name).chmod(0o755)
-            data.mkdir()
-            (data / "manifest.json").write_text("{}\n")
-            common = ["make", "-s", "-C", str(root), "PREFIX=/usr", "VERSION=9.8.7", f"DESTDIR={stage}", f"SYSBUILD={build}",
-                      f"DATA={data}", "PAIRING_LOCK=/nonexistent", "FCITX5=0", "IBUS=0", "SETTINGS=0"]
-            env = {**os.environ, "SOURCE_DATE_EPOCH": "1700000000"}
-            result = subprocess.run([*common, "install"], capture_output=True, text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            link = stage / "usr/bin/0c-update"
-            self.assertTrue(link.is_symlink())
-            self.assertFalse(os.path.isabs(os.readlink(link)))  # Debian Policy 10.5：同一個頂層目錄內用相對連結
-            self.assertEqual(link.resolve(), (stage / "usr/libexec/0c/0c-update").resolve())
-            self.assertFalse((build / "templates").exists())  # install 不寫建置目錄：sudo make install 不留 root 擁有的檔案
-            for name in ["0c-update", "0c-mcp"]:
-                page = stage / "usr/share/man/man1" / f"{name}.1"
-                text = page.read_text()
-                self.assertIn('"2023-11-14" "0c-ime 9.8.7"', text)
-                self.assertNotIn("@", text)
-                self.assertEqual(page.stat().st_mode & 0o777, 0o644)
-            # 重裝：自己的連結照樣換新
-            result = subprocess.run([*common, "install"], capture_output=True, text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(link.resolve(), (stage / "usr/libexec/0c/0c-update").resolve())
-            self.assertNotIn("Debian", (stage / "usr/share/man/man1/0c-update.1").read_text())
-            result = subprocess.run([*common, "uninstall"], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse(os.path.lexists(link))
-            self.assertFalse((stage / "usr/share/man/man1/0c-update.1").exists())
-            self.assertFalse((stage / "usr/share/man/man1/0c-mcp.1").exists())
-            # PREFIX=~/.local：BINDIR 已有官網安裝的 0c-update（指向 ~/.local/share/zuin），install 不蓋掉、uninstall 不刪
-            personal = stage / "usr/bin/0c-update"
-            personal.symlink_to("../share/zuin/bin/0c-update")
-            result = subprocess.run([*common, "install"], capture_output=True, text=True, env=env)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("不覆蓋", result.stderr)
-            self.assertEqual(os.readlink(personal), "../share/zuin/bin/0c-update")
-            result = subprocess.run([*common, "uninstall"], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(os.readlink(personal), "../share/zuin/bin/0c-update")
-            personal.unlink()
-            personal.write_text("#!/bin/sh\n")  # 一般檔案也一樣
-            subprocess.run([*common, "install"], capture_output=True, text=True, env=env, check=True)
-            subprocess.run([*common, "uninstall"], capture_output=True, text=True, check=True)
-            self.assertEqual(personal.read_text(), "#!/bin/sh\n")
 
 
 class HFModelsTests(unittest.TestCase):
@@ -3155,7 +892,7 @@ class HFModelsTests(unittest.TestCase):
                 content = f"{role} {name}\n".encode() * 100
                 (self.weights / role).mkdir(parents=True, exist_ok=True)
                 (self.weights / role / name).write_bytes(content)
-                lock["models"][role]["files"][name] = {"sha256": installer.digest(self.weights / role / name), "size": len(content)}
+                lock["models"][role]["files"][name] = {"sha256": packager.digest(self.weights / role / name), "size": len(content)}
         self.lock = self.root / "models.lock.json"
         self.lock.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
         self.data = self.root / "data"
@@ -3229,13 +966,13 @@ class HFModelsTests(unittest.TestCase):
             self.assertEqual((out / name).read_bytes(), (self.hf.WORKERS / name).read_bytes(), name)
         self.assertFalse((out / "pairing.lock.json").exists())
         self.assertEqual(sorted(p.name for p in (out / "select").iterdir()), ["LICENSE", "README.md", "manifest.json", "model.onnx", "vocab.json"])
-        dictionary = installer.digest(self.data / "manifest.json")
+        dictionary = packager.digest(self.data / "manifest.json")
         expected = json.loads(self.pairing.pairing_lock(dictionary, self.lock))
         for role in self.hf.ROLES:
             self.assertEqual((out / role / "model.onnx").read_bytes(), (self.weights / role / "model.onnx").read_bytes())
             self.assertEqual(json.loads((out / role / "vocab.json").read_bytes())["dictionary_sha256"], dictionary)
             for name in ("manifest.json", "vocab.json"):
-                self.assertEqual(installer.digest(out / role / name), expected["packages"][role][name]["sha256"], f"{role}/{name}")
+                self.assertEqual(packager.digest(out / role / name), expected["packages"][role][name]["sha256"], f"{role}/{name}")
         self.assertEqual(self.hf.check_shipped(out, self.data, self.lock), self.pairing.pairing_lock(dictionary, self.lock))
         with self.assertRaisesRegex(ValueError, "輸出已存在"):
             self.hf.replace_models(old, self.data, out, weights, self.lock)
@@ -3262,11 +999,11 @@ class HFModelsTests(unittest.TestCase):
         weights = self.hf.fetch(self.weights, lock_path=self.lock)
         neural = self.root / "neural"
         neural.mkdir()
-        self.hf.write_packages(weights, installer.digest(self.data / "manifest.json"), neural, self.lock)
+        self.hf.write_packages(weights, packager.digest(self.data / "manifest.json"), neural, self.lock)
         for name in self.hf.WORKER_NAMES:
             shutil.copyfile(self.hf.WORKERS / name, neural / name)
         shipped = packager.prepare_data_manifest(self.data, neural)
-        self.assertEqual(shipped, installer.digest(self.data / "manifest.json"))
+        self.assertEqual(shipped, packager.digest(self.data / "manifest.json"))
         self.assertEqual(json.loads(self.hf.check_shipped(neural, self.data, self.lock))["dictionary_manifest_sha256"], shipped)
 
     def test_missing_in_vocab_lists_unknown_characters(self):

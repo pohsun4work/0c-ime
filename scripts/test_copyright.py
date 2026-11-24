@@ -12,7 +12,7 @@ DEFAULT = "AGPL-3"
 # Only in the source release tarball: the compiled dictionary is not committed.
 TARBALL_ONLY = "assets/data/"
 IMAGES = re.compile(r"\.(png|ico|icns|tiff?|svg|webp|jpe?g|gif)$", re.IGNORECASE)
-THIRD_PARTY = ("platforms/linux-fcitx5/third_party/", "internal/simplified/opencc/")
+THIRD_PARTY = ("internal/simplified/opencc/",)
 
 
 def paragraphs(text):

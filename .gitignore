@@ -6,8 +6,6 @@ __pycache__/
 /data/raw
 /build
 /data/lm/bigram
-/platforms/linux-fcitx5/build
-/platforms/macos/build
 .env
 .env.*
 !.env.example
@@ -49,9 +47,6 @@ htmlcov/
 /data/raw/
 /data/research
 /migration
-/Mac-E2E.md
-/platforms/macos/Tests/E2E
-/platforms/macos/Tests/Acceptance
 /data/pipeline/probe_lexicon
 /**/HANDOFF.md
 
