@@ -168,10 +168,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	if len(r) != 1 || !unicode.IsPrint(r[0]) {
 		return false, "", false
 	}
-	if microsoftRawPunctuation(k) {
-		if s.mixedKeepsPunctuation(k) {
-			return true, "", true
-		}
+	if s.english && microsoftRawPunctuation(k) {
 		if s.fullWidth {
 			if s.englishWord {
 				return true, s.commit() + s.fullWidthText(k), true
@@ -185,12 +182,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 			// A pending autocomplete word delivers the word, then the key (#233).
 			return false, "", false
 		}
-		if !s.english && !s.comp.Empty() {
-			// Half-width raw punctuation cancels an unfinished syllable.
-			// Already converted words remain in their original order.
-			s.comp.Reset()
-		}
-		if !s.composing() && !s.explicitSymbol(k) {
+		if !s.composing() {
 			return false, "", true
 		}
 		s.insertStyleLiteral(k)
@@ -236,26 +228,14 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	return false, "", false
 }
 
-// mixedKeepsPunctuation appends a style's half-width punctuation to a pending
-// mixed-input English token, as mixedKey does for : \ ' (#233): URLs (a?q=1),
-// paths (C:\Users), contractions (i'm) and quoted words stay one English run
-// instead of flushing it and reading the following letters as Bopomofo.
-func (s *Session) mixedKeepsPunctuation(k string) bool {
-	if s.english || !s.mixedInput() || !s.comp.Empty() || s.mixed.raw == "" || s.mixed.accepted != "" || len(s.mixed.raw) >= maxMixedPending {
-		return false
-	}
-	if s.mixedText() != s.mixed.raw && !(s.mixed.choice == 0 && s.mixedEnglishWord(s.mixed.raw)) {
-		return false
-	}
-	s.mixed.raw += k
-	return true
-}
-
 // cycleStyleCandidate 是 ↑（與設定成輪換的 Tab）：照微軟，游標處的字詞直接換成下一個候選、不開候選窗，連按接著換。
 // 先換整個詞；詞沒有別的候選時換游標旁那個字（混合清單後段的單字）。原始按鍵與原樣注音不在輪換裡
 // （「我們很好」↑ 不會變回 cp3cl3）。全形符號照 ↓ 清單的順序換下一個全形；半形符號、英數、
 // 還沒定案的混打按鍵與原樣音節不動。
 func (s *Session) cycleStyleCandidate(delta int) {
+	if s.mixed.raw != "" {
+		return // openCandidates 會把結尾是符號的待定按鍵定案（hello<），還沒定案的不動
+	}
 	s.refresh()
 	continuing := s.styleCycle != nil
 	if continuing {

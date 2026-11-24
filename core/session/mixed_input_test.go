@@ -66,7 +66,6 @@ func TestFirstToneAfterRestoringPendingZhuyin(t *testing.T) {
 }
 
 func TestPendingLiteralRestorationDoesNotUndoEdits(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形時，照字面留下的待定注音鍵在編輯／選回後沒有還原，待修")
 	s := newSession()
 	key(s, "j")
 	key(s, "i")

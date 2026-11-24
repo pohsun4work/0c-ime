@@ -161,7 +161,6 @@ func arrowsWithout(arrow string) []string {
 
 // 中英混打：識別字或英文後面的 _、^ 照舊是英文的一部分，不能變成破折號或刪節號。
 func TestMixedKeepsUnderscoreAndCaretInEnglish(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形（allSymbolsKey）繞過混打的英數 token 規則（a<b → a<ㄖ、03:00 → 俺:00），待修")
 	for _, raw := range []string{"user_name", "foo_bar123", "my_var", "snake_case_id", "x^2", "a_b"} {
 		s := newSession()
 		mixedType(s, raw)

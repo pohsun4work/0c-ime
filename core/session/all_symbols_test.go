@@ -5,8 +5,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0c-biggo/0c-ime/core/english"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/layout"
+	"github.com/0c-biggo/0c-ime/core/lexicon"
+	"github.com/0c-biggo/0c-ime/core/lm"
+	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
+	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
 // #282：所有符號鍵打半形（fork 寫死）。注音模式的符號鍵不論有沒有按 Shift 都打鍵帽上的半形字元
@@ -39,7 +45,7 @@ func TestAllSymbolsHalfwidthInsideComposition(t *testing.T) {
 			t.Fatalf("Enter 送出 %q：%+v", k, snap)
 		}
 	}
-	// 游標在中間時插在游標處；未打完的注音同其他標點留成符號。
+	// 游標在中間時插在游標處；顯示成注音的待定按鍵同其他標點留成符號（_ ^ 是識別字的一部分，v_ 照字面，#118）。
 	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	typeSyl(s, "ㄒㄧㄤˇ")
@@ -50,8 +56,14 @@ func TestAllSymbolsHalfwidthInsideComposition(t *testing.T) {
 	s = newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	key(s, "v") // ㄒ
-	if snap := key(s, "_"); snap.Text() != "我ㄒ_" {
+	if snap := key(s, "["); snap.Text() != "我ㄒ[" {
 		t.Fatalf("未打完的注音應留成符號：%+v", snap)
+	}
+	s = newSession()
+	typeSyl(s, "ㄨㄛˇ")
+	key(s, "v")
+	if snap := key(s, "_"); snap.Text() != "我v_" {
+		t.Fatalf("_ 是識別字的一部分：%+v", snap)
 	}
 }
 
@@ -110,6 +122,7 @@ func TestAllSymbolsHalfwidthOtherStates(t *testing.T) {
 }
 
 // 中英混打：打到一半的英文收下識別字、網址、路徑裡的符號，括號讓英文先定案；中文後面照樣半形。
+// 收下的符號後面接聲調組成中文時從符號後面切開（DNS<我、OK?我），接空白照字面（DNS<b␣；a<b␣ 見 TestMixedEnglishKeepsStylePunctuation）。
 func TestAllSymbolsHalfwidthMixedInput(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		{"ji3_", "我_"},
@@ -118,6 +131,10 @@ func TestAllSymbolsHalfwidthMixedInput(t *testing.T) {
 		{"ji3[DNS]", "我[DNS]"},
 		{"ji3<", "我<"},
 		{"DNS<ji3", "DNS<我"},
+		{"OK?ji3", "OK?我"},
+		{"DNS:ji3", "DNS:我"},
+		{"ji3OK<ji3", "我OK<我"},
+		{"DNS<b ", "DNS<b "},
 		{"user_name", "user_name"},
 		{"search?q=1", "search?q=1"},
 		{"C:\\Users", "C:\\Users"},
@@ -143,5 +160,74 @@ func TestAllSymbolsHalfwidthIdleKeysMatchSession(t *testing.T) {
 		if want := strings.ContainsRune(idle, r); got != want {
 			t.Errorf("%q 實際 handled=%v，IdleKeys 回報 %v", r, got, want)
 		}
+	}
+}
+
+// 併進英文的符號定案時（Enter、↓）單獨留下：神經選字時 Enter 也不能掉字，前段照畫面送出（up? 不能送出 ㄧㄣ?），
+// ↓ 開的是游標前那個符號（第二項是全形），↑ 不動還沒定案的按鍵。
+func TestJoinedSymbolSettles(t *testing.T) {
+	calls := 0
+	for _, keys := range []string{"ji3DNS<", "DNS?", "ji3DNS:"} {
+		s := neuralSession(&calls)
+		mixedType(s, keys)
+		want := strings.ReplaceAll(keys, "ji3", "我")
+		if got := key(s, proto.KeyEnter).Commit; got != want {
+			t.Errorf("神經選字 %q Enter：%q，要 %q", keys, got, want)
+		}
+	}
+	upSession := func() *Session {
+		lex, sys := lexicon.NewMem(), lm.NewMem()
+		lex.Add(lexicon.Entry{Surface: "因", Reading: zhuyin.ParseReading("ㄧㄣ"), PRW: 1})
+		sys.SetUni("因", 1e-3)
+		s := New(personal.NewModel(lex, sys))
+		s.English = english.New([]english.Word{{Text: "up", Weight: 10}})
+		return s
+	}
+	if got := mixedType(upSession(), "up").Text(); got != "ㄧㄣ" {
+		t.Fatalf("前提：up 單獨顯示成注音，實際 %q", got)
+	}
+	s := upSession()
+	shown := mixedType(s, "up?").Text()
+	if got := key(s, proto.KeyEnter).Commit; got != shown || got != "up?" {
+		t.Errorf("up? 畫面 %q、送出 %q", shown, got)
+	}
+	// 句中（游標後面還有字）按 ↓ 也是 < 的候選。
+	s = newSession()
+	mixedType(s, "ji3t ")
+	key(s, proto.KeyLeft)
+	mixedType(s, "DNS<")
+	if items := downItems(key(s, proto.KeyDown)); len(items) < 2 || items[0] != "<" || items[1] != "，" {
+		t.Errorf("句中 DNS< 按 ↓：%q", items)
+	}
+	// 從符號後面切開（DNS<我）時留下的 < 按 ↓ 也換得到全形。
+	s = newSession()
+	mixedType(s, "DNS<ji3")
+	s.Handle(proto.Request{Type: proto.Cursor, To: 3})
+	if items := downItems(key(s, proto.KeyDown)); len(items) < 2 || items[0] != "<" || items[1] != "，" {
+		t.Errorf("DNS<我 的 < 按 ↓：%q", items)
+	}
+	s = newSession()
+	mixedType(s, "DNS:")
+	key(s, proto.KeyUp)
+	mixedType(s, "a")
+	if got := key(s, proto.KeyEnter).Commit; got != "DNS:a" {
+		t.Errorf("DNS: ↑ 之後接著打 a：%q", got)
+	}
+}
+
+// 符號後面只有數字的是數字寫法（時間、編號），不切開組成中文；全形時的 03:00 也照數字寫法。
+func TestJoinedSymbolBeforeDigitsStaysNumber(t *testing.T) {
+	for _, keys := range []string{"10:04", "12:53", "10:56", "DNS:04", "ji3 10:54"} {
+		s := numberWritingSession()
+		want := strings.ReplaceAll(keys, "ji3", "我")
+		if got := mixedType(s, keys).Text(); got != want {
+			t.Errorf("%q：%q，要 %q", keys, got, want)
+		}
+	}
+	s := numberWritingSession()
+	s.InputStyle.ShiftSpace = inputstyle.ShiftSpaceFullWidth
+	key(s, proto.KeyShiftSpace)
+	if got := mixedType(s, "03:00").Text(); got != "０３：００" {
+		t.Errorf("全形 03:00：%q", got)
 	}
 }

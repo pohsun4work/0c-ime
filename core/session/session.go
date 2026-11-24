@@ -497,9 +497,6 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	if s.hoshiSymbolKey(k) {
 		return true, ""
 	}
-	if handled, commit, done := s.allSymbolsKey(k); done {
-		return handled, commit
-	}
 	if handled, commit, done := s.styleKey(k); done {
 		return handled, commit
 	}
@@ -792,9 +789,9 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		}
 	}
 	// 標點保留在組字區，可移動、替換候選；Enter 才提交。
-	if p, ok := layout.Standard.Punct(runes[0]); ok {
+	if _, ok := layout.Standard.Punct(runes[0]); ok {
 		s.insertPendingLiteral()
-		s.insertPunctKey(k, p)
+		s.insertPunctKey(k)
 		return true, ""
 	}
 	// 其他可見字元（Shift＋字母、@、#、落單聲調鍵等）在游標處逐字保留；明確打的符號（@ #）沒在組字時也一樣。
@@ -1195,6 +1192,10 @@ func (s *Session) openCandidates(length int) {
 		s.refreshEnglishCandidates()
 		return
 	}
+	symbol := s.mixedTrailingSymbol()
+	if symbol {
+		s.flushMixed() // hello< 的 ↓ 是游標前那個 < 的候選（第二項是全形「，」），不是整串
+	}
 	if s.mixed.raw != "" {
 		s.openMixedCandidates()
 		return
@@ -1206,7 +1207,7 @@ func (s *Session) openCandidates(length int) {
 	if len(s.syls) == 0 {
 		return
 	}
-	before := s.candidateBefore()
+	before := symbol || s.candidateBefore()
 	pos := min(s.cursor, len(s.syls)-1)
 	if before {
 		pos = max(0, s.cursor-1)

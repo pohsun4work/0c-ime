@@ -134,7 +134,6 @@ func TestLiteralEditsAndLearningBoundaries(t *testing.T) {
 
 // 混打下單按 . 先照原鍵顯示，↓ 清單裡有原鍵與注音 ㄡ 可選。
 func TestPendingZhuyinCanBeSelectedAsLiteral(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形時，照字面留下的待定注音鍵在編輯／選回後沒有還原，待修")
 	s := newSession()
 	key(s, ".") // ㄡ 尚未按聲調
 	snap := key(s, proto.KeyDown)

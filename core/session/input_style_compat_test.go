@@ -38,7 +38,6 @@ func englishWordsSession() *Session {
 // #233：混打打到一半的英文收下微軟的半形標點（比照 mixedKey 的 : \ '），
 // 不先送出英文、把後面的字母當注音（i'm → ㄛ'淤、a?q=1 → a?ㄆ=）。
 func TestMixedEnglishKeepsStylePunctuation(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形（allSymbolsKey）繞過混打的英數 token 規則（a<b → a<ㄖ、03:00 → 俺:00），待修")
 	for _, tc := range []struct{ keys, want string }{
 		{"i'm ", "i'm "},
 		{"a?q=1 ", "a?q=1 "},

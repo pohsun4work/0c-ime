@@ -184,17 +184,28 @@ func (s *Session) insertPairedBracket(k string) bool {
 	return true
 }
 
-// insertPunctKey 在游標處插入標點鍵 k 打出的全形標點 p。中英混打時 Shift＋, Shift＋. 的「，」「。」記下原按鍵，
-// ↓ 第二項是半形 < >（#190）：混打的注音鍵、數字鍵出字後 ↓ 第二項都是原按鍵（#162、#175、#187），這兩個鍵比照辦理，
-// 不切英文也打得出大於、小於。只限這兩個鍵在混打下；一般注音模式與其他標點維持全形（#177），Ctrl＋標點（#168）也不附。
-// 混打的閉括號跟著配對的開括號（#232，insertPairedBracket）。
-func (s *Session) insertPunctKey(k, p string) {
+// insertPunctKey 在游標處插入排列有全形標點的鍵 k：照鍵帽打半形（fork 寫死，#282；Shift＋- 是 _、Shift＋, 是 <、
+// [ 是 [），↓ 第二項是這一鍵原本的全形標點；全形時（Shift＋空白）打全形。閉括號跟著組字區裡配對的開括號
+// （#232，insertPairedBracket）。全形標點用 Ctrl＋標點（ctrlPunct）。
+func (s *Session) insertPunctKey(k string) {
 	if s.insertPairedBracket(k) {
 		return
 	}
-	s.insertLiteral(p)
-	if s.mixedInput() && (k == "<" || k == ">") {
-		s.setLiteralKey(s.cursor-1, k)
+	if s.fullWidth {
+		s.insertLiteral(s.fullWidthText(k))
+		return
+	}
+	s.insertLiteral(k)
+	p, _ := layout.Standard.Punct([]rune(k)[0])
+	known := symbolAlternatives(k)
+	var alts []string
+	for _, a := range []string{p, k} {
+		if !slices.Contains(known, a) && !slices.Contains(alts, a) {
+			alts = append(alts, a)
+		}
+	}
+	if len(alts) > 0 {
+		s.setLiteralKey(s.cursor-1, strings.Join(alts, literalKeySep))
 	}
 }
 
