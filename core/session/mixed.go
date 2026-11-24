@@ -710,6 +710,9 @@ func (s *Session) mixedBoundary(raw, key string, tone rune) (int, zhuyin.Syllabl
 	if best > 0 {
 		return best, bestSyl, true
 	}
+	if at, done, ok := s.mixedRepair(raw, key, tone); ok {
+		return at, done, true
+	}
 	// 打錯一鍵的注音（#203）：後段以數字鍵結尾（qji3wu0 的 ㄉㄧㄢ 天）也要切開，但切出來的後段要有字母，
 	// 只用數字鍵的後段照舊交給下面「帳號、編號」的判斷。接空白的單一鍵只認聲母（ㄗ 資、ㄙ 思）：型號、版本後面的
 	// 單一字母（gpt4o、ps4u、win7u）不是 ㄟ、ㄧ 一聲。
@@ -724,6 +727,9 @@ func (s *Session) mixedBoundary(raw, key string, tone rune) (int, zhuyin.Syllabl
 		return at, done, true
 	}
 	if at, done, ok := s.mixedAfterToken(raw, key, tone); ok {
+		return at, done, true
+	}
+	if at, done, ok := s.mixedRepairSplit(raw, key, tone); ok {
 		return at, done, true
 	}
 	// 聲調前一鍵是數字（lisa03、nina87）像帳號或編號，不切。

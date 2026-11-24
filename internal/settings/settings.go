@@ -76,6 +76,8 @@ type Settings struct {
 	SelectionKeys string
 	// PersonalLearning：記住我選的字詞（#297）。關閉時照常選字，只是送出與手選不再寫進個人資料；「我的詞彙」不受影響。
 	PersonalLearning bool
+	// RedundantKeys：中英混打時同一個注音重複按當成一次（P6，照華碩）。關閉時照官方。
+	RedundantKeys bool
 	// 以下是按鍵規則（原本官方「輸入習慣」風格的規則，fork 拿掉風格後是一般設定），值見 inputstyle.Rules。
 	ShiftSpace          string
 	Tab                 string
@@ -375,6 +377,8 @@ func fields() []field {
 			func(s *Settings) *string { return &s.SelectionKeys }),
 		switchField("personal-learning", "記住我選的字詞", personalLearningDescription,
 			true, func(s *Settings) *bool { return &s.PersonalLearning }),
+		switchField("redundant-keys", "重複按的注音當成一次", redundantKeysDescription,
+			true, func(s *Settings) *bool { return &s.RedundantKeys }),
 		choiceField("shift-space", "Shift＋空白", "切換全半形時也包含英文與數字",
 			inputstyle.ShiftSpaceDisabled, []string{inputstyle.ShiftSpaceDisabled, inputstyle.ShiftSpaceFullWidth, inputstyle.ShiftSpaceSpace, inputstyle.ShiftSpaceSingle},
 			map[string]string{inputstyle.ShiftSpaceDisabled: "不使用", inputstyle.ShiftSpaceFullWidth: "切換全半形", inputstyle.ShiftSpaceSpace: "插入空白", inputstyle.ShiftSpaceSingle: "開單字候選"},
@@ -753,6 +757,9 @@ func disabledBy(reason string) string {
 const englishAutocompleteDescription = "單按 Shift 切換到英文模式後，輸入至少兩個字母時顯示補全候選，三個字母起也提供拼字修正；按 Tab 補全或修正拼字、Esc 關閉。" +
 	"「我的詞彙」的英文詞排在最前面；自己打過幾次的英文單字會記在本機，之後也會建議（私人欄位與關閉「記住我選的字詞」時不記）。" +
 	"空白送出單字並輸入空格；Enter 只送出單字，再按一次才換行或執行"
+
+const redundantKeysDescription = "同一個注音鍵多按了幾下，相不相鄰都當成按一次：wuuuu/6、wu//6、wuwu/6 是「停」，ggggk6 是「什」。" +
+	"關閉時多按的鍵照字面留下（wuuuu/6 是 wuuu營）"
 
 // personalLearningDescription 是「記住我選的字詞」（#297）的說明：關閉時什麼照常、什麼不記、已學的怎麼清。
 const personalLearningDescription = "選過的字詞會排到前面，常用的英文單字也會記住；學習資料只存在這台電腦。" +

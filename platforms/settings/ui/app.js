@@ -403,9 +403,9 @@
       keys: ['toggle-key', 'shift-tap-ms', 'start-mode', 'mode-memory', 'english-autocomplete'],
     },
     candidates: {
-      title: '選字', lead: '候選字怎麼排、怎麼選，以及要不要列出近音的字（模糊音）。',
+      title: '選字', lead: '候選字怎麼排、怎麼選、重複按的注音要不要合併，以及要不要列出近音的字（模糊音）。',
       // personal-learning（#297，記住我選的字詞）是個人偏好，排在選字項目最後、按鍵規則之前。
-      keys: ['selection', 'document-context', 'candidate-cursor', 'advance-after-select', 'candidate-layout', 'page-size', 'selection-keys', 'esc-clear', 'personal-learning', 'tab', 'candidate-tab', 'candidate-space', 'candidate-enter', 'candidate-navigation'],
+      keys: ['selection', 'document-context', 'redundant-keys', 'candidate-cursor', 'advance-after-select', 'candidate-layout', 'page-size', 'selection-keys', 'esc-clear', 'personal-learning', 'tab', 'candidate-tab', 'candidate-space', 'candidate-enter', 'candidate-navigation'],
     },
     keyboard: {
       title: '鍵盤與符號', lead: '提交時補標點，以及 Shift＋空白、Shift＋Delete 的作用。',

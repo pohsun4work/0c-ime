@@ -36,6 +36,7 @@ type Engine struct {
 	NoLearning            bool             // 「記住我選的字詞」關閉時由宿主設定（#297）；選字、神經選字照常，只是不寫進個人資料。
 	Fuzzy                 fuzzy.Config     // 使用者逐對啟用的模糊音；零值全部關閉。
 	EnglishAutocomplete   bool
+	KeepRedundantKeys     bool                // 「重複按的注音當成一次」關閉時由宿主設定（P6）。
 	English               *english.Dictionary // nil uses the authored prototype vocabulary.
 	EnglishPack           string              // host-supplied pack version for diagnostics; empty means prototype.
 	CandidateBeforeCursor bool
@@ -90,6 +91,7 @@ func (e *Engine) OpenSession() uint64 {
 	e.sessions[e.next].InputStyle = e.InputStyle
 	e.sessions[e.next].Fuzzy = e.Fuzzy
 	e.sessions[e.next].EnglishAutocomplete = e.EnglishAutocomplete
+	e.sessions[e.next].KeepRedundantKeys = e.KeepRedundantKeys
 	e.sessions[e.next].CandidateColumns = e.CandidateColumns
 	e.sessions[e.next].CandidateBeforeCursor = e.CandidateBeforeCursor
 	e.sessions[e.next].Preview02 = e.Preview02

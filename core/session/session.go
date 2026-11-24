@@ -120,7 +120,9 @@ type Session struct {
 	sylPrior            map[zhuyin.Syllable]float64           // 簡拼保留讀音用的單音節常用程度（syllablePrior）
 	missedMemo          map[zhuyin.Syllable][]zhuyin.Syllable // 打的音節補上一鍵的讀音（missedFor，#335）
 	EnglishAutocomplete bool
-	English             *english.Dictionary // 共用、不會改變的英文詞庫
+	// KeepRedundantKeys：「重複按的注音當成一次」關閉時由宿主設定（P6）。混打時重複的注音不合併，照官方（wuuuu/6 是 wuuu營）。
+	KeepRedundantKeys bool
+	English           *english.Dictionary // 共用、不會改變的英文詞庫
 	// equalsPalette：= 開 Emoji／片語選單。fork 的 = 直接打 =（P4.5），選單到 P10／P11 才有新入口；目前只有測試打開它。
 	equalsPalette         bool
 	CandidateColumns      int

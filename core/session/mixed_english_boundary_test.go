@@ -94,12 +94,13 @@ func TestMixedUnknownEnglishStaysLiteral(t *testing.T) {
 	}
 }
 
-// 打錯一鍵的注音（qji3 是 ㄆㄨㄛˇ、ju3 是 ㄨㄧˇ，組不成音節）照字面留下，後面的注音照常組成中文；
+// 打錯一鍵的注音（qji3 是 ㄆㄨㄛˇ，組不成音節）照字面留下，後面的注音照常組成中文；
 // 不再一路併成同一串，直到空白才整串變成英文字母（qji3su3cl3 不是整串照字面）。
+// ju3（ㄨㄧˇ）在 P6 照華碩是同一格後按的算（ㄧˇ 以），見 mixed_repair_test.go。
 func TestMixedTypoDoesNotSwallowFollowingZhuyin(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		{"qji3su3cl3", "qji3你好"},
-		{"ju3su3cl3", "ju3你好"},
+		{"ju3su3cl3", "以你好"},
 		{"qji3su3", "qji3你"},
 		// 句首機率低、但不是罕用字的音節也切開（個人用字可能讓們、門的句首機率掉到 5e-5）
 		{"qji3ap7su3", "qji3們你"},
