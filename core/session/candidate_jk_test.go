@@ -187,7 +187,7 @@ func TestCandidateJKSelectionKeysWin(t *testing.T) {
 	jkWalk(t, s, "JK", [][2]int{{2, 1}, {2, 1}})
 }
 
-// Emoji／顏文字選單、中英混打的按鍵候選、注音打到一半的符號候選、` 符號選單都不是「改某個字」，j/k 不動。
+// Emoji／顏文字選單、中英混打的按鍵候選、注音打到一半的符號候選都不是「改某個字」，j/k 不動。
 func TestCandidateJKIgnoredOutsideOrdinaryCandidates(t *testing.T) {
 	unchanged := func(t *testing.T, name string, s *Session) {
 		t.Helper()
@@ -237,12 +237,6 @@ func TestCandidateJKIgnoredOutsideOrdinaryCandidates(t *testing.T) {
 		t.Fatalf("pending fixture: %+v", p.cand)
 	}
 	unchanged(t, "pending", p)
-
-	b := jkSession(false)
-	if openSymbolMenu(b); b.cand == nil || b.cand.symbols == "" {
-		t.Fatalf("symbol menu fixture: %+v", b.cand)
-	}
-	unchanged(t, "symbols", b)
 }
 
 // 英文自動補字的候選也不是改字（#193 的頁尾提示要跟著核心）。

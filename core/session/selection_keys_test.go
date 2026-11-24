@@ -117,7 +117,7 @@ func TestSelectionKeysOnlyApplyWhileCandidatesOpen(t *testing.T) {
 	}
 }
 
-// 符號選單與 Emoji 選單也用同一組選字鍵。
+// Emoji 選單也用同一組選字鍵。
 func TestSelectionKeysInEmojiPalette(t *testing.T) {
 	s := newSession()
 	s.SelectionKeys = "1234qweras"

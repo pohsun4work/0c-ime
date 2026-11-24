@@ -60,7 +60,6 @@ func pruneFixture(t *testing.T) (*Model, lexicon.Source, lm.System) {
 	s.English["zuin"] = EnglishEvidence{Text: "Zuin", Confirmed: 3, Days: 2, Updated: s.Time, Day: s.Time / daySeconds}
 	m.RememberEmoji("😀")
 	m.RememberPaletteTab("kaomoji")
-	m.RememberSymbol("※")
 	return m, lex, sys
 }
 
@@ -69,7 +68,7 @@ func explicitChoices(s *Store) map[string]any {
 		"Corrections": s.Corrections, "Readings": s.Readings, "Picked": s.Picked, "Phrases": s.Phrases,
 		"PhraseOrder": s.PhraseOrder, "Tombstones": s.Tombstones, "Rejects": s.Rejects, "Pronouns": s.Pronouns,
 		"English": s.English, "EmojiRecent": s.EmojiRecent, "EmojiStats": s.EmojiStats, "PaletteTab": s.PaletteTab,
-		"SymbolRecent": s.SymbolRecent, "SymbolStats": s.SymbolStats, "CorrectionSerial": s.CorrectionSerial,
+		"CorrectionSerial": s.CorrectionSerial,
 	}
 }
 

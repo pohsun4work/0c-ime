@@ -136,17 +136,6 @@ func TestToneMarkDownOffersOriginalKeySecond(t *testing.T) {
 	if snap = key(s, proto.KeyDown); snap.Candidates == nil || snap.Candidates.Items[0].Text != "ˇ" || snap.Candidates.Items[1].Text != "3" {
 		t.Fatalf("ˇ 在句中也能選回數字：%+v", snap.Candidates)
 	}
-	// 從符號選單選的聲調符號沒有原按鍵，↓ 照舊只列符號組。
-	s = toneMarkSession()
-	openSymbolMenu(s)
-	key(s, proto.KeyBackTab) // 注音分頁
-	pickText(t, s, "ˇ")
-	if s.cand != nil || len(s.syls) != 1 {
-		t.Fatalf("符號選單選 ˇ：%q", s.snapshot().Text())
-	}
-	if snap = key(s, proto.KeyDown); snap.Candidates == nil || snap.Candidates.Items[1].Text == "3" {
-		t.Fatalf("符號選單的 ˇ 沒有原按鍵：%+v", snap.Candidates)
-	}
 }
 
 func TestToneMarkLeavesMixedInputAlone(t *testing.T) {

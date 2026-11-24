@@ -14,8 +14,7 @@ import (
 // 同組符號可用 ↓ 重選；左右括號分組，避免把開括號換成閉括號。每一項是一個符號，可以是多個字元
 // （刪節號「……」、破折號「——」各算一個，見 symbolUnits）。
 //
-// 符號出現在多組時，以最後一組為它的本組：↓ 列本組。↑ 的符號選單另有分類目錄（core/symbols，#290），
-// 這裡的每個符號都要列在選單的某個分頁裡（symbol_palette_test.go 檢查）。
+// 符號出現在多組時，以最後一組為它的本組：↓ 列本組。
 // 所以「…」「⋯」歸刪節號組、「—」「－」歸破折號組、「←」「→」歸箭頭組（#118）。
 // ^、_ 兩組參考新酷音（libchewing symbol.rs）與小麥注音（BPMFPunctuations.txt）的 ^、_ 符號組，
 // 最後附半形原字元，讓中文模式要打半形 ^、_ 的人換得回來。
@@ -273,7 +272,6 @@ func (s *Session) selectLiteral(id int) bool {
 		s.insertLiteral(text)
 	}
 	s.keepLiteralEdit(shown, start, start+length)
-	s.rememberSymbol(c, text)
 	s.cand = nil
 	return true
 }

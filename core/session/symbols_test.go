@@ -5,7 +5,6 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/proto"
-	"github.com/0c-biggo/0c-ime/core/symbols"
 )
 
 func pickText(t *testing.T, s *Session, text string) proto.Snapshot {
@@ -71,7 +70,7 @@ func TestAmpersandIsFullWidthInChineseMode(t *testing.T) {
 	}
 }
 
-// issue #148：標準排列的 / 是 ㄥ，打不出斜線；Shift＋/ 的「？」按 ↓ 可換全形「／」與半形「/」，符號選單也有「／」。
+// issue #148：標準排列的 / 是 ㄥ，打不出斜線；Shift＋/ 的「？」按 ↓ 可換全形「／」與半形「/」。
 func TestQuestionMarkGroupOffersSlash(t *testing.T) {
 	for _, want := range []string{"／", "/"} {
 		s := newSession()
@@ -85,9 +84,6 @@ func TestQuestionMarkGroupOffersSlash(t *testing.T) {
 		if snap := key(s, proto.KeyEnter); snap.Commit != want {
 			t.Fatalf("Enter 應提交 %q：%+v", want, snap)
 		}
-	}
-	if !symbols.Contains("／") {
-		t.Fatal("符號選單應列出全形斜線")
 	}
 }
 
@@ -164,25 +160,6 @@ func TestConvertedSyllableCanReturnToLiteral(t *testing.T) {
 	}
 	if snap = key(s, proto.KeyBackspace); snap.Text() != "ㄐㄧㄥ" {
 		t.Fatalf("原樣注音應可逐字刪除：%+v", snap)
-	}
-}
-
-func TestSymbolPaletteAndCancel(t *testing.T) {
-	s := newSession()
-	snap := openSymbolMenu(s)
-	if !snap.Handled || snap.Candidates == nil || snap.Candidates.Pages < 2 || snap.Commit != "" {
-		t.Fatalf("符號上按 ↑ 應開符號選單：%+v", snap)
-	}
-	key(s, proto.KeyPageDown)
-	key(s, proto.KeyBackTab) // 注音是最後一個分頁（#290）
-	if snap = pickText(t, s, "ㄡ"); snap.Text() != "ㄡ" || snap.Commit != "" {
-		t.Fatalf("符號選單應包含注音：%+v", snap)
-	}
-	key(s, proto.KeyDown)
-	key(s, proto.KeyUp) // 符號組內反向循環，不進入中文字詞候選
-	key(s, proto.KeyEscape)
-	if snap = key(s, proto.KeyEscape); snap.Text() != "" || snap.Commit != "" {
-		t.Fatalf("Esc 應能放棄符號組字：%+v", snap)
 	}
 }
 

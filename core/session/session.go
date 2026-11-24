@@ -24,7 +24,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/punct"
 	"github.com/0c-biggo/0c-ime/core/rerank"
 	"github.com/0c-biggo/0c-ime/core/suggest"
-	"github.com/0c-biggo/0c-ime/core/symbols"
 	"github.com/0c-biggo/0c-ime/core/zhconv"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
@@ -36,7 +35,7 @@ type candState struct {
 	before        bool // 前方模式：詞長變動仍以原來的尾端為界，向左延伸
 	items         []decode.Candidate
 	cursor        int             // 反白的候選（items 的索引）；頁碼由它推得
-	literal       bool            // 符號選單：插入或替換字面文字，不作為詞彙學習
+	literal       bool            // 符號候選：插入或替換字面文字，不作為詞彙學習
 	pending       bool            // 選取後消耗尚未完成的注音；取消時保留
 	raw           bool            // 一音節漢字候選的最後一項是原樣注音
 	matched       []string        // 與 items 等長（或 nil）：近音候選在詞庫中的讀音，原音為空字串
@@ -52,7 +51,6 @@ type candState struct {
 	kind          string
 	direct        bool   // empty composition: selection commits once.
 	ids           []int  // stable palette IDs, independent of recent order.
-	symbols       string // 符號選單的目前分頁（#290；fork 從符號上按 ↑ 開）；空字串表示不是符號選單
 	// split > 0 時是混合清單（#161）：items[:split] 是 start/length 的詞，items[split:] 接著列
 	// 游標那個字（位置 single）的單字候選，翻頁就看得到，不必先按 Tab 換到單字。
 	split  int
@@ -371,8 +369,8 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 	if r.Private || r.Type == proto.Pause && r.On {
 		s.clearDocumentContext()
 		s.localBlocked = true
-		if s.cand != nil && (s.cand.mixed || s.cand.kind != "" || s.cand.symbols == symbols.Recent) {
-			s.cand = nil // 不讓已開啟的個人英文候選、最近用過的符號跨入保護狀態。
+		if s.cand != nil && (s.cand.mixed || s.cand.kind != "") {
+			s.cand = nil // 不讓已開啟的個人英文候選、最近用過的表情跨入保護狀態。
 		}
 	}
 	s.model.SyncTime()
@@ -681,7 +679,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		}
 	}
 	if s.cand != nil {
-		if s.paletteKey(k) || s.symbolMenuKey(k) {
+		if s.paletteKey(k) {
 			return true, ""
 		}
 		switch k {
@@ -846,10 +844,6 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		}
 		return s.composing(), "" // 沒有合格補全：組字中吃掉，沒有組字才交還應用程式
 	case proto.KeyUp, proto.KeyPageUp, proto.KeyPageDown, proto.KeyBackTab:
-		// 游標在符號上按 ↑ 開完整符號選單，停在它的分類（#290）。
-		if k == proto.KeyUp && s.openSymbolMenuAt() {
-			return true, ""
-		}
 		// 候選沒開時這些鍵在組字中沒有作用；吃掉不動作，免得應用程式的游標或焦點離開組字區（#106）。
 		// 沒有組字時交還應用程式。
 		return s.composing(), ""
@@ -1455,7 +1449,7 @@ func (s *Session) openCandidates(length int) {
 // 後方模式放在詞首、選從游標開始的詞。兩種模式走過的詞一樣，換到的範圍都跟把游標放在那裡按 ↓ 相同，
 // 不會停在詞的一半（以前一次移一個字，前方模式按 j 從「風景」到「風」、後方模式從句尾的「好」到「景」，BD-0e2d73）。
 // 後方模式在句尾開的前方候選也照後方模式往前換。已在頭尾時不動。
-// 只用於改字的候選：Emoji／顏文字、中英混打的按鍵候選、注音打到一半與 ` 的符號選單都不套用。
+// 只用於改字的候選：Emoji／顏文字、中英混打的按鍵候選、注音打到一半的符號候選都不套用。
 func (s *Session) stepCandidate(d int) {
 	if !s.canStepCandidate() {
 		return
@@ -1507,7 +1501,7 @@ func (s *Session) unitEnd(pos int) int {
 // 外殼的「J K 換字」提示跟實際行為一致（#193）。
 func (s *Session) canStepCandidate() bool {
 	c := s.cand
-	return c != nil && c.kind == "" && c.symbols == "" && !c.direct && !c.mixed && !c.english && !c.pending && c.length > 0 &&
+	return c != nil && c.kind == "" && !c.direct && !c.mixed && !c.english && !c.pending && c.length > 0 &&
 		s.comp.Empty() && s.mixed.raw == "" && !s.englishWord
 }
 
@@ -2134,9 +2128,6 @@ func (s *Session) snapshot() proto.Snapshot {
 		}
 		if cl.Kind != "" {
 			cl.Title = s.paletteTitle()
-		}
-		if s.cand.symbols != "" {
-			cl.Title = s.symbolTitle()
 		}
 		if !s.cand.literal && !s.cand.mixed && cl.Length > 0 {
 			cl.Title = "修改「" + s.candidateText() + "」 · Tab 切換詞長"

@@ -15,7 +15,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
-	"github.com/0c-biggo/0c-ime/core/symbols"
 	"github.com/0c-biggo/0c-ime/core/vocab"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
@@ -55,7 +54,8 @@ func DefaultParams() Params {
 // 4 加入有上限且獨立於詞彙學習的 EmojiRecent；5 加入表情的常用分數 EmojiStats 與上次選用的
 // = 選單分頁 PaletteTab，EmojiRecent 改為保存（含遲滯的）顯示順序，舊版照樣讀得懂（#124）；
 // 6 加入多字詞的手選紀錄 Confirmed（#218，舊檔由留下的更正推回）與中英混打選過的注音文 ZhuyinKeys（#208，舊檔沒有這份紀錄）；
-// 7 加入符號選單「最近」分頁的順序 SymbolRecent 與常用分數 SymbolStats（#290，舊檔沒有，讀進來是空的）。
+// 7 加入符號選單「最近」分頁的順序 SymbolRecent 與常用分數 SymbolStats（#290）；fork 拿掉了符號選單，
+// 讀檔時略過這兩個欄位、存檔時不寫，版本號照舊是 7（官方 7 讀到沒有這兩欄的檔案就是空的）。
 const StoreFormat = 7
 
 // NewerFormatError 表示個人資料由較新版本寫成；呼叫端不得以目前的結構寫回。
@@ -99,9 +99,6 @@ type Store struct {
 	EmojiRecent []string                   // = 選單的表情顯示順序，最多 64 項；不參與文字學習。
 	EmojiStats  map[string]emoji.Stat      // EmojiRecent 各項的常用分數（衰減後次數）
 	PaletteTab  string                     // 上次真的選了東西的 = 選單分頁：emoji、kaomoji 或 phrases
-	// SymbolRecent 是 ` 符號選單「最近」分頁的顯示順序，最多 symbols.MaxRecent 項，只收目錄裡的符號；不參與文字學習（#290）。
-	SymbolRecent []string
-	SymbolStats  map[string]emoji.Stat // SymbolRecent 各項的常用分數，排序規則同表情
 }
 
 func NewStore() *Store {
@@ -139,8 +136,6 @@ func (s *Store) Clone() *Store {
 	c.English = maps.Clone(s.English)
 	c.EmojiRecent = slices.Clone(s.EmojiRecent)
 	c.EmojiStats = maps.Clone(s.EmojiStats)
-	c.SymbolRecent = slices.Clone(s.SymbolRecent)
-	c.SymbolStats = maps.Clone(s.SymbolStats)
 	return &c
 }
 
@@ -173,11 +168,6 @@ func LoadStore(r io.Reader) (*Store, error) {
 		s.EmojiStats = emoji.SeedStats(s.EmojiRecent)
 	}
 	s.EmojiStats = emoji.CleanStats(s.EmojiStats, s.EmojiRecent)
-	s.SymbolRecent = symbols.CleanRecent(s.SymbolRecent)
-	s.SymbolStats = emoji.KeepStats(s.SymbolStats, s.SymbolRecent)
-	if s.SymbolStats == nil && len(s.SymbolRecent) > 0 { // 有順序沒有分數（手改過的檔）：照順序給初始分數
-		s.SymbolStats = emoji.SeedStats(s.SymbolRecent)
-	}
 	return s, nil
 }
 

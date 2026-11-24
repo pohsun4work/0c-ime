@@ -140,8 +140,8 @@ func TestNoLearningSkipsEnglishWords(t *testing.T) {
 	}
 }
 
-// 「最近」的表情、符號與 = 選單上次的分頁也是打字留下的紀錄，關閉時不記；選了照常插入。
-func TestNoLearningSkipsPaletteAndSymbolHistory(t *testing.T) {
+// 「最近」的表情與 = 選單上次的分頁也是打字留下的紀錄，關閉時不記；選了照常插入。
+func TestNoLearningSkipsPaletteHistory(t *testing.T) {
 	s := paletteSession()
 	s.NoLearning = true
 	key(s, "=")
@@ -151,16 +151,5 @@ func TestNoLearningSkipsPaletteAndSymbolHistory(t *testing.T) {
 	}
 	if s.model.Store.PaletteTab != "" || len(s.model.Store.EmojiRecent) != 0 {
 		t.Fatalf("%q %v", s.model.Store.PaletteTab, s.model.Store.EmojiRecent)
-	}
-
-	s = newSession()
-	s.NoLearning = true
-	openSymbolMenu(s)
-	keys(s, proto.KeyTab, proto.KeyTab, proto.KeyTab, proto.KeyTab) // 圖形
-	if snap := pickText(t, s, "※"); snap.PersonalChanged || snap.Text() != "※" {
-		t.Fatalf("選了符號照常插入、不要求存檔：%+v", snap)
-	}
-	if len(s.model.Store.SymbolRecent) != 0 {
-		t.Fatalf("最近用過的符號不記：%v", s.model.Store.SymbolRecent)
 	}
 }

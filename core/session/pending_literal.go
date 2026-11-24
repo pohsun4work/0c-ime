@@ -247,7 +247,7 @@ func (s *Session) syllableLiteralAt(pos int) (pendingLiteral, bool) {
 }
 
 // openSyllableLiteral 讓 ↓ 把原樣音節當成一個整體：第一項是畫面上帶聲調的原樣注音，
-// 其後是同一讀音的其他聲調，同符號選單「同組可重選」的規則；選了照樣是原樣文字。
+// 其後是同一讀音的其他聲調，同符號按 ↓「同組可重選」的規則；選了照樣是原樣文字。
 func (s *Session) openSyllableLiteral(p pendingLiteral) {
 	syl := p.syllable()
 	items := []string{syl.Text()}
