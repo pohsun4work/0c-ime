@@ -32,11 +32,6 @@ const (
 	Mode       = "mode"       // On：設定中英模式（true 為英文）；外殼重連後用它還原模式
 	Toggle     = "toggle"     // 中英模式切換（單按 Shift）；Restore 見 Request
 	Display    = "display"    // 外殼可呈現的欄數；1 表示原生直排。
-	// NineReading（注音九宮格，觸控）：To、Word。把一個九宮格音節固定成讀音 Word（快照 nine_readings.readings 的一項），
-	// 移除其他讀音（左欄「注音選擇」）。To 是快照 nine_readings.at：pending 時（To 等於游標、還有沒完成的鍵）固定的是那串鍵
-	// 的拼法，之後照常按聲調鍵完成；否則是第 To 個已完成的音節，蓋到它的手選解除、重新解碼。Word 不是那個位置的讀音時
-	// 什麼都不改，Notices 帶「沒有這個讀音」。
-	NineReading = "nine_reading"
 )
 
 // 輸入模式。
@@ -142,12 +137,6 @@ type Request struct {
 	// 由外殼依觸控位置的空間模型算出。核心在音節格放入換成鄰鍵的讀音，
 	// 打的鍵接不上音節時也可改用鄰鍵；沒有 Near 時行為與沒有此功能時相同。
 	Near []NearKey `json:"near,omitempty"`
-	// Group（注音九宮格，只用於 Symbol）：這顆鍵代表的一組注音，例如 "ㄇㄋㄜㄝ"（三星式分組）；這時 Symbol 不看、Near 不用。
-	// 鍵先存著，按聲調鍵（Group 全是聲調符號，例如 "ˊˇˋ˙"：音節結束、聲調未指定）、空白（Symbol "ˉ"，一聲）
-	// 或指定聲調（Symbol 是單一聲調符號）時，核心把每顆鍵各取一個注音組成合法音節，全部放進音節格由解碼依前後文挑。
-	// 有沒完成的九宮格鍵時，不帶 Group 的單一注音（長按選的）當成只有那個注音的一顆鍵。
-	// 沒有 Group（也沒有沒完成的九宮格鍵）時行為與沒有此功能時相同。
-	Group string `json:"group,omitempty"`
 }
 
 // NearKey 是一次點按的鄰鍵假設。
@@ -255,18 +244,6 @@ type Snapshot struct {
 	Notices             []string        `json:"notices,omitempty"`    //
 	Mode                string          `json:"mode"`                 // zhuyin 或 english
 	ReadingHint         *ReadingHint    `json:"reading_hint,omitempty"`
-	// NineReadings（注音九宮格）：左欄「注音選擇」要畫的讀音；沒有九宮格的鍵或音節時省略。
-	NineReadings *NineReadings `json:"nine_readings,omitempty"`
-}
-
-// NineReadings 是一個九宮格音節可以選的讀音（注音，沒打聲調的不帶聲調、一聲不標）。
-// 有還沒完成的九宮格鍵時是那串鍵目前可能的拼法（Pending，音節的開頭），At 是游標（那個音節會插入的位置）；
-// 否則是游標前那個有多個讀音的九宮格音節，At 是它的位置。外殼點了其中一項送 nine_reading（To 為 At、Word 為那一項）。
-type NineReadings struct {
-	At       int      `json:"at"`
-	Pending  bool     `json:"pending,omitempty"`
-	Readings []string `json:"readings"` // 依常用程度；Pending 時第一項是組字區畫的那個
-	Current  int      `json:"current"`  // 組字目前用的那一項（Readings 的索引）；Pending 時一律 0
 }
 
 // SuggestedText 回傳按 Tab 接受後預覽的完整組字；無建議或範圍不合法時為空。

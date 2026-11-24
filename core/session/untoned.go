@@ -56,7 +56,7 @@ func (s *Session) abbreviatedTone(before zhuyin.Composer, done zhuyin.Syllable) 
 }
 
 // editsPending 回報實體按鍵 k 是不是作用在未打完的注音上的編輯鍵（Backspace 刪一個注音、Esc 清掉未打完的注音）。
-// 這兩個鍵之前不完成注音鍵或九宮格打到一半的音節（finishSymbolPending），否則會先收成音節、再整個刪掉。
+// 這兩個鍵之前不完成注音鍵打到一半的音節（finishSymbolPending），否則會先收成音節、再整個刪掉。
 // 其他非字元鍵（Enter、方向鍵、Tab、Delete）本來就會用到整段組字，照舊先完成（聲調選填的 untonedKey 也會做）。
 func editsPending(k string) bool { return k == proto.KeyBackspace || k == proto.KeyEscape }
 
@@ -73,8 +73,7 @@ func (s *Session) finishSymbolPending() {
 // 一直更新，選字時才真的完成音節（這時由 Candidates 請求開啟的是同一份候選，ID 相同）。沒有未打完的注音、
 // 或注音還不能完成時回傳 nil。
 func (s *Session) PreviewPending() *proto.CandidateList {
-	nine := s.ninePending() && len(s.nineReadings(s.nineKeys, nineToneKey)) > 0 // 九宮格的鍵同未打完的注音
-	if !nine && (!s.toneless() || s.comp.Empty() || s.untonedSyllable(zhuyin.Syllable(s.comp.String())) == "") {
+	if !s.toneless() || s.comp.Empty() || s.untonedSyllable(zhuyin.Syllable(s.comp.String())) == "" {
 		return nil
 	}
 	saved := *s
@@ -131,9 +130,6 @@ func lastClass(c zhuyin.Composer) zhuyin.Class {
 // finishUntoned 把未打完、但已是完整音節（或能簡拼）的注音當成沒打聲調的音節收進組字。
 // 沒開聲調選填、沒有未打完的注音，或注音還不是完整音節也不能簡拼時不動作，回傳 false。
 func (s *Session) finishUntoned() bool {
-	if s.ninePending() {
-		return s.finishNine(nineToneKey) // 九宮格的鍵：不打聲調就完成（不看聲調選填的設定，九宮格本來就靠解碼定讀音）
-	}
 	if !s.toneless() || s.comp.Empty() {
 		return false
 	}

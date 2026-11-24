@@ -341,9 +341,9 @@ func (s *Session) missedFor(y zhuyin.Syllable) []zhuyin.Syllable {
 }
 
 // missedAt 是位置 at 補上一鍵的讀音。簡拼音節本來就展開成所有以它開頭的音節；旁邊是簡拼音節時使用者正在簡拼
-// （ㄋㄧ 的 ㄧ 不是漏了聲母），而且簡拼的寬列再加上補鍵的讀音會讓候選清單慢上十倍，都不放。九宮格與原樣文字的位置也不放。
+// （ㄋㄧ 的 ㄧ 不是漏了聲母），而且簡拼的寬列再加上補鍵的讀音會讓候選清單慢上十倍，都不放。原樣文字的位置也不放。
 func (s *Session) missedAt(syls []zhuyin.Syllable, at int) []zhuyin.Syllable {
-	if !s.Spatial.on() || s.Spatial.Missed <= 0 || s.literals[at] || len(s.nine[at]) > 0 {
+	if !s.Spatial.on() || s.Spatial.Missed <= 0 || s.literals[at] {
 		return nil
 	}
 	if syls[at].Abbreviated() || at > 0 && syls[at-1].Abbreviated() || at+1 < len(syls) && syls[at+1].Abbreviated() {

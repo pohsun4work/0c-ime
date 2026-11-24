@@ -177,26 +177,6 @@ func TestMixedWithTonelessEditKeysActOnPendingSymbols(t *testing.T) {
 	}
 }
 
-// 九宮格的鍵還沒完成音節時按實體 Backspace：刪最後一顆鍵（同觸控的 backspace 請求），不先把那串鍵收成音節。
-func TestNineKeyPhysicalBackspaceDropsOneKey(t *testing.T) {
-	s := nineSession()
-	press(s, 7, 2)
-	key(s, proto.KeyBackspace)
-	if len(s.nineKeys) != 1 || len(s.syls) != 0 {
-		t.Fatalf("nine keys %v syls %v", s.nineKeys, s.syls)
-	}
-	press(s, 2, 0)
-	if got := s.snapshot().Text(); got != "你" {
-		t.Fatalf("退格後接著打：%q", got)
-	}
-	s = nineSession()
-	press(s, 8, 4, 0, 7, 2)
-	key(s, proto.KeyEscape)
-	if s.ninePending() || len(s.syls) != 1 {
-		t.Fatalf("Esc 只清掉還沒完成的鍵：nine keys %v syls %v", s.nineKeys, s.syls)
-	}
-}
-
 func TestTonelessWithoutCoexistStillDisablesMixed(t *testing.T) {
 	s := newSession()
 	s.Toneless = true

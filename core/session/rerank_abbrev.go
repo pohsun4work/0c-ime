@@ -13,8 +13,6 @@ import (
 // 送給評分器的卻是那個完整音節（rerank.MaskTones），評分器會把「ㄧ 簡拼 ㄧㄠ」推回「ㄧ」。照原樣送時，校準組改成
 // 只打首音的 1,155 例比不用模型差 2.1～2.5pp；完全不送又丟掉完整讀音時的增益。所以照樣送評分，但候選在簡拼位置的
 // 詞庫讀音（基底）跟統計首選不同的不能贏：評分器只能在同一個讀法裡換字。量測與取捨見 commit 訊息。
-//
-// 注音九宮格（ninekey.go）的位置同理：送出的是統計首選走的那個讀音，評分器不准把它換成同一串鍵的另一個拼法。
 
 // readingsAt 回傳候選 r（段落從 start 起）在 at（絕對位置）各音節的詞庫讀音；有一個解不出來 ok 就是 false。
 func (s *Session) readingsAt(lat input.Lattice, start int, r decode.Hypothesis, at []int) ([]zhuyin.Syllable, bool) {
@@ -45,12 +43,12 @@ func (s *Session) readingsAt(lat input.Lattice, start int, r decode.Hypothesis, 
 	return out, found == len(at)
 }
 
-// vetoAbbrevReadings 標出在簡拼位置（與九宮格位置）換了讀音的候選：詞庫讀音的基底跟統計首選 rows[0] 不同，或解不出來。
+// vetoAbbrevReadings 標出在簡拼位置換了讀音的候選：詞庫讀音的基底跟統計首選 rows[0] 不同，或解不出來。
 // 段內沒有簡拼音節時回傳 nil、true；統計首選本身解不出讀音時 ok 為 false，整段照統計引擎。
 func (s *Session) vetoAbbrevReadings(lat input.Lattice, start, end int, rows []decode.Hypothesis) (vetoed []bool, ok bool) {
 	var at []int
 	for i := start; i < end; i++ {
-		if s.syls[i].Abbreviated() || len(s.nine[i]) > 0 {
+		if s.syls[i].Abbreviated() {
 			at = append(at, i)
 		}
 	}
@@ -81,13 +79,13 @@ func (s *Session) vetoAbbrevReadings(lat input.Lattice, start, end int, rows []d
 var vetoAbbrev = (*Session).vetoAbbrevReadings
 
 // abbrevVetoKey 是 vetoAbbrevReadings 除了候選文字與分段以外依賴的輸入，併進重排快取的鍵：段內每個音節的完整寫法
-// （含簡拼與沒打聲調的標記；遮罩過的讀音分不出簡拼）、九宮格位置的讀音，以及候選各段記下的詞庫讀音（Matched）。
-// 音節格其他的假設（近音、鄰鍵）都有成本又不是打的音，decode.Reading 不看。段內沒有簡拼或九宮格位置時檢查一定通過，
+// （含簡拼與沒打聲調的標記；遮罩過的讀音分不出簡拼），以及候選各段記下的詞庫讀音（Matched）。
+// 音節格其他的假設（近音、鄰鍵）都有成本又不是打的音，decode.Reading 不看。段內沒有簡拼位置時檢查一定通過，
 // 回傳空字串。
 func (s *Session) abbrevVetoKey(start, end int, rows []decode.Hypothesis) string {
 	var b strings.Builder
 	for i := start; i < end; i++ {
-		if s.syls[i].Abbreviated() || len(s.nine[i]) > 0 {
+		if s.syls[i].Abbreviated() {
 			if b.Len() == 0 {
 				b.WriteString("#abbrev|")
 				for j := start; j < end; j++ {
@@ -95,7 +93,7 @@ func (s *Session) abbrevVetoKey(start, end int, rows []decode.Hypothesis) string
 					b.WriteByte(' ')
 				}
 			}
-			fmt.Fprintf(&b, "|%d:%s", i, zhuyin.Key(s.nine[i]))
+			fmt.Fprintf(&b, "|%d", i)
 		}
 	}
 	if b.Len() == 0 {

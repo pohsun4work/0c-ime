@@ -404,7 +404,7 @@ func TestTonelessDisplaysWithoutMark(t *testing.T) {
 	}
 }
 
-// syllablePrior（簡拼保留哪些讀音、九宮格讀音的排序）只看系統詞庫：記在 session 裡的值不能取決於 session 開始時
+// syllablePrior（簡拼保留哪些讀音）只看系統詞庫：記在 session 裡的值不能取決於 session 開始時
 // 學過什麼，否則同一個人、同樣的按鍵在不同時間開的 session 結果不同。
 func TestSyllablePriorIgnoresLearning(t *testing.T) {
 	s := newTonelessSession(true)

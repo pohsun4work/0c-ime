@@ -14,7 +14,7 @@ type Hyp struct {
 	// 它的成本也不算「打的音和讀音不同」（不是近音）；全部打了聲調時沒有這種假設。
 	Untoned bool
 	// Abbreviated：這個假設是簡拼音節展開出來的讀音（同時也是 Untoned）。解碼器據此對經過這個位置的弧
-	// 改用較小的上限（decode.maxAbbreviatedArcs）。要明確標記：沒打聲調加模糊音、鄰鍵或九宮格的一列也可能有幾十個
+	// 改用較小的上限（decode.maxAbbreviatedArcs）。要明確標記：沒打聲調加模糊音或鄰鍵的一列也可能有幾十個
 	// 假設，不能從列長推斷是不是簡拼。
 	Abbreviated bool
 	// Corrected：這個假設是觸控鍵盤的修正（換成鄰鍵、補上漏按的鍵、去掉多按的鍵，session.SpatialOptions），不是打的音。
