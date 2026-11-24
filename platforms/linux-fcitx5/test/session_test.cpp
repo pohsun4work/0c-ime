@@ -257,26 +257,27 @@ int main(int argc, char **argv) {
               "預覽重播後第二次 Tab 應接受補全");
         CHECK(s.key("Enter").commit == "小籠包", "提交同音補全");
 
-        // 標點與中英切換
+        // 標點與中英切換（fork：符號照微軟，Shift+, 打半形 <、] 打 ]，沒在組字時也留在組字區）
         snap = s.key("<");
-        CHECK(snap.handled && snap.commit.empty() && snap.text() == "，", "全形逗號應留在組字區");
+        CHECK(snap.handled && snap.commit.empty() && snap.text() == "<", "半形 < 應留在組字區");
         snap = s.key("Enter");
-        CHECK(snap.commit == "，", "Enter 才提交標點");
+        CHECK(snap.commit == "<", "Enter 才提交標點");
         s.key("]");
         snap = s.key("Down");
-        CHECK(snap.candidates.size() >= 2 && snap.candidates[1].second == "』", "右引號應提供變體");
+        CHECK(snap.candidates.size() >= 2 && snap.candidates[1].second == "」", "右括號應提供變體");
         snap = s.key("2");
-        CHECK(snap.text() == "』" && snap.commit.empty(), "選符號不應提交");
-        CHECK(s.key("Enter").commit == "』", "確認右引號");
+        CHECK(snap.text() == "」" && snap.commit.empty(), "選符號不應提交");
+        CHECK(s.key("Enter").commit == "」", "確認右引號");
 
-        // 空白組字區的符號選單在 server 重啟後仍可選取。
-        snap = s.key("`");
-        CHECK(!snap.candidates.empty(), "反引號應開啟符號選單");
+        // 符號選單在 server 重啟後仍可選取（fork：游標停在選單裡的符號上按 ↑ 開，` 照字面打）。
+        s.key("Ctrl+,");
+        snap = s.key("Up");
+        CHECK(!snap.candidates.empty(), "符號上按 ↑ 應開啟符號選單");
         gen = client.generation();
         (void)!system((std::string("pkill -f '0c-server -socket ") + argv[1] + "'").c_str());
         usleep(300 * 1000);
         snap = s.key("2");
-        CHECK(client.generation() > gen && snap.text() == "、" && snap.commit.empty(), "空白選單也必須可重播");
+        CHECK(client.generation() > gen && snap.text() == "、" && snap.commit.empty(), "符號選單也必須可重播");
         s.key("Escape");
         s.key(".");
         snap = s.key("Down");
@@ -601,7 +602,7 @@ int main(int argc, char **argv) {
         s.handle({{"type", "cancel"}}); // 斷線要等下一個請求才發現：先重連到重啟的引擎
         CHECK(s.ctrlPunct("Ctrl+,"), "預設應回報 ctrl_punctuation");
         CHECK(s.ctrlPunct("Ctrl+("), "引擎應回報認得 Ctrl+(（ctrl_punctuation_keys，#231）");
-        CHECK(!s.ctrlPunct("Ctrl+["), "Ctrl+[ 不是 Ctrl＋標點");
+        CHECK(s.ctrlPunct("Ctrl+["), "fork：Ctrl+[ 打【");
         auto snap = s.key("Ctrl+(");
         CHECK(snap.handled && snap.text() == "（", "Ctrl+( 應插進組字區：%d %s", snap.handled, snap.text().c_str());
         s.key("Escape");
@@ -611,7 +612,8 @@ int main(int argc, char **argv) {
         CHECK(snap.commit == "，", "Enter 送出全形逗號：%s", snap.commit.c_str());
         (void)!system((std::string("pkill -f '0c-server -socket ") + argv[1] + "'").c_str());
         usleep(300 * 1000);
-        std::ofstream(home + "/settings.json") << R"({"ctrl_punctuation":false})";
+        // fork：預設所有符號鍵打半形會固定開著 Ctrl＋標點，標點寬度關掉才看得到這個設定本身
+        std::ofstream(home + "/settings.json") << R"({"ctrl_punctuation":false,"shift_symbol_halfwidth":false})";
         s.handle({{"type", "cancel"}});
         CHECK(!s.ctrlPunct("Ctrl+,"), "設定關閉後重開的 session 不應回報 ctrl_punctuation");
         CHECK(!s.ctrlPunct("Ctrl+)"), "設定關閉時新加的鍵也不送");
