@@ -327,7 +327,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.finishSymbolPending()
 		handled, commit = s.key(r.Key)
 	case proto.Symbol:
-		s.flushMixed()
+		s.settleMixed(true) // 顯示成注音的待定按鍵交給注音接著組（nm 再點 ㄅ 是 ㄅㄩ）
 		for _, sym := range r.Symbol {
 			handled = s.symbolNear(sym, r.Near) && handled
 		}
@@ -941,10 +941,11 @@ func (s *Session) backspace() bool {
 			for s.cursor > span.start {
 				s.eraseBeforeCursor()
 			}
-			s.restorePendingLiteral()
+			s.restorePending(true)
 			return true
 		}
 	}
+	s.restorePending(true)
 	if s.mixed.raw != "" {
 		if s.mixed.accepted != "" {
 			s.mixed.accepted = ""
@@ -957,7 +958,6 @@ func (s *Session) backspace() bool {
 		}
 		return true
 	}
-	s.restorePendingLiteral()
 	if !s.comp.Empty() {
 		s.comp = layout.Standard.Backspace(s.comp)
 		return true
@@ -969,7 +969,7 @@ func (s *Session) backspace() bool {
 	for s.cursor > to {
 		s.eraseBeforeCursor()
 	}
-	s.restorePendingLiteral()
+	s.restorePending(true)
 	return true
 }
 
@@ -1660,7 +1660,7 @@ func (s *Session) commitComposed() string {
 
 func (s *Session) commit() string {
 	// Resolve pending English exactly as displayed; never accept a suggestion on Enter.
-	s.flushMixed()
+	s.settleMixed(s.mixedKeepsZhuyin(s.mixed.raw))
 	s.finishUntoned() // 聲調選填：最後一個沒打聲調的音節也照解碼結果送出（#150）
 	if s.Rerank.Scorer == nil {
 		s.refresh()

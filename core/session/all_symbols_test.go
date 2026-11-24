@@ -45,7 +45,7 @@ func TestAllSymbolsHalfwidthInsideComposition(t *testing.T) {
 			t.Fatalf("Enter 送出 %q：%+v", k, snap)
 		}
 	}
-	// 游標在中間時插在游標處；顯示成注音的待定按鍵同其他標點留成符號（_ ^ 是識別字的一部分，v_ 照字面，#118）。
+	// 游標在中間時插在游標處；顯示成注音、還沒打完的待定按鍵照原按鍵留下（v[ 不是 ㄒ[；_ ^ 是識別字的一部分，#118）。
 	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	typeSyl(s, "ㄒㄧㄤˇ")
@@ -56,8 +56,8 @@ func TestAllSymbolsHalfwidthInsideComposition(t *testing.T) {
 	s = newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	key(s, "v") // ㄒ
-	if snap := key(s, "["); snap.Text() != "我ㄒ[" {
-		t.Fatalf("未打完的注音應留成符號：%+v", snap)
+	if snap := key(s, "["); snap.Text() != "我v[" {
+		t.Fatalf("未打完的注音照原按鍵留下：%+v", snap)
 	}
 	s = newSession()
 	typeSyl(s, "ㄨㄛˇ")

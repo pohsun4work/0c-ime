@@ -32,13 +32,13 @@ func TestCtrlPunctTypesFullWidthPunctuation(t *testing.T) {
 	}
 }
 
-// 未打完的注音同一般標點留成符號；游標在中間時插在游標處。
+// 未打完的注音同一般標點照原按鍵留下；游標在中間時插在游標處。
 func TestCtrlPunctKeepsPendingZhuyinAndCursor(t *testing.T) {
 	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	key(s, "v") // ㄒ
-	if snap := key(s, proto.KeyCtrlPeriod); !snap.Handled || snap.Text() != "我ㄒ。" {
-		t.Fatalf("未打完的注音應留成符號：%+v", snap)
+	if snap := key(s, proto.KeyCtrlPeriod); !snap.Handled || snap.Text() != "我v。" {
+		t.Fatalf("未打完的注音照原按鍵留下：%+v", snap)
 	}
 	s = newSession()
 	typeSyl(s, "ㄨㄛˇ")

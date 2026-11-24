@@ -12,8 +12,8 @@ mix-07	tj3xu3fu4g4i7	處理器是喔	保留官方：句尾後面沒字的不換�
 mix-08	ep␣␣2␣	跟␣2␣	保留官方：盤古之白（規格寫「跟 2」）
 mix-09	win10␣	win10␣	保留官方：型號詞表（規格寫「win10」，後面的空白照打）
 mix-10	ps52k7	ps5的	保留官方：型號詞表
-mix-11	npm␣	npm	P5；官方 ㄙㄩㄣ
-mix-12	cpu␣	cpu	P5；官方 ㄏㄧㄣ
+mix-11	npm␣	npm␣	P5；官方 ㄙㄩㄣ（規格寫「npm」，後面的空白照打）
+mix-12	cpu␣	cpu␣	P5；官方 ㄏㄧㄣ（規格寫「cpu」，後面的空白照打）
 mix-13	nm{Enter}	nm	P5；官方送出 ㄙㄩ
 mix-14	url␣	交	保留官方：反過來打的英文字
 mix-15	e(	e(	P5；官方 ㄍ（

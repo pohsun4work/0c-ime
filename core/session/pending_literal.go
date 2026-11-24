@@ -20,7 +20,10 @@ import (
 type pendingLiteral struct {
 	start    int
 	composer zhuyin.Composer
-	tone     int // 0：一般暫存注音；1–5：原樣留下的完整音節
+	keys     string // 非空：照原按鍵留下的混打待定按鍵（insertPendingKeys），還原成 s.mixed.raw
+	// fullWidth：keys 留下時的字寬。切換過字寬就不收回，照切換前的字寬定案。
+	fullWidth bool
+	tone      int // 0：一般暫存注音；1–5：原樣留下的完整音節
 	// prefix：音節本身沒有字、只是某個更長的詞的開頭，因此原樣留下（#107 的 ㄟ）。
 	// 下一個音節能和它成詞時收回去一起解碼；使用者從 ↓ 明確選的原樣音節不會帶這個標記。
 	prefix bool
@@ -30,7 +33,12 @@ type pendingLiteral struct {
 	abbrev zhuyin.Syllable
 }
 
-func (p pendingLiteral) end() int { return p.start + len([]rune(p.composer.String())) }
+func (p pendingLiteral) end() int {
+	if p.keys != "" {
+		return p.start + len([]rune(p.keys))
+	}
+	return p.start + len([]rune(p.composer.String()))
+}
 
 // mark 是畫面上聲調符號占的字數：二、三、四聲與輕聲各一個，一聲不標。
 func (p pendingLiteral) mark() int {
@@ -73,21 +81,38 @@ func (s *Session) shiftPendingLiterals(at, delta int) {
 	s.pendingLiterals = next
 }
 
-func (s *Session) restorePendingLiteral() {
-	if !s.comp.Empty() {
+// restorePendingLiteral 收回游標前暫存的未打完注音（注音鍵、聲調鍵用），照原按鍵留下的不收。
+func (s *Session) restorePendingLiteral() { s.restorePending(false) }
+
+// restorePending：keys 時也收回照原按鍵留下的混打待定按鍵（混打的按鍵、退格用）；英文模式、切換過字寬時不收。
+func (s *Session) restorePending(keys bool) {
+	if !s.comp.Empty() || s.mixed.raw != "" {
 		return
 	}
 	for i, p := range s.pendingLiterals {
-		if p.tone != 0 || p.end() != s.cursor {
+		if p.tone != 0 || p.end() != s.cursor || p.keys != "" && (!keys || s.english || p.fullWidth != s.fullWidth) {
 			continue
 		}
 		s.pendingLiterals = append(s.pendingLiterals[:i:i], s.pendingLiterals[i+1:]...)
 		for s.cursor > p.start {
 			s.eraseBeforeCursor()
 		}
-		s.comp = p.composer
+		if p.keys != "" {
+			s.mixed.raw = p.keys
+			s.refresh() // 同一鍵可能接著定案（ji→ 再打 <），keepMixedDisplay 要拿刪掉之後的分詞
+		} else {
+			s.comp = p.composer
+		}
 		return
 	}
+}
+
+// insertPendingKeys：顯示成還沒打完的注音的待定按鍵定案時（符號、數字鍵盤、移動游標，Enter 見 settleMixed）照原按鍵留下，
+// 按過的鍵不丟（e( 是 e(、e 數字鍵盤 2 e 是 e2e）。緊接著打字或退格回到它後面時收回接著組（ji 數字鍵盤 1 退格再打 3 是 我）。
+func (s *Session) insertPendingKeys(keys string) {
+	p := pendingLiteral{start: s.cursor, keys: keys, fullWidth: s.fullWidth}
+	s.insertMixedLiteral(keys, false, false)
+	s.pendingLiterals = append(s.pendingLiterals, p)
 }
 
 // insertSyllableLiteral 把沒有字可讀、由聲調鍵完成的音節原樣留在游標處（#109、#107）：

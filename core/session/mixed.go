@@ -151,15 +151,18 @@ func (s *Session) mixedPending(text string) (zhuyin.Composer, bool) {
 	return c, !s.englishWord && ok && s.mixed.accepted == "" && text == c.String()
 }
 
-// Flushing preserves exactly what is displayed. An unfinished phonetic segment
-// uses the existing pending-literal restoration mechanism for cursor edits.
-func (s *Session) flushMixed() {
+// flushMixed 讓待定按鍵照畫面定案；顯示成還沒打完的注音時照原按鍵留下（insertPendingKeys），↓ 選過注音的照注音。
+func (s *Session) flushMixed() { s.settleMixed(false) }
+
+// settleMixed：keepZhuyin 時顯示成還沒打完的注音照注音留下（Enter 照畫面送出、點注音鍵接著組）。
+func (s *Session) settleMixed(keepZhuyin bool) {
 	if s.mixed.raw == "" {
 		return
 	}
 	s.settleTokenAn()
-	text := s.mixedText()
+	raw, text := s.mixed.raw, s.mixedText()
 	c, phonetic := s.mixedPending(text)
+	zhuyinText := phonetic && (keepZhuyin || s.mixed.choice == 2)
 	if !phonetic {
 		s.reviseLetterI(text)
 	}
@@ -168,10 +171,13 @@ func (s *Session) flushMixed() {
 	assisted, explicit := s.mixed.accepted != "", s.mixed.choice == 1
 	assistedPrefix := s.mixed.assistedPrefix
 	s.clearMixed()
-	if phonetic {
+	switch {
+	case zhuyinText:
 		s.comp = c
 		s.insertPendingLiteral()
-	} else {
+	case phonetic:
+		s.insertPendingKeys(raw)
+	default:
 		s.insertMixedPrefix(text, assisted, explicit)
 		for pos := at; pos < at+min(assistedPrefix, len([]rune(text))); pos++ {
 			origin := s.mixedOrigins[pos]
@@ -583,10 +589,10 @@ func (s *Session) finishMixedTone(key string) bool {
 		s.insertMixedTyped(done, raw[at:]+key)
 		return true
 	}
-	// 畫面顯示成注音、空白組不成字（單獨的聲母 c ㄏ、x ㄌ，#190），或 ↓ 選了注音解釋後的聲調組不成字（2 ↓ㄉ，#208）：
-	// 比照一般注音模式（#109）原樣留下注音，空白當一聲吃掉，不另外插入空白（c␣c␣ 是「ㄏㄏ」，不是「ㄏ ㄏ 」）。
-	// 結尾是聲調鍵、照字面顯示的按鍵（co6）照舊。
-	if key == " " || s.mixed.choice == 2 {
+	// 畫面顯示成注音、空白組不成字而 mixedKeepsZhuyin 的，或 ↓ 選了注音解釋後的聲調組不成字（2 ↓ㄉ，#208）：
+	// 比照一般注音模式（#109）原樣留下注音，空白當一聲吃掉（c␣c␣ 是「ㄏㄏ」）。
+	// 其他照原按鍵、空白照打（npm␣ 是 npm␣，mixedKey 的 flushMixed）；結尾是聲調鍵、照字面顯示的按鍵（co6）照舊。
+	if s.mixed.choice == 2 || key == " " && s.mixedKeepsZhuyin(raw) {
 		at, picked := s.cursor, s.mixed.choice == 2 && key == " " && len(raw) == 1
 		kept := s.keepMixedSyllable(sym, raw+key)
 		if kept && picked {
@@ -1543,6 +1549,10 @@ func (s *Session) mixedReachable(raw string) bool {
 	return false
 }
 
+// mixedKeepsZhuyin：顯示成注音的待定按鍵在空白、Enter 時照官方留下注音：單鍵（c 是 ㄏ，#190），
+// 或加某個聲調組得成字的（ㄋㄩ）。多鍵又怎樣都組不成字的（npm 的 ㄙㄩㄣ）照原按鍵。
+func (s *Session) mixedKeepsZhuyin(raw string) bool { return len(raw) == 1 || s.mixedReachable(raw) }
+
 // mixedAfterChinese：待定按鍵要插入的位置前面是中文音節（不是字面的英文、數字、空白或標點）。
 func (s *Session) mixedAfterChinese() bool {
 	if _, ok := s.prefixLiteralBefore(); ok {
@@ -1574,9 +1584,9 @@ func (s *Session) mixedKey(k string) bool {
 		return false
 	}
 	rs := []rune(k)
-	// 照字面留下的注音後面接著打字時收回來接著組（#309）；方向鍵、Enter 等不收，游標照常移動。
+	// 暫存的未打完注音或按鍵（pendingLiteral）後面接著打字時收回來接著組；方向鍵、Enter 等不收，游標照常移動。
 	if s.mixed.raw == "" && len(rs) == 1 && unicode.IsPrint(rs[0]) {
-		s.restorePendingLiteral()
+		s.restorePending(true)
 	}
 	if !s.comp.Empty() {
 		return false
