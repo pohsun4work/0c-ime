@@ -162,18 +162,3 @@ func (s Store) EngineState(dictionary string) string {
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
-
-// EngineShouldCheck 是引擎端便宜的檢查（只讀 remind.json 與幾個目錄）：什麼時候值得叫 0c-update models remind。
-// 個人目錄有權重、而且狀態跟 0c-update 上次處理完的不同（升級換了字典、配對是舊的 models.lock 配的）時，讓它看看
-// 要不要重新配對；否則看提醒有沒有停止、時間到了沒有。
-func EngineShouldCheck(userDir, dictionary string, now time.Time) bool {
-	s := NewStore(userDir)
-	r := s.LoadRemind()
-	if entries, err := os.ReadDir(filepath.Join(s.Root, "weights")); err == nil && len(entries) > 0 && validHex(dictionary) && r.Checked != s.EngineState(dictionary) {
-		return true
-	}
-	if r.Stopped != "" {
-		return false
-	}
-	return r.NextAt.IsZero() || !now.Before(r.NextAt)
-}

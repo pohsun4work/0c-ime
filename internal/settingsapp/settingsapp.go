@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/0c-biggo/0c-ime/internal/enginedir"
 	"github.com/0c-biggo/0c-ime/internal/update"
@@ -80,7 +79,7 @@ func Locate(base, installed, installedSHA256 string) (Location, error) {
 	return Location{}, ErrNotFound
 }
 
-// Verify 確認檔案是目前使用者擁有的一般可執行檔、其他人不能改，且雜湊與記錄相符。
+// Verify 確認檔案是一般檔案，且雜湊與記錄相符。
 // 沒有記錄的雜湊就無從核對，視為不可啟動。
 func Verify(path, want string) error {
 	if want == "" {
@@ -93,17 +92,6 @@ func Verify(path, want string) error {
 	if !st.Mode().IsRegular() {
 		return errors.New("不是一般檔案")
 	}
-	if runtime.GOOS != "windows" {
-		if st.Mode().Perm()&0o111 == 0 {
-			return errors.New("沒有執行權限")
-		}
-		if st.Mode().Perm()&0o022 != 0 {
-			return errors.New("群組或其他人可以修改")
-		}
-		if !ownedByCurrentUser(st) {
-			return errors.New("不屬於目前使用者")
-		}
-	}
 	got, err := update.Hash(path)
 	if err != nil {
 		return err
@@ -112,30 +100,4 @@ func Verify(path, want string) error {
 		return errors.New("雜湊與記錄不符")
 	}
 	return nil
-}
-
-// SourceSystem：系統套件安裝的設定程式（#181，Linux 的 /usr/bin/0c-settings）。
-const SourceSystem = "system"
-
-// LocateSystem 核對系統套件安裝的設定程式：沒有安裝收據可比對雜湊（檔案由套件管理員核對），改成確認是
-// root 擁有、其他人不能改的一般可執行檔（不接受符號連結）。不存在時回傳 ErrNotFound。
-func LocateSystem(path string) (Location, error) {
-	st, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return Location{}, ErrNotFound
-		}
-		return Location{}, err
-	}
-	switch {
-	case !st.Mode().IsRegular():
-		return Location{}, errors.New("系統的設定程式不是一般檔案")
-	case st.Mode().Perm()&0o111 == 0:
-		return Location{}, errors.New("系統的設定程式沒有執行權限")
-	case st.Mode().Perm()&0o022 != 0:
-		return Location{}, errors.New("系統的設定程式群組或其他人可以修改")
-	case !ownedBy(st, systemOwner):
-		return Location{}, errors.New("系統的設定程式不屬於 root")
-	}
-	return Location{Path: path, Source: SourceSystem}, nil
 }

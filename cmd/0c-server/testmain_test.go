@@ -7,15 +7,11 @@ import (
 	"testing"
 )
 
-// TestMain 讓整個測試行程（以及它啟動的 0c-server 子行程）用臨時的使用者目錄：引擎啟動時會清 onnxruntime 的遙測暫存
-// （neural.RemoveTelemetryQueue），預設的資料與個人檔也在 LOCALAPPDATA 底下，不可以動到跑測試的人自己的資料。
-// 個別測試仍可另外指定。測試執行檔也兼當 stopServer 送 Ctrl+Break 的小工具（ctrlBreakEnv）與假的新執行檔（fakeEngineEnv）。
+// TestMain 讓整個測試行程（以及它啟動的 0c-server 子行程）用臨時的使用者目錄：預設的資料與個人檔都在 LOCALAPPDATA
+// 底下，不可以動到跑測試的人自己的資料。個別測試仍可另外指定。測試執行檔也兼當 stopServer 送 Ctrl+Break 的小工具（ctrlBreakEnv）。
 func TestMain(m *testing.M) {
 	if pid := os.Getenv(ctrlBreakEnv); pid != "" {
 		os.Exit(ctrlBreakMain(pid))
-	}
-	if mode := os.Getenv(fakeEngineEnv); mode != "" {
-		os.Exit(fakeEngineMain(mode))
 	}
 	buildEnv = os.Environ()
 	root, err := os.MkdirTemp("", "0c-server-test-")

@@ -16,7 +16,6 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
 	"github.com/0c-biggo/0c-ime/internal/autoupdate"
-	"github.com/0c-biggo/0c-ime/internal/neural"
 	"github.com/0c-biggo/0c-ime/internal/settings"
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
@@ -695,12 +694,6 @@ func afterInstall() {
 	defer restartRetiredUI() // Windows：排程與穩定副本都處理完才帶起新版 0c-ui；排程建不起來時也要帶（#243）
 	if os.Getenv("ZC_NO_SCHEDULE") != "" {
 		return
-	}
-	// 0.2.3 以前的 worker 會讓 onnxruntime 留下未送出的遙測事件；新版不再讀寫，安裝後刪掉，免得別的程式送出（docs/46）。
-	if home, err := os.UserHomeDir(); err == nil {
-		if err := neural.RemoveTelemetryQueue(home); err != nil {
-			fmt.Fprintln(os.Stderr, "0c-update: 舊的推論元件遙測暫存未刪除：", err)
-		}
 	}
 	// Windows：第一次安裝（或從還沒有這一步的版本更新）時把靈犀注音加入這個帳號的輸入法清單（#191）。
 	listInputMethod(basePath())

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -19,6 +18,9 @@ func TestPunctProcess(t *testing.T) {
 	mode := os.Getenv("ZUIN_TEST_PUNCT_CHILD")
 	if mode == "" {
 		return
+	}
+	if mode == "slow_start" {
+		time.Sleep(time.Second)
 	}
 	fmt.Printf(`{"ready":true,"schema":%q,"model_sha256":%q}`+"\n", PunctSchema, os.Getenv("ZUIN_TEST_PUNCT_MODEL"))
 	scanner := bufio.NewScanner(os.Stdin)
@@ -72,14 +74,11 @@ func openTestPunct(t *testing.T, mode string, timeout time.Duration) (*PunctWork
 
 // 啟動在背景進行：開啟後立即可用，就緒前的提交照原文送出，不等待 Python 載入模型。
 func TestPunctStartupDoesNotBlock(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses sh to delay the fake worker")
-	}
 	dir, model := punctPackage(t)
 	started := time.Now()
 	w, err := openPunct(PunctConfig{Package: dir, Threads: 1, Timeout: 200 * time.Millisecond}, func() *exec.Cmd {
-		cmd := exec.Command("sh", "-c", "sleep 1; exec \"$0\" -test.run=^TestPunctProcess$", os.Args[0])
-		cmd.Env = append(os.Environ(), "ZUIN_TEST_PUNCT_CHILD=ok", "ZUIN_TEST_PUNCT_MODEL="+model)
+		cmd := exec.Command(os.Args[0], "-test.run=^TestPunctProcess$")
+		cmd.Env = append(os.Environ(), "ZUIN_TEST_PUNCT_CHILD=slow_start", "ZUIN_TEST_PUNCT_MODEL="+model)
 		return cmd
 	})
 	if err != nil || time.Since(started) > 500*time.Millisecond {

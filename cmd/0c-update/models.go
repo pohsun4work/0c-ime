@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -127,8 +126,6 @@ type modelsEnv struct {
 	// equivalent 是 models/equivalent.json：與 models.lock 的 model.onnx 等價的雜湊。
 	equivalent []byte
 	dial       autoupdate.Dialer
-	// runtimeCheck 核對系統 Python 能不能 import numpy、onnxruntime，回傳缺少的 apt 套件。
-	runtimeCheck func(python string) []string
 	// distributionDisabled：發行版關掉了模型下載與提醒。
 	distributionDisabled func(data string) bool
 	// settingsMissing：找不到設定程式（例如發行版套件沒附 0c-settings），提醒的「下載模型」開不了模型頁。
@@ -139,7 +136,7 @@ type modelsEnv struct {
 func defaultModelsEnv() modelsEnv {
 	base := basePath()
 	return modelsEnv{base: base, data: dataPackDir(base), goos: runtime.GOOS, lock: upstream.Lock, equivalent: upstream.Equivalent, dial: dialEngine,
-		runtimeCheck: checkModelRuntime(base), distributionDisabled: modelDownloadDisabled, settingsMissing: settingsProgramMissing, now: time.Now}
+		distributionDisabled: modelDownloadDisabled, settingsMissing: settingsProgramMissing, now: time.Now}
 }
 
 // newModelsEnv 測試替換用。
@@ -186,7 +183,7 @@ func (e modelsEnv) snapshot() (modelsSnapshot, error) {
 	}
 	s.lock, s.dictionary = l, e.dictionary()
 	s.equivalent, _ = models.ParseEquivalents(e.equivalent) // 讀不到就只認 models.lock 本身（測試核對編進去的那份）
-	s.bundled = neural.Find(neural.Options{DataDir: e.data, SystemPython: neural.SystemPython()})
+	s.bundled = neural.Find(neural.Options{DataDir: e.data})
 	s.inspect = e.store().Inspect(l, s.dictionary)
 	if p, err := e.pairing(); err == nil {
 		s.pairing, s.pairingOK = p, p.Matches(l, s.dictionary)
@@ -293,19 +290,11 @@ func manifestModelSHA(dir string) string {
 	return ""
 }
 
-// runtime：內附 Python 不必檢查；Linux 用系統的 python3，缺什麼列出 Debian 的套件名。
+// runtime：推論環境是安裝包內附的 Python，不必另外檢查。
 func (e modelsEnv) runtime(b neural.Bundled) modelsRuntime {
 	r := modelsRuntime{Missing: []string{}}
-	switch {
-	case b.PythonSource == neural.SourceBundled:
+	if b.PythonSource == neural.SourceBundled {
 		r.OK, r.Python = true, b.Python
-	case e.goos != "linux":
-	case b.PythonSource == neural.SourceSystem:
-		r.Python = b.Python
-		r.Missing = e.runtimeCheck(b.Python)
-		r.OK = len(r.Missing) == 0
-	default: // 沒有 python3
-		r.Missing = []string{"python3", "python3-numpy", "python3-onnxruntime"}
 	}
 	return r
 }
@@ -587,7 +576,7 @@ func (e modelsEnv) editRemind(fn func(*models.Remind)) error {
 	})
 }
 
-// remind 由引擎呼叫（啟動時、之後送出字又沒在組字時最多每小時一次；條件見 models.EngineShouldCheck）：
+// remind 重新配對與提醒：
 //  1. 權重是目前 models.lock 的，這份字典卻沒有配對、或配對是舊的 models.lock 配的（need=repair：升級換了字典、
 //     模型沒換，或換 revision 的下載在放上配對之前中斷）：用已有的權重在本機重新配對，不連網，完成後請引擎交接
 //     載入。引擎正在用舊配對（source=user）時也一樣，設定頁不會一直停在「正在重新配對」；
@@ -741,9 +730,6 @@ func printModels(w io.Writer, st modelsStatus) {
 		fmt.Fprintln(w, "字典已更新，下次引擎啟動時會在本機重新配對")
 	case !st.CanDownload && st.DisabledReason != modelsDisabledBundled:
 		fmt.Fprintln(w, modelsDisabledMessage(st.DisabledReason))
-	}
-	if len(st.Runtime.Missing) > 0 {
-		fmt.Fprintf(w, "缺少推論元件，請安裝：sudo apt install %s\n", strings.Join(st.Runtime.Missing, " "))
 	}
 	if st.LastError != nil {
 		fmt.Fprintf(w, "上一次失敗：%s\n", st.LastError.Message)
