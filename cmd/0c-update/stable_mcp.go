@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/0c-biggo/0c-ime/internal/enginedir"
@@ -13,16 +12,10 @@ import (
 )
 
 // 0c-mcp 是只支援 stdio 的 AI 工具用的轉接（#126）。使用者把它的路徑貼進 AI 工具的設定檔後就不會再改，
-// 所以路徑不能隨版本變動：Linux 由 install.py 放在 ~/.local/bin/0c-mcp，macOS 在原地更新的輸入法 App 裡
-// （Contents/MacOS/0c-mcp），Windows 的版本目錄 versions\<版本> 每次更新都換，於是比照穩定更新器在
+// 所以路徑不能隨版本變動：版本目錄 versions\<版本> 每次更新都換，於是比照穩定更新器在
 // %LOCALAPPDATA%\Zuin\bin\0c-mcp.exe 放一份穩定副本（設定程式 platforms/settings 的 planned_mcp_path 填這裡）。
 
-func mcpName() string {
-	if runtime.GOOS == "windows" {
-		return "0c-mcp.exe"
-	}
-	return "0c-mcp"
-}
+func mcpName() string { return "0c-mcp.exe" }
 
 // stableMCP 是 Windows 上 AI 工具設定填的 0c-mcp 位置，與穩定更新器同一個目錄。
 func stableMCP(base string) string { return filepath.Join(base, "bin", mcpName()) }

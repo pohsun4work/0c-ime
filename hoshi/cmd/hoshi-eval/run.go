@@ -184,7 +184,7 @@ func startEngine(server, data, profile string, threads int, statistical bool) (*
 	}
 	sock := socketPath(dir)
 	// -idle-exit：hoshi-eval 被強制結束時，引擎沒有連線一分鐘後自己收掉。
-	args := []string{"-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-install-watch", "off", "-idle-exit", "1m"}
+	args := []string{"-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-idle-exit", "1m"}
 	if threads > 0 {
 		args = append(args, "-neural-threads", strconv.Itoa(threads))
 	}

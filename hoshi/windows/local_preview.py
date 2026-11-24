@@ -46,7 +46,6 @@ def dictionary_source():
 
 def ensure_data(tag, receipt):
     """官方同版本原始碼 tarball 裡的字典，依這個 checkout 的字典 lock 核對；快取以 lock 的雜湊區分。
-    不用 fetch_assets.install：整包驗證會比對執行權限位元，只能在 POSIX 跑。
 
     官方安裝檔的字典檔跟 tarball 的相同，manifest 卻是非公開建置的那份（Public=false），已安裝的 neural/ 綁的是它；
     本機包沿用已安裝的 neural/，所以兩份 manifest 記的字典檔一樣時，換上已安裝版本的 manifest。"""

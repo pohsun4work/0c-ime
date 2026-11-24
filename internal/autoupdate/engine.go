@@ -39,9 +39,8 @@ type CoreLayout struct {
 
 // PrepareCore 從已核對雜湊的壓縮包準備核心版本目錄 versions/<版本>-c-<雜湊>：引擎、配對字典與神經模型。
 // 每個檔案都依套件清單重新核對；完成後以該引擎 -check-data 做隔離檢查，不碰個人檔與執行中的引擎。
-// scratch 是解開套件的暫存根目錄（見 update.StageIn）。
-func PrepareCore(base, scratch, archive string, t Target, goos, arch string, layout CoreLayout) (string, error) {
-	root, cleanup, err := update.StageIn(scratch, archive, t.SHA256, goos, arch)
+func PrepareCore(base, archive string, t Target, goos, arch string, layout CoreLayout) (string, error) {
+	root, cleanup, err := update.Stage(archive, t.SHA256, goos, arch)
 	if err != nil {
 		return "", err
 	}

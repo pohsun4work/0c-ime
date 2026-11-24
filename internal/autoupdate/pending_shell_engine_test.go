@@ -19,11 +19,6 @@ func (p windowsShellPlatform) ShellReady(_ context.Context, version string) (boo
 	return p.installed == version, p.receiptErr
 }
 
-// macOS：整包換 App、等登入，有自己的 #77／#98 路徑（ShellIdleGate＋ShellLoadProver），不交接。
-type macShellPlatform struct{ provingShellPlatform }
-
-func (macShellPlatform) ShellNeedsIdle() bool { return true }
-
 func idleWindows(installed, running string) (*fakePlatform, Conditions) {
 	cond := Conditions{Idle: 10 * time.Minute, IdleKnown: true}
 	return &fakePlatform{installed: installed, running: running, startVer: installed, cond: cond}, cond
@@ -427,9 +422,6 @@ func TestStaleEngineHandoverLeavesCoreTransactionsAlone(t *testing.T) {
 // macOS 與其他等登入的平台：行為不變，舊引擎照舊留著，仍要重新登入。
 func TestWaitingForLoginStaysOnOtherPlatforms(t *testing.T) {
 	for name, wrap := range map[string]func(*fakePlatform) Platform{
-		"macos": func(p *fakePlatform) Platform {
-			return macShellPlatform{provingShellPlatform{&loginShellPlatform{fakePlatform: p}}}
-		},
 		"login-shell": func(p *fakePlatform) Platform { return &loginShellPlatform{fakePlatform: p} },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -452,23 +444,6 @@ func TestWaitingForLoginStaysOnOtherPlatforms(t *testing.T) {
 				t.Fatalf("calls %v", p.calls)
 			}
 		})
-	}
-}
-
-// Linux 在登入中重載外殼：即使平台也宣稱不必登入，等待中的外殼仍走原本的安裝路徑，不在這裡動引擎。
-func TestPendingShellEngineHandoverSkipsLiveShell(t *testing.T) {
-	p, _ := idleWindows("0.2.8", "0.2.7")
-	co, _ := newCoordinator(t, p)
-	co.Platform = struct {
-		*liveShellFake
-		ShellWithoutRelogin
-	}{&liveShellFake{p, co.Base, t}, windowsShellPlatform{}}
-	stuckRelogin(t, co, ModeAuto, "已安裝，重新登入後生效")
-	s, _ := Load(co.Base)
-	co.defaults()
-	co.handOverPendingShellEngine(context.Background(), s, co.Now(), true)
-	if len(p.calls) != 0 || p.running != "0.2.7" || s.Blocked == nil || s.Blocked.Reason != "needs_relogin" {
-		t.Fatalf("calls %v running %q blocked %+v", p.calls, p.running, s.Blocked)
 	}
 }
 
@@ -532,7 +507,7 @@ func TestStaleEngineLeftBehindSaysWhy(t *testing.T) {
 func TestStaleEngineReasonIsWindowsOnly(t *testing.T) {
 	p, _ := idleWindows("0.2.8", "0.2.7")
 	co, _ := newCoordinator(t, p)
-	co.Platform = macShellPlatform{provingShellPlatform{&loginShellPlatform{fakePlatform: p}}}
+	co.Platform = &loginShellPlatform{fakePlatform: p}
 	co.Consent = true
 	if _, err := EditState(co.Base, func(s *State) error {
 		s.LastCheck, s.NextCheck = co.Now(), co.Now().Add(6*time.Hour)

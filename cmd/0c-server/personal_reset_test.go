@@ -1,12 +1,8 @@
-//go:build !windows
-
 package main
 
 import (
 	"bytes"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -20,12 +16,12 @@ import (
 )
 
 // 清除學習紀錄（#301）：引擎在跑時用 reset_personal 清空並立刻存檔，user.json 馬上變成空白的個人資料；
-// 之後結束（SIGINT／SIGTERM 會存檔）也不會把清除前的學習寫回來，正在組字的那段送出也不學。vocab.json 不動。
+// 之後結束（結束訊號會存檔）也不會把清除前的學習寫回來，正在組字的那段送出也不學。vocab.json 不動。
 func TestResetPersonalSavesEmptyStoreAndKeepsVocab(t *testing.T) {
 	binary := buildServer(t)
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
-	user, sock := filepath.Join(dir, "user.json"), filepath.Join(dir, "reset.sock")
+	user, sock := filepath.Join(dir, "user.json"), testPipe("reset")
 	config := settings.Default()
 	config.Selection, config.Punctuation = settings.Statistical, false
 	if err := settings.Save(filepath.Join(dir, settings.FileName), config); err != nil {
@@ -46,13 +42,10 @@ func TestResetPersonalSavesEmptyStoreAndKeepsVocab(t *testing.T) {
 	}
 	run := func(body func(call func(ipc.Envelope) ipc.Reply, typeKeys func(uint64, string) *proto.Snapshot)) {
 		t.Helper()
-		server := exec.Command(binary, "-data", data, "-user", user, "-socket", sock)
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+		server, _ := startServer(t, binary, "-data", data, "-user", user, "-socket", sock)
+		defer stopServer(t, server)
 		waitDial(t, sock)
-		conn, err := net.Dial("unix", sock)
+		conn, err := dial(sock)
 		if err != nil {
 			t.Fatal(err)
 		}

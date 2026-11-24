@@ -454,11 +454,11 @@ func (p checkPlatform) Installed() (string, error) { return p.installed, nil }
 func (p checkPlatform) Fetch(context.Context, uint64) (*update.SignedFeed, error) {
 	return p.feed, p.err
 }
-func (p checkPlatform) Target() (string, string) { return "linux", "amd64" }
+func (p checkPlatform) Target() (string, string) { return "windows", "amd64" }
 
 func feedOf(version string, rollout int) *update.SignedFeed {
 	return &update.SignedFeed{Serial: 1, Version: version, Rollout: rollout,
-		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "linux", Arch: "amd64", URL: "https://x/" + version, SHA256: strings.Repeat("a", 64), Size: 1}, Kind: "core"}}}
+		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "windows", Arch: "amd64", URL: "https://x/" + version, SHA256: strings.Repeat("a", 64), Size: 1}, Kind: "core"}}}
 }
 
 func TestRunCheckReportsAllFourStates(t *testing.T) {

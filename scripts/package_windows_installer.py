@@ -12,8 +12,7 @@ import sys
 import tempfile
 import zipfile
 
-from install_package import digest
-from package_release import ROOT
+from package_release import ROOT, digest
 
 # 內嵌 Python 的 ._pth 或 PYTHONPATH 指向另一份原始碼時，會打包出那份程式（2026-10-01 曾因沿用舊建置目錄的
 # Python，把 dev.21 的程式標成新版本）。

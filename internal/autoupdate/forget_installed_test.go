@@ -31,7 +31,7 @@ func TestForgetInstalledDropsTargetSupersededByManualInstall(t *testing.T) {
 			s, _ := Load(base)
 			s.Target = &Target{Version: c.version, Kind: c.kind, SHA256: "abc"}
 			s.Stage, s.Switched = c.stage, c.switched
-			s.Download, s.Prepared = "update/downloads/x.tar.gz", "versions/x"
+			s.Download, s.Prepared = "update/downloads/x.zip", "versions/x"
 			s.Snooze = &NoticeSnooze{Version: c.version, SHA256: "abc"}
 			s.block(s.PreparedAt, "engine_busy", "使用中，等待閒置")
 			if err := Save(base, s); err != nil {

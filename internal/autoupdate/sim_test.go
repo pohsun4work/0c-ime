@@ -134,7 +134,7 @@ func (p simPlatform) Fetch(_ context.Context, last uint64) (*update.SignedFeed, 
 		return nil, fmt.Errorf("serial %d older than %d", w.serial, last)
 	}
 	f := &update.SignedFeed{Serial: w.serial, Version: ver(w.latest), Rollout: w.rollout,
-		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "linux", Arch: "amd64", URL: "https://x/" + ver(w.latest),
+		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "windows", Arch: "amd64", URL: "https://x/" + ver(w.latest),
 			SHA256: strings.Repeat("a", 64), Size: 1}, Kind: "core"}}}
 	w.seenWithdrawn = map[int]bool{}
 	for v := range w.withdrawn {
@@ -261,7 +261,7 @@ func (p simPlatform) Notify(n Notice) error {
 	w.logf("notify: %s", n.Body)
 	return nil
 }
-func (p simPlatform) Target() (string, string) { return "linux", "amd64" }
+func (p simPlatform) Target() (string, string) { return "windows", "amd64" }
 
 func (w *world) wake(base string, force bool) *State {
 	co := &Coordinator{Base: base, Platform: simPlatform{w}, Now: func() time.Time { return w.now },

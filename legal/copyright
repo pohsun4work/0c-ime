@@ -12,15 +12,11 @@ License: AGPL-3
 Files: .github/assets/*
        internal/settingsapp/icon.ico
        internal/settingsapp/icon.png
-       platforms/linux-fcitx5/icons/*
-       platforms/macos/Icon/0c.tiff
-       platforms/macos/Icon/AppIcon.icns
        platforms/settings/icons/*
        platforms/settings/ui/icon.png
 Copyright: 2026 Funmula Co., Limited
 License: CC-BY-SA-4.0
-Comment: App 圖示的設計原檔是 .github/assets/logo.svg；macOS 的 0c.tiff、AppIcon.icns 由
- platforms/macos/Icon/make_icon.swift、make_app_icon.swift 產生。
+Comment: App 圖示的設計原檔是 .github/assets/logo.svg。
 
 Files: data/lexicon/corrections.tsv
        data/lexicon/reachability.tsv
@@ -84,12 +80,6 @@ License: SCOWL and AGPL-3
 Comment: 由 data/english/esdb.tsv（SCOWL）與 data/english/technical.tsv（自有產品詞）以 0c-english 編譯，
  只在原始碼 tarball 內。
 
-Files: internal/simplified/opencc/*.txt
-       internal/simplified/opencc/LICENSE
-Copyright: 2010-2026 Carbo Kuo (BYVoid) and contributors
-License: Apache-2.0
-Comment: OpenCC ver.1.4.2（commit 025f371dc76b598d77384fbdab90c937471844d8）的 tw2s 字典，原樣收錄。
-
 Files: internal/englishpack/wordfreq/wordfreq.tsv
        data/sources/licenses/wordfreq.txt
 Copyright: 2022 Robyn Speer（wordfreq）
@@ -97,11 +87,6 @@ Copyright: 2022 Robyn Speer（wordfreq）
 License: CC-BY-SA-4.0
 Comment: wordfreq 3.1.1 的英文 Zipf 詞頻，只取 data/english 詞表收錄的詞，由 scripts/export_wordfreq.py 產生；
  出處見 data/sources/licenses/wordfreq.txt。
-
-Files: platforms/linux-fcitx5/third_party/nlohmann/*
-Copyright: 2013-2023 Niels Lohmann <https://nlohmann.me>
-License: Expat
-Comment: nlohmann/json 3.11.3。
 
 License: AGPL-3
                      GNU AFFERO GENERAL PUBLIC LICENSE
@@ -1114,11 +1099,6 @@ License: Expat
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE.
-
-License: Apache-2.0
- On Debian systems, the full text of the Apache License, Version 2.0 can be
- found in /usr/share/common-licenses/Apache-2.0. The full text is also in
- internal/simplified/opencc/LICENSE.
 
 License: OGDL-Taiwan-1.0
  政府資料開放授權條款－第1版

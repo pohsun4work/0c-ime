@@ -13,7 +13,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/0c-biggo/0c-ime/core/engine"
 	"github.com/0c-biggo/0c-ime/core/english"
@@ -208,11 +207,8 @@ func writeAtomic(path string, write func(io.Writer) error) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	syncDir(filepath.Dir(path))
-	return nil
+	// 不對目錄 fsync：Windows 做不到，NTFS 日誌會保留改名前或改名後其中一份。
+	return os.Rename(tmp, path)
 }
 
 // VocabFileName 是自訂詞彙檔（#122），與 user.json 放在同一個目錄。
@@ -247,19 +243,4 @@ func SaveVocab(e *engine.Engine, path string) error {
 		return nil
 	}
 	return writeAtomic(path, snap.Save)
-}
-
-// syncDir 盡量讓改名本身也落盤。資料已在新檔，失敗只代表斷電後可能看到上一份，
-// 所以不回報錯誤：部分檔案系統不支援對目錄 fsync，回報會讓每次存檔都失敗、引擎交接卡住。
-// Windows 不能對目錄 fsync，NTFS 日誌會保留改名前或改名後其中一份。
-func syncDir(dir string) {
-	if runtime.GOOS == "windows" {
-		return
-	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return
-	}
-	d.Sync()
-	d.Close()
 }

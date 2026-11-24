@@ -23,90 +23,33 @@ import zipfile
 import hf_models
 
 ROOT = Path(__file__).resolve().parents[1]
-# CPython 3.14.7 except on Intel Macs; python.org stopped shipping Windows binaries for 3.12.
-RUNTIMES = {
-    "linux-amd64": {
-        "version": "3.14",
-        "python": ("https://github.com/astral-sh/python-build-standalone/releases/download/20260924/"
-                   "cpython-3.14.7%2B20260924-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-                   "bd0d0568ccded07bbf1c87727230dc5dd0187e706a87da23c4de78388a229b78"),
-        "wheels": [
-            ("https://files.pythonhosted.org/packages/45/8f/9beacf79ca7c650688ad0baa80931adb988fe6e6e5d5903c23cc3dbd70eb/"
-             "numpy-2.5.3-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
-             "b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b"),
-            ("https://files.pythonhosted.org/packages/f1/38/8138eed225c5bc6ddfc05879ecac7dacc63c34b9b6f99be72839c1f6dc49/"
-             "onnxruntime-1.30.0-cp314-cp314-manylinux_2_28_x86_64.whl",
-             "8b611d24db2954545ce6bd9acd4670183cb368e4642450de7a9ab6474eb374ec"),
-        ],
-    },
-    "macos-arm64": {
-        "version": "3.14",
-        # onnxruntime 1.30.0 ships macOS arm64 wheels for 14.0 and later only; older macOS falls back
-        # to the statistical engine because the worker cannot start.
-        "python": ("https://github.com/astral-sh/python-build-standalone/releases/download/20260924/"
-                   "cpython-3.14.7%2B20260924-aarch64-apple-darwin-install_only_stripped.tar.gz",
-                   "f0fb6b233971672dd7add4efa90f8c209a63253e457ffabd0148b9f734638319"),
-        "wheels": [
-            ("https://files.pythonhosted.org/packages/94/75/4640d2d6e4b64a049e48425a82728a41ef4adb61332d2cba68055774878b/"
-             "numpy-2.5.3-cp314-cp314-macosx_14_0_arm64.whl",
-             "adc1ada2662f8a5f960b8a10d9986897e7499ef07e06d4cfe7197f8cce923c07"),
-            ("https://files.pythonhosted.org/packages/6a/03/05c9a9234688757d2876ddecf80bba908561ee11debf125bc1a427ae6f48/"
-             "onnxruntime-1.30.0-cp314-cp314-macosx_14_0_arm64.whl",
-             "8b6169c16a48429890d2f4a0c774ebf54dfe9066a998514aad0518a16d398547"),
-        ],
-    },
-    "macos-amd64": {
-        # onnxruntime 1.23.2 是最後一版有 Intel Mac wheel 的（最高 cp313，macOS 13.0 以上），因此 Python 用 3.13。
-        # 兩個模型對 1.30.0 的輸出逐請求比對過：選字排序相同、補標點結果相同。
-        "version": "3.13",
-        "python": ("https://github.com/astral-sh/python-build-standalone/releases/download/20260924/"
-                   "cpython-3.13.15%2B20260924-x86_64-apple-darwin-install_only_stripped.tar.gz",
-                   "327814efd865a0b6a99c149b12a261e9d0ad409183515c745d41bda2d07282e9"),
-        "wheels": [
-            # macosx_10_13 而不是 14_0：最低系統跟著 onnxruntime 的 13.0，不讓 numpy 把它提高。
-            ("https://files.pythonhosted.org/packages/79/e5/8fb89cd46d14e35699d13bf943a5f5f441ecee8667120a1f6105ab89e349/"
-             "numpy-2.5.3-cp313-cp313-macosx_10_13_x86_64.whl",
-             "66a78fe4556c60aceda5916f9eacd638b18e9e681016ec302dcb4682d6d4d034"),
-            ("https://files.pythonhosted.org/packages/fe/f9/2d49ca491c6a986acce9f1d1d5fc2099108958cc1710c28e89a032c9cfe9/"
-             "onnxruntime-1.23.2-cp313-cp313-macosx_13_0_x86_64.whl",
-             "162f4ca894ec3de1a6fd53589e511e06ecdc3ff646849b62a9da7489dee9ce95"),
-        ],
-    },
-    "windows-amd64": {
-        "version": "3.14",
-        "python": ("https://www.python.org/ftp/python/3.14.7/python-3.14.7-embed-amd64.zip",
-                   "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"),
-        "wheels": [
-            ("https://files.pythonhosted.org/packages/a4/73/d2c08231e4fde7e415501fd02c715d96e98599b2d8384445933944152984/"
-             "numpy-2.5.3-cp314-cp314-win_amd64.whl",
-             "2c25dfa72943e4336ddb6b0ee4277b47a0c85bede0807530ec68103bf58e2c10"),
-            ("https://files.pythonhosted.org/packages/4d/0a/748b86000fbf9518b5dfc5bdc1b924eeaca976203740fd9d30649e568ee6/"
-             "onnxruntime-1.30.0-cp314-cp314-win_amd64.whl",
-             "3bdd1752a8502ac1a7ccc6e878d16db6943df574d54ed7f01058a6806ae05be4"),
-        ],
-        # onnxruntime 需要 MSVCP140.dll／MSVCP140_1.dll；embeddable Python 只帶 vcruntime140*.dll，numpy 的 msvcp140
-        # 改過名只給自己用。沒裝 Visual C++ 可轉散發套件的電腦（例如精簡版 Windows）會載入失敗、退回統計選字（#80），
-        # 系統裝的版本太舊時 onnxruntime 也可能當掉。這個 wheel 只取這兩個 Microsoft 簽章的 DLL，放在 python.exe 旁，
-        # 擴充模組載入時優先於 System32 找到。14.44 的匯出涵蓋 onnxruntime 1.30.0 用到的全部符號，所需的 vcruntime140
-        # 匯出也都在內附的 14.51 版裡。
-        "crt": ("https://files.pythonhosted.org/packages/d2/48/7fb574a4bfa697574a7dc7105bc15ef6882125e7c77c794c5e73429de832/"
-                "msvc_runtime-14.44.35112-cp314-cp314-win_amd64.whl",
-                "af179a6c552070e660493765efd5856283af3fed971ddc3577203a7d3f1ee8e7",
-                ("msvcp140.dll", "msvcp140_1.dll")),
-    },
+# CPython 3.14.7; python.org stopped shipping Windows binaries for 3.12.
+RUNTIME = {
+    "version": "3.14",
+    "python": ("https://www.python.org/ftp/python/3.14.7/python-3.14.7-embed-amd64.zip",
+               "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"),
+    "wheels": [
+        ("https://files.pythonhosted.org/packages/a4/73/d2c08231e4fde7e415501fd02c715d96e98599b2d8384445933944152984/"
+         "numpy-2.5.3-cp314-cp314-win_amd64.whl",
+         "2c25dfa72943e4336ddb6b0ee4277b47a0c85bede0807530ec68103bf58e2c10"),
+        ("https://files.pythonhosted.org/packages/4d/0a/748b86000fbf9518b5dfc5bdc1b924eeaca976203740fd9d30649e568ee6/"
+         "onnxruntime-1.30.0-cp314-cp314-win_amd64.whl",
+         "3bdd1752a8502ac1a7ccc6e878d16db6943df574d54ed7f01058a6806ae05be4"),
+    ],
+    # onnxruntime 需要 MSVCP140.dll／MSVCP140_1.dll；embeddable Python 只帶 vcruntime140*.dll，numpy 的 msvcp140
+    # 改過名只給自己用。沒裝 Visual C++ 可轉散發套件的電腦（例如精簡版 Windows）會載入失敗、退回統計選字（#80），
+    # 系統裝的版本太舊時 onnxruntime 也可能當掉。這個 wheel 只取這兩個 Microsoft 簽章的 DLL，放在 python.exe 旁，
+    # 擴充模組載入時優先於 System32 找到。14.44 的匯出涵蓋 onnxruntime 1.30.0 用到的全部符號，所需的 vcruntime140
+    # 匯出也都在內附的 14.51 版裡。
+    "crt": ("https://files.pythonhosted.org/packages/d2/48/7fb574a4bfa697574a7dc7105bc15ef6882125e7c77c794c5e73429de832/"
+            "msvc_runtime-14.44.35112-cp314-cp314-win_amd64.whl",
+            "af179a6c552070e660493765efd5856283af3fed971ddc3577203a7d3f1ee8e7",
+            ("msvcp140.dll", "msvcp140_1.dll")),
 }
-# Linux 上編譯 bytecode 用的同版本直譯器（bytecode 跨平台、只跟 CPython 版本有關）。
-COMPILERS = {
-    "3.14": RUNTIMES["linux-amd64"]["python"],
-    "3.13": ("https://github.com/astral-sh/python-build-standalone/releases/download/20260924/"
-             "cpython-3.13.15%2B20260924-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-             "d0b640eed27fbdd6f5f2bd33444aee53df2c8863f8b2a96f4094717411e3de9c"),
-}
-# Not needed by the workers; removing them keeps the bundle smaller and reduces attack surface.
-TRIM = ("lib/python{v}/site-packages/pip", "lib/python{v}/ensurepip", "lib/python{v}/idlelib",
-        "lib/python{v}/tkinter", "lib/python{v}/turtledemo", "lib/tcl9", "lib/tcl9.0", "lib/tk9.0",
-        "lib/libtcl9.0.so", "lib/libtcl9tk9.0.so", "lib/libtcl9.0.dylib", "lib/libtcl9tk9.0.dylib",
-        "lib/itcl4.3.8", "lib/thread3.0.6", "lib/pkgconfig", "include", "share")
+# 編譯 bytecode 用的同版本 Linux 直譯器（bytecode 跨平台、只跟 CPython 版本有關），所以這個工具在 Linux x86-64 上執行。
+COMPILER = ("https://github.com/astral-sh/python-build-standalone/releases/download/20260924/"
+            "cpython-3.14.7%2B20260924-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+            "bd0d0568ccded07bbf1c87727230dc5dd0187e706a87da23c4de78388a229b78")
 
 
 def digest(path):
@@ -133,26 +76,7 @@ def fetch(url, sha256, cache, local=None):
     return target
 
 
-def install_python(platform, archive, dest, version=None):
-    if not platform.startswith("windows-"):
-        version = version or RUNTIMES[platform]["version"]
-        # The archive's top-level directory is python/, which is the destination name.
-        with tarfile.open(archive) as tar:
-            tar.extractall(dest.parent, filter="data")
-        for relative in TRIM:
-            path = dest / relative.format(v=version)
-            shutil.rmtree(path) if path.is_dir() else path.unlink(missing_ok=True)
-        for info in (dest / f"lib/python{version}/site-packages").glob("pip-*.dist-info"):
-            shutil.rmtree(info)
-        # Bundles and installers reject links; keep only the interpreter, named as 0c-server expects.
-        for path in sorted(dest.rglob("*"), reverse=True):
-            if path.is_symlink():
-                path.unlink()
-        for path in (dest / "bin").iterdir():
-            if path.name != f"python{version}":
-                path.unlink()
-        (dest / f"bin/python{version}").rename(dest / "bin/python3")
-        return dest / f"lib/python{version}/site-packages"
+def install_python(archive, dest):
     with zipfile.ZipFile(archive) as z:
         z.extractall(dest)
     site = dest / "Lib/site-packages"
@@ -160,6 +84,13 @@ def install_python(platform, archive, dest, version=None):
     # The embeddable distribution fixes sys.path with its ._pth file; add the bundled packages.
     (dest / "python314._pth").write_text("python314.zip\n.\nLib\\site-packages\n", encoding="ascii")
     return site
+
+
+def install_compiler(archive, dest):
+    """Unpack the Linux interpreter that compiles the bytecode; the archive's top-level directory is python/."""
+    with tarfile.open(archive) as tar:
+        tar.extractall(dest, filter="data")
+    return dest / f"python/bin/python{RUNTIME['version']}"
 
 
 def install_crt(wheel, names, dest):
@@ -197,7 +128,6 @@ def precompile(tree, compiler):
 
 
 def build(args):
-    runtime = RUNTIMES[args.platform]
     dictionary = digest(args.dictionary / "manifest.json")
     weights = hf_models.fetch(args.models, args.models_cache, log=sys.stderr)
     out = args.out
@@ -205,41 +135,24 @@ def build(args):
         raise ValueError(f"輸出已存在：{out}")
     stage = Path(tempfile.mkdtemp(prefix=".neural-", dir=out.parent))
     try:
-        archive = fetch(*runtime["python"], args.cache, args.python_archive)
-        site = install_python(args.platform, archive, stage / "python")
-        for url, sha256 in runtime["wheels"]:
+        archive = fetch(*RUNTIME["python"], args.cache, args.python_archive)
+        site = install_python(archive, stage / "python")
+        for url, sha256 in RUNTIME["wheels"]:
             local = next((w for w in args.wheel if Path(w).name == url.rsplit("/", 1)[-1]), None)
             install_wheel(fetch(url, sha256, args.cache, local), site)
-        if "crt" in runtime:
-            url, sha256, names = runtime["crt"]
-            local = next((w for w in args.wheel if Path(w).name == url.rsplit("/", 1)[-1]), None)
-            install_crt(fetch(url, sha256, args.cache, local), names, stage / "python")
-        version = runtime["version"]
-        if args.platform == "linux-amd64":
-            precompile(stage / "python", stage / "python/bin/python3")
-        elif args.platform.startswith("macos-"):
-            # Bytecode is platform independent; compile the macOS tree with the pinned Linux interpreter
-            # when building on Linux, or with the bundled interpreter itself on macOS (the Intel one runs
-            # under Rosetta on Apple Silicon).
-            if sys.platform == "darwin":
-                precompile(stage / "python", stage / "python/bin/python3")
-            else:
-                with tempfile.TemporaryDirectory(prefix=".compiler-", dir=out.parent) as temp:
-                    compiler_archive = fetch(*COMPILERS[version], args.cache, args.compiler_archive)
-                    install_python("linux-amd64", compiler_archive, Path(temp) / "python", version)
-                    precompile(stage / "python", Path(temp) / "python/bin/python3")
-        else:
-            # The Windows stdlib ships as bytecode inside python314.zip; compile the packages with the
-            # pinned Linux interpreter of the same CPython release.
-            with tempfile.TemporaryDirectory(prefix=".compiler-", dir=out.parent) as temp:
-                compiler_archive = fetch(*COMPILERS[version], args.cache, args.compiler_archive)
-                install_python("linux-amd64", compiler_archive, Path(temp) / "python", version)
-                precompile(site, Path(temp) / "python/bin/python3")
+        url, sha256, names = RUNTIME["crt"]
+        local = next((w for w in args.wheel if Path(w).name == url.rsplit("/", 1)[-1]), None)
+        install_crt(fetch(url, sha256, args.cache, local), names, stage / "python")
+        # The Windows stdlib ships as bytecode inside python314.zip; compile the packages with the
+        # pinned Linux interpreter of the same CPython release.
+        with tempfile.TemporaryDirectory(prefix=".compiler-", dir=out.parent) as temp:
+            compiler = install_compiler(fetch(*COMPILER, args.cache, args.compiler_archive), Path(temp))
+            precompile(site, compiler)
         for name in hf_models.WORKER_NAMES:
             shutil.copy2(hf_models.WORKERS / name, stage / name)
         hf_models.write_packages(weights, dictionary, stage)
         (stage / "README.txt").write_text(
-            "靈犀注音內附的神經選字與提交時補標點：可攜 Python " + version +
+            "靈犀注音內附的神經選字與提交時補標點：可攜 Python " + RUNTIME["version"] +
             "（numpy、onnxruntime）、worker 與模型。只在本機執行，不連網。\n"
             "切換：0c-update set selection statistical|neural、0c-update set punctuation on|off。\n",
             encoding="utf-8")
@@ -251,8 +164,8 @@ def build(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="組出套件內附的 neural/ 目錄（可攜 Python、worker、模型）")
-    parser.add_argument("--platform", required=True, choices=sorted(RUNTIMES))
+    parser = argparse.ArgumentParser(description="組出 Windows 套件內附的 neural/ 目錄（可攜 Python、worker、模型）；"
+                                     "在 Linux x86-64 執行（編 bytecode 的是同版本的 Linux 版 Python）")
     parser.add_argument("--models", type=Path, help="Hugging Face 原檔目錄（<dir>/<select|punct>/model.onnx、LICENSE、README.md，"
                         "例如 0c-ime 的 models/）；省略則用 --models-cache 或從 Hugging Face 下載。一律核對 models.lock")
     parser.add_argument("--models-cache", type=Path, default=hf_models.CACHE, help="模型下載快取")
@@ -261,7 +174,7 @@ def main():
     parser.add_argument("--cache", type=Path, default=ROOT / "build/cache/neural", help="下載快取")
     parser.add_argument("--python-archive", help="已下載的 Python 壓縮檔（仍核對雜湊）")
     parser.add_argument("--wheel", action="append", default=[], help="已下載的 wheel（仍核對雜湊）")
-    parser.add_argument("--compiler-archive", help="非原生建置時編譯 bytecode 用的同版本 Linux Python 壓縮檔（仍核對雜湊）")
+    parser.add_argument("--compiler-archive", help="已下載的編 bytecode 用 Linux Python 壓縮檔（仍核對雜湊）")
     args = parser.parse_args()
     try:
         print(build(args))

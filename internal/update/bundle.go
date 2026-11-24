@@ -2,9 +2,7 @@
 package update
 
 import (
-	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 )
 
 const MaxArchive = int64(1 << 30)
@@ -48,7 +45,6 @@ type Release struct {
 	Channel string            `json:"channel"`
 	OS      string            `json:"os"`
 	Arch    string            `json:"arch"`
-	Machine string            `json:"machine"`
 	Files   map[string]string `json:"files"`
 }
 
@@ -133,11 +129,6 @@ func Verify(root, targetOS, targetArch string) (*Release, error) {
 	if r.Schema != 1 || r.Product != "0c" || !ValidVersion(r.Version) {
 		return nil, fmt.Errorf("unsupported release metadata")
 	}
-	// Read the first Linux preview bundles, which predate explicit OS/arch fields.
-	if r.OS == "" && r.Machine != "" {
-		r.OS = "linux"
-		r.Arch = map[string]string{"x86_64": "amd64", "aarch64": "arm64"}[r.Machine]
-	}
 	if r.OS != targetOS || r.Arch != targetArch {
 		return nil, fmt.Errorf("bundle targets %s/%s, need %s/%s", r.OS, r.Arch, targetOS, targetArch)
 	}
@@ -149,29 +140,14 @@ func Verify(root, targetOS, targetArch string) (*Release, error) {
 	for _, n := range data {
 		required = append(required, "data/"+n)
 	}
-	switch targetOS {
-	case "darwin":
-		// 字典與神經模型放在 App 內，整個 0c.app 是一個版本單位。
-		required = []string{"0c-update", MacApp + "/Contents/Info.plist", MacApp + "/Contents/MacOS/0c", MacApp + "/Contents/MacOS/0c-server"}
-		for _, n := range data {
-			required = append(required, MacApp+"/Contents/Resources/data/"+n)
-		}
-	case "linux":
-		required = append(required, "install.py")
-		if _, ok := r.Files[LinuxLegacyServer]; ok {
-			required = append(required, LinuxLegacyServer, "lib/libzuin.so")
-		} else {
-			required = append(required, "bin/0c-server", "lib/lib0c.so")
-		}
-	case "windows":
-		layout, err := WindowsLayoutOf(r.Files)
-		if err != nil {
-			return nil, err
-		}
-		required = append(required, "0c-update.exe", layout.DLL, layout.Server, layout.UI)
-	default:
+	if targetOS != "windows" {
 		return nil, fmt.Errorf("unsupported platform: %s", targetOS)
 	}
+	layout, err := WindowsLayoutOf(r.Files)
+	if err != nil {
+		return nil, err
+	}
+	required = append(required, "0c-update.exe", layout.DLL, layout.Server, layout.UI)
 	for _, n := range required {
 		if _, ok := r.Files[n]; !ok {
 			return nil, fmt.Errorf("missing bundle file: %s", n)
@@ -221,15 +197,9 @@ func Verify(root, targetOS, targetArch string) (*Release, error) {
 }
 
 // Stage requires a checksum from a trusted release feed or an explicit user argument.
-// It never runs code and only writes under a new private temporary directory.
+// It never runs code and only writes under a new private temporary directory (never next to the archive,
+// which may be on a USB stick or in any folder).
 func Stage(archive, expected, targetOS, targetArch string) (string, func(), error) {
-	return StageIn("", archive, expected, targetOS, targetArch)
-}
-
-// StageIn 與 Stage 相同，但私有暫存目錄建在 scratch 底下（空字串為系統暫存目錄；建不起來時也退回系統暫存目錄）。
-// 暫存位置由呼叫端決定：Linux 的 /tmp 常是有大小或使用者配額的 tmpfs，完整套件解開約 1.3 GB（見 cmd/0c-update 的
-// scratchRoot）。不放在壓縮包旁邊：使用者指定的壓縮包可能在隨身碟（vfat 沒有執行位元）或任何資料夾。
-func StageIn(scratch, archive, expected, targetOS, targetArch string) (string, func(), error) {
 	noop := func() {}
 	if !hashPattern.MatchString(expected) {
 		return "", noop, fmt.Errorf("a lowercase SHA-256 is required")
@@ -248,10 +218,7 @@ func StageIn(scratch, archive, expected, targetOS, targetArch string) (string, f
 	if actual != expected {
 		return "", noop, fmt.Errorf("archive SHA-256 mismatch")
 	}
-	temp, err := os.MkdirTemp(scratch, stagePrefix)
-	if err != nil && scratch != "" {
-		temp, err = os.MkdirTemp("", stagePrefix)
-	}
+	temp, err := os.MkdirTemp("", stagePrefix)
 	if err != nil {
 		return "", noop, err
 	}
@@ -274,28 +241,6 @@ func StageIn(scratch, archive, expected, targetOS, targetArch string) (string, f
 }
 
 const stagePrefix = "0c-update-"
-
-// RemoveStale 刪除 dir 底下名稱以 prefixes 開頭、超過 age 沒有變動的目錄：被中斷的下載與安裝留下的暫存，
-// 放在使用者資料目錄時不像 /tmp 會在重開機後消失。dir 必須是更新器專用的暫存根目錄，不要傳使用者的資料夾。
-func RemoveStale(dir string, age time.Duration, prefixes ...string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		for _, prefix := range prefixes {
-			if strings.HasPrefix(e.Name(), prefix) {
-				if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > age {
-					os.RemoveAll(filepath.Join(dir, e.Name()))
-				}
-				break
-			}
-		}
-	}
-}
 
 func extract(archive, root string) error {
 	seen := map[string]bool{}
@@ -338,55 +283,27 @@ func extract(archive, root string) error {
 		}
 		return closeErr
 	}
-	if strings.HasSuffix(strings.ToLower(archive), ".zip") {
-		z, err := zip.OpenReader(archive)
-		if err != nil {
-			return err
-		}
-		defer z.Close()
-		for _, f := range z.File {
-			if f.Mode()&os.ModeSymlink != 0 || (!f.FileInfo().IsDir() && !f.Mode().IsRegular()) {
-				return fmt.Errorf("archive links/devices are not allowed")
-			}
-			if f.UncompressedSize64 > uint64(MaxArchive) {
-				return fmt.Errorf("archive member too large")
-			}
-			r, err := f.Open()
-			if err != nil {
-				return err
-			}
-			err = put(f.Name, int64(f.UncompressedSize64), f.Mode(), f.FileInfo().IsDir(), r)
-			r.Close()
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	f, err := os.Open(archive)
+	z, err := zip.OpenReader(archive)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	tarReader := tar.NewReader(gz)
-	for {
-		h, err := tarReader.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeDir {
+	defer z.Close()
+	for _, f := range z.File {
+		if f.Mode()&os.ModeSymlink != 0 || (!f.FileInfo().IsDir() && !f.Mode().IsRegular()) {
 			return fmt.Errorf("archive links/devices are not allowed")
 		}
-		if err = put(h.Name, h.Size, os.FileMode(h.Mode), h.Typeflag == tar.TypeDir, tarReader); err != nil {
+		if f.UncompressedSize64 > uint64(MaxArchive) {
+			return fmt.Errorf("archive member too large")
+		}
+		r, err := f.Open()
+		if err != nil {
+			return err
+		}
+		err = put(f.Name, int64(f.UncompressedSize64), f.Mode(), f.FileInfo().IsDir(), r)
+		r.Close()
+		if err != nil {
 			return err
 		}
 	}
+	return nil
 }

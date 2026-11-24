@@ -1,7 +1,7 @@
 > [!WARNING]
 > **這不是官方版本。** 這是 pohsun4work 維護的靈犀注音非官方修改版（fork），官方是 [0c-biggo/0c-ime](https://github.com/0c-biggo/0c-ime)。
 > 輸入行為與更新來源都跟官方不同，差異見 [hoshi/README.md](hoshi/README.md)；只發布 Windows 版，安裝請到本 repo 的 [Releases](https://github.com/pohsun4work/0c-ime/releases/latest)（安裝方式見 [INSTALL.md](hoshi/windows/INSTALL.md)）。
-> 下方是官方 README 原文，官網、下載、回報問題等連結都是官方版；fork 的問題請到本 repo 的 [Issues](https://github.com/pohsun4work/0c-ime/issues)。
+> 下方是官方 README，只留下 Windows 的部分；官網、下載、回報問題等連結都是官方版；fork 的問題請到本 repo 的 [Issues](https://github.com/pohsun4work/0c-ime/issues)。
 
 <p align="center">
   <img src=".github/assets/logo.svg" width="96" height="96" alt="靈犀注音 0C">
@@ -11,7 +11,7 @@
 
 <p align="center">
   <b>免選字，把話打完。</b><br>
-  在你的電腦上用 Transformer 看前文選字的注音輸入法，支援 Linux、macOS 與 Windows。
+  在你的電腦上用 Transformer 看前文選字的注音輸入法，支援 Windows。
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@
   <a href="https://github.com/0c-biggo/0c-ime/actions/workflows/checks.yml"><img src="https://github.com/0c-biggo/0c-ime/actions/workflows/checks.yml/badge.svg" alt="Checks"></a>
   <a href="legal/README.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-005c73" alt="License"></a>
   <img src="https://img.shields.io/badge/go-1.26-005c73?logo=go&logoColor=white" alt="Go 1.26">
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-005c73" alt="Platforms">
+  <img src="https://img.shields.io/badge/platform-Windows-005c73" alt="Platform">
 </p>
 
 <p align="center">
@@ -37,7 +37,7 @@
   <img src=".github/assets/demo.svg" width="800" alt="打字示範：整句注音打下去不用選字，按 Tab 把話打完">
 </p>
 
-> **English** — 0C (靈犀注音) is a Zhuyin (Bopomofo) input method for Traditional Chinese. An on-device Transformer language model reads what you have just written and picks the right homophones, so you can type a whole sentence without stopping to choose characters. It runs entirely on your computer, and ships shells for Fcitx5, IBus, macOS InputMethodKit and Windows TSF.
+> **English** — 0C (靈犀注音) is a Zhuyin (Bopomofo) input method for Traditional Chinese. An on-device Transformer language model reads what you have just written and picks the right homophones, so you can type a whole sentence without stopping to choose characters. It runs entirely on your computer, and ships a Windows TSF shell.
 
 ## ✨ 特色
 
@@ -109,9 +109,7 @@ xychart-beta
 
 ## 📥 安裝
 
-Windows、macOS、Linux 安裝包請到官網下載：👉 [0c.biggo.com/download](https://0c.biggo.com/download/)
-
-發行版打包請用 [Releases](https://github.com/0c-biggo/0c-ime/releases/latest) 的 `0c-ime-<版本>.tar.xz`：內附現成字典，符合 DFSG，解壓即可建置；已配對的神經模型在另附的 `0c-ime-models-<版本>.tar.xz`。見 [打包與發佈](PACKAGING.md)。
+Windows 安裝包請到官網下載：👉 [0c.biggo.com/download](https://0c.biggo.com/download/)
 
 ## 🛠️ 從原始碼建置
 
@@ -120,25 +118,20 @@ Windows、macOS、Linux 安裝包請到官網下載：👉 [0c.biggo.com/downloa
 ```sh
 git clone https://github.com/0c-biggo/0c-ime.git
 cd 0c-ime
-make assets          # 下載與這份原始碼相符的字典與模型
+python scripts/fetch_assets.py   # 下載與這份原始碼相符的字典與模型
 go test ./...
 go run ./cmd/0c-cli -data assets/data
 ```
 
-`make assets` 從同版本的 [Release](https://github.com/0c-biggo/0c-ime/releases) 取得原始碼與模型 tarball（合計約 275 MB），驗證後把現成字典放到 `assets/data/`、已配對模型放到 `models/select/` 與 `models/punct/`，和出貨內容相同；0.2.2 起 Release 附的 Source code 壓縮檔也適用。要指定版本用 `make assets RELEASE=v0.2.2`，只取字典用 `make assets MODELS=0`（約 36 MB，以統計選字運作）。
+`scripts/fetch_assets.py` 從同版本的 [Release](https://github.com/0c-biggo/0c-ime/releases) 取得原始碼與模型 tarball（合計約 275 MB），驗證後把現成字典放到 `assets/data/`、已配對模型放到 `models/select/` 與 `models/punct/`，和出貨內容相同；0.2.2 起 Release 附的 Source code 壓縮檔也適用。要指定版本用 `--release v0.2.2`，只取字典用 `--no-models`（約 36 MB，以統計選字運作）。
 
 `cmd/` 下工具的旗標、輸入輸出與範例見官網 [CLI 文件](https://0c.biggo.com/docs/cli/)，例如 [0c-cli](https://0c.biggo.com/docs/cli/0c-cli/)、[0c-update](https://0c.biggo.com/docs/cli/0c-update/)、[0c-mcp](https://0c.biggo.com/docs/cli/0c-mcp/)。
 
-發行版維護者以 `make install PREFIX=/usr` 做系統安裝、由套件管理員更新，見 [Linux 系統安裝](platforms/linux-system/README.md)。
+外殼、設定程式與神經推論另需各自的工具鏈：
 
-各平台外殼另需各自的工具鏈與系統函式庫：
-
-| 平台 | 外殼 | 建置說明 |
+| 元件 | 實作 | 建置說明 |
 |---|---|---|
-| 🐧 Linux | Fcitx5（C++） | [platforms/linux-fcitx5](platforms/linux-fcitx5/README.md) |
-| 🐧 Linux | IBus（Go） | [platforms/linux-ibus](platforms/linux-ibus/README.md) |
-| 🍎 macOS | InputMethodKit（Swift） | [platforms/macos](platforms/macos/README.md) |
-| 🪟 Windows | TSF（Rust） | [platforms/windows](platforms/windows/README.md) |
+| 🪟 Windows 外殼 | TSF（Rust） | [platforms/windows](platforms/windows/README.md) |
 | ⚙️ 設定程式 | Tauri | [platforms/settings](platforms/settings/README.md) |
 | 🧠 神經推論 | Python＋ONNX Runtime | [platforms/neural](platforms/neural/README.md) |
 
@@ -148,8 +141,8 @@ go run ./cmd/0c-cli -data assets/data
 core/         輸入法邏輯：注音解析、詞圖解碼、語言模型、候選重排、個人學習（不做 I/O）
 bridge/       引擎與外殼之間的行程間通訊（IPC）
 internal/     設定、自動更新、神經推論 worker、詞庫編譯與評測等共用程式
-cmd/          執行檔入口：0c-server、0c-ibus、0c-update、0c-cli、0c-compile、0c-eval…
-platforms/    Linux／macOS／Windows 外殼、設定程式、神經推論
+cmd/          執行檔入口：0c-server、0c-update、0c-cli、0c-compile、0c-eval…
+platforms/    Windows 外殼、設定程式、神經推論
 data/         詞庫來源、來源帳本與授權聲明
 models/       上游模型與字典配對的固定清單
 scripts/      建置、打包與回歸測試工具
@@ -163,12 +156,10 @@ testdata/     測試資料
 歡迎回報問題與送 PR！請先看 [參與開發](CONTRIBUTING.md)：回報時附上版本、平台與逐鍵重現步驟；改程式前後跑一次檢查：
 
 ```sh
-python3 scripts/check_public_tree.py
+python scripts/check_public_tree.py
 go test ./...
 go vet ./...
-make -C platforms/linux-fcitx5 test
-make test-upgrade
-make test-release
+python -m unittest discover -s scripts -p "test_*.py"
 ```
 
 版本變更見 [CHANGELOG](CHANGELOG.md)。

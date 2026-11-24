@@ -1,11 +1,10 @@
 //go:debug default=go1.26
 
-// 0c-server 是行程外的輸入法引擎（docs/19）：在 unix socket（Linux／macOS）或 named pipe（Windows）上
-// 為平台薄殼（Fcitx 5 addon、TSF DLL 等）提供服務。每位使用者一個實例；它是個人化資料唯一的寫入者。
+// 0c-server 是行程外的輸入法引擎（docs/19）：在 named pipe 上為 TSF DLL 提供服務。
+// 每位使用者一個實例；它是個人化資料唯一的寫入者。
 package main
 
 import (
-	"context"
 	"crypto/sha256"
 	"errors"
 	"flag"
@@ -16,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -30,7 +28,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/vocab"
 	"github.com/0c-biggo/0c-ime/internal/datadir"
 	"github.com/0c-biggo/0c-ime/internal/e2esync"
-	"github.com/0c-biggo/0c-ime/internal/installs"
 	"github.com/0c-biggo/0c-ime/internal/neural"
 	"github.com/0c-biggo/0c-ime/internal/settings"
 )
@@ -39,30 +36,16 @@ import (
 var buildVersion = "dev"
 
 func main() {
-	// 系統安裝的升級交接（#181）：serve 存完檔、放開端點與個人資料鎖、關掉 worker 之後才換成新的執行檔。
-	if next := serve(); next != "" {
-		err := reexec(next)
-		fmt.Fprintln(os.Stderr, "0c-server: 無法換成新的執行檔，結束（外殼下一個按鍵會重新啟動引擎）：", err)
-	}
-}
-
-// serve 執行引擎直到結束；回傳要換成的新執行檔（系統安裝的升級交接），一般結束時為空字串。
-func serve() string {
 	defaultData, defaultUser, defaultSock := defaultPaths()
-	redirectEngine(filepath.Dir(defaultUser))
 	data := flag.String("data", defaultData, "資料包目錄")
 	user := flag.String("user", defaultUser, "個人資料檔")
-	sock := flag.String("socket", defaultSock, transportName)
-	legacy := flag.String("legacy-socket", legacyName(), "過渡期同時服務的舊 zuin "+transportName+"；空值停用，指定 -socket 時預設停用")
+	sock := flag.String("socket", defaultSock, "named pipe 名稱")
+	legacy := flag.String("legacy-socket", legacyName(), "過渡期同時服務的舊 zuin named pipe 名稱；空值停用，指定 -socket 時預設停用")
 	idle := flag.Duration("idle-exit", 0, "沒有任何連線這麼久之後自行結束（0 為不結束）")
 	lockWait := flag.Duration("lock-wait", 5*time.Second, "個人資料目錄被另一個引擎鎖住時最多等這麼久（交接時舊引擎存完檔才放鎖）；逾時照常輸入但不存檔")
 	checkData := flag.Bool("check-data", false, "僅驗證資料包能載入，不開啟管道、不讀寫個人詞庫")
 	neuralPackage := flag.String("neural-package", "", "神經選字 ONNX 包；未指定時依 settings.json 使用資料包旁內附的 neural/select")
 	neuralPython := flag.String("neural-python", "python3", "ONNX worker Python 路徑；指定時也取代內附或系統的 Python")
-	systemPython := flag.String("system-python", neural.SystemPython(), "沒有內附 Python 時使用的系統 Python（需要 numpy、onnxruntime）；空值不使用")
-	installWatchMode := flag.String("install-watch", "auto", "執行檔或字典被套件管理員換掉時自己交接重啟：auto（Linux 系統安裝才啟用）、on、off")
-	installWatchEvery := flag.Duration("install-watch-interval", installWatchInterval, "檢查安裝檔案的間隔")
-	installWatchQuiet := flag.Duration("install-watch-idle", installWatchIdle, "最後一個按鍵之後這麼久才交接")
 	neuralWorker := flag.String("neural-worker", "", "worker 腳本路徑（encoder_runtime.py 或 sequence_runtime.py）")
 	neuralTimeout := flag.Duration("neural-timeout", 100*time.Millisecond, "模型決策期限，上限 100ms；逾時保留原排序")
 	neuralThreads := flag.Int("neural-threads", neural.DefaultThreads(), "模型 CPU threads（1–8，預設為 CPU 邏輯核心數，最多 8）")
@@ -77,7 +60,7 @@ func serve() string {
 			lg.Fatal(err)
 		}
 		fmt.Println("資料包可載入")
-		return ""
+		return
 	}
 
 	// 過渡期：升級當下已載入的舊外殼仍連舊名稱，因此同時服務新舊名稱。隔離測試指定 -socket 時不碰舊名稱。
@@ -93,7 +76,7 @@ func serve() string {
 
 	// 單一實例：任一名稱能連上，表示已有 server（可能是舊版 zuin-server）在跑，它才是個人資料的寫入者。
 	for _, name := range names {
-		if alreadyRunning(name) {
+		if serving(name) {
 			fmt.Fprintln(os.Stderr, "0c-server 已經在執行：", name)
 			os.Exit(0)
 		}
@@ -127,9 +110,9 @@ func serve() string {
 	eng.Model.Now = func() int64 { return time.Now().Unix() }
 
 	// 使用者設定：預設神經選字與前文開啟，補標點（Beta）關閉。明確的 -neural-*／-punct-* 參數優先（開發與隔離測試）。
-	// #206：Windows 的中英切換鍵預設改成左右 Shift；0.2.4 以前存檔時順手寫進去的 right 在第一次以新版啟動時換一次。
+	// #206：中英切換鍵預設改成左右 Shift；0.2.4 以前存檔時順手寫進去的 right 在第一次以新版啟動時換一次。
 	// 放在引擎：不論是新版安裝程式、還是舊版更新器在背景裝上這一版，第一個以新設定服務的一定是新版引擎。
-	if writable && runtime.GOOS == "windows" {
+	if writable {
 		if adopted, err := settings.AdoptBothShift(*user); err != nil {
 			lg.Printf("中英切換鍵未換成左右 Shift，下次啟動再試：%v", err)
 		} else if adopted {
@@ -191,17 +174,9 @@ func serve() string {
 	if manifestErr == nil {
 		dictionarySHA = fmt.Sprintf("%x", sha256.Sum256(dictionaryManifest))
 	}
-	// Python、worker 與模型分開找（#181）：Python 內附優先，Linux 沒有時用系統的 python3；模型依
-	// 安裝包內建 → 個人目錄（#180）的順序；都沒有時統計選字。Linux 找到模型、系統卻沒有 python3 時照樣
-	// 啟動 worker（neural.Bundled）：啟動失敗回報 runtime_missing、每 10 分鐘重試，之後裝好不必重啟引擎。
-	// 0.2.3 以前的 worker 會讓 onnxruntime 留下未送出的遙測事件。0c-update 安裝後也會清，但從舊版背景更新時
-	// 執行安裝的是舊的更新器，碰不到；升級後第一個啟動的一定是新引擎，所以這裡再清一次（檔案不存在時只是幾次 stat）。
-	if home, err := os.UserHomeDir(); err == nil {
-		if err := neural.RemoveTelemetryQueue(home); err != nil {
-			lg.Printf("舊的推論元件遙測暫存未刪除：%v", err)
-		}
-	}
-	bundled := neural.Find(neural.Options{DataDir: *data, UserDir: filepath.Dir(*user), DictionarySHA256: dictionarySHA, SystemPython: *systemPython})
+	// Python、worker 與模型分開找：Python 用安裝包內附的；模型依安裝包內建 → 個人目錄（#180）的順序；
+	// 都沒有時統計選字。
+	bundled := neural.Find(neural.Options{DataDir: *data, UserDir: filepath.Dir(*user), DictionarySHA256: dictionarySHA})
 	python, pythonSource := bundled.Python, bundled.PythonSource
 	if explicit["neural-python"] {
 		python, pythonSource = *neuralPython, "custom"
@@ -210,14 +185,6 @@ func serve() string {
 	}
 	if pythonSource == "" {
 		pythonSource = "missing"
-	}
-	// #180：沒有內建選字模型時，在 Linux 檢查要不要重新配對（升級換了字典，或正在用的個人目錄配對是舊的
-	// models.lock 配的）或提醒下載。只看安裝的字典（官網安裝的預設位置或系統安裝的 share/0c/data，與 0c-update
-	// 找的同一份）；隔離測試（指定 -user、-socket）與開發時指定別的字典不碰使用者的 0c-update 與個人目錄。
-	var remind *modelRemind
-	if bundled.SelectSource != neural.SourceBundled && !explicit["neural-package"] && !explicit["user"] && !explicit["socket"] &&
-		(filepath.Clean(*data) == filepath.Clean(defaultData) || filepath.Clean(*data) == filepath.Clean(installs.Default().SystemData())) {
-		remind = newModelRemind(filepath.Dir(*user), dictionarySHA, lg)
 	}
 	neuralState := "disabled_by_setting"
 	var selectionSource, punctuationSource string
@@ -260,9 +227,6 @@ func serve() string {
 			eng.Rerank = worker.Options()
 			selectionWorker = worker
 			neuralState = "enabled"
-			if selectionSource != "" && bundled.RuntimeMissing(false) {
-				neuralState = "runtime_missing" // 啟動時就知道沒有 python3；之後的狀態看 selection_state
-			}
 			lg.Printf("神經選字已啟用（背景載入模型）：%s（%d threads）", filepath.Base(*neuralPackage), *neuralThreads)
 		}
 	}
@@ -312,8 +276,8 @@ func serve() string {
 		return vocabDisabled == "" && (vocabDirty || vocabVersion() != savedVocab)
 	}
 
-	var listeners []*endpoint
-	var stopping atomic.Bool // 已決定結束：端點由自己關閉，不再當成被移除
+	var listeners []net.Listener
+	var stopping atomic.Bool // 已決定結束（closeAll）：不再提醒或交接
 	stopAPI, apiInfo := func() {}, func() map[string]string { return map[string]string{"api_state": "off"} }
 	closeAll := func() {
 		stopping.Store(true)
@@ -338,7 +302,7 @@ func serve() string {
 	// 加詞、刪詞、改讀音與復原也會改學習資料（刪詞清掉指向它的手選、更正與證據，加詞解除 tombstone、
 	// 取代衝突的舊更正，#122）；只存 vocab.json 的話，之後沒打字就結束或交接，user.json 不會重寫，
 	// 重啟後留著指向已刪除自訂詞的更正（#196）。只標記、不加急：組字中加詞與候選窗反悔鍵也走這裡，
-	// 加急會在下一秒整份重寫 user.json，打字中途就存；交接（BeforeDrain）與結束（含 SIGTERM／SIGHUP、
+	// 加急會在下一秒整份重寫 user.json，打字中途就存；交接（BeforeDrain）與結束（含結束訊號、
 	// 閒置結束）一定會 save()，所以照一般學習等使用者停下來或最長間隔即可。
 	vocabEdited := func() error {
 		schedule.changed(time.Now(), false)
@@ -376,7 +340,6 @@ func serve() string {
 			if !eng.NoLearning {
 				schedule.changed(time.Now(), false)
 			}
-			remind.markCommitted()
 		},
 		OnForget: func() { schedule.changed(time.Now(), true) }}
 	// 設定程式的「清除學習紀錄」（#301）：清空記憶體裡的個人資料並立刻存檔，不重啟引擎。
@@ -392,14 +355,7 @@ func serve() string {
 		}
 		return e2esync.Pause(filepath.Dir(*user), "writer_saved")
 	} // 不釋放端點，直到學習存檔成功；失敗時保留原引擎供重試。
-	// 升級交接（#181）：只有自己開始的交接成功時才換成新的執行檔；0c-update 或訊號造成的結束照舊退出。
-	var watchDrain, handover atomic.Bool
-	srv.OnDrained = func() {
-		if watchDrain.Load() {
-			handover.Store(true)
-		}
-		closeAll()
-	}
+	srv.OnDrained = closeAll
 	srv.Info = map[string]string{"version": buildVersion, "protocol": fmt.Sprint(proto.Version),
 		"neural_startup_state": neuralState, "personal_store": personalState, "personal_lock": lockState,
 		"punctuation": fmt.Sprint(eng.Punct != nil), "left_shift": fmt.Sprint(config.TogglesLeft()), "right_shift": fmt.Sprint(config.TogglesRight()),
@@ -468,8 +424,7 @@ func serve() string {
 		contextWeight = *eng.DocumentContextWeight
 	}
 	srv.Info["document_context_weight"] = fmt.Sprintf("%g", contextWeight)
-	executable, exeErr := os.Executable()
-	if exeErr == nil {
+	if executable, err := os.Executable(); err == nil {
 		if binary, err := os.ReadFile(executable); err == nil {
 			srv.Info["executable_sha256"] = fmt.Sprintf("%x", sha256.Sum256(binary))
 		}
@@ -485,73 +440,14 @@ func serve() string {
 			}
 		}
 	}
-	var watch *installWatch
-	watchCtx, stopWatch := context.WithCancel(context.Background())
-	defer stopWatch() // 引擎結束時不留下還在核對的新執行檔
-	if exeErr == nil && (*installWatchMode == "on" || *installWatchMode == "auto" && installWatchEnabled(runtime.GOOS, executable, *data, installs.Default())) {
-		neuralDir := filepath.Join(filepath.Dir(filepath.Clean(*data)), "neural")
-		watch = newInstallWatch([]string{executable, filepath.Join(*data, "manifest.json"),
-			filepath.Join(neuralDir, "sequence_runtime.py"), filepath.Join(neuralDir, "punct_runtime.py"),
-			filepath.Join(neuralDir, "select", "manifest.json"), filepath.Join(neuralDir, "punct", "manifest.json")},
-			runningExecutable(), *installWatchEvery, time.Now())
-		lg.Printf("系統安裝：執行檔或字典被套件管理員換掉時，停手後自己交接到新版（每 %v 檢查）", *installWatchEvery)
-	}
-	remind.startup(time.Now())
 	go func() {
 		lastBusy := time.Now()
 		for now := range time.Tick(saveTick) {
-			for i, l := range listeners {
-				if !stopping.Load() && l.lost() {
-					// 例如登出時執行期目錄被清掉：留下來只會變成占著個人資料鎖、沒人連得到的孤兒。
-					lg.Printf("端點 %s 已被移除或由別的引擎取代，存檔後結束", names[i])
-					closeAll()
-					return
-				}
-			}
 			if schedule.due(now, srv.LastKey()) {
 				save()
 			}
 			// 「靈犀學到的」頁的復原複本含使用者要求刪除的學習：操作完不再回來時，也在 10 分鐘後放掉（#182）。
 			eng.ExpireLearnedUndo()
-			if remind != nil && !stopping.Load() {
-				_, composing := eng.Sessions()
-				remind.tick(now, composing)
-			}
-			if watchDrain.Load() && !srv.Draining() {
-				watchDrain.Store(false) // 交接逾時（一直在組字）或存檔失敗：繼續服務，下一次檢查再試
-			}
-			if watch != nil && !watchDrain.Load() && !stopping.Load() && now.Sub(srv.LastKey()) >= *installWatchQuiet {
-				if _, composing := eng.Sessions(); composing == 0 {
-					ready, changed := watch.poll(now)
-					if changed {
-						lg.Printf("安裝的檔案已更新，等檔案穩定後交接")
-					}
-					if ready {
-						// 核對在背景跑（最長 installCheckTimeout），不擋存檔、失聯偵測與閒置結束；通過的結果記下來，
-						// 交接逾時（一直在組字）之後不必再核對。
-						switch step, stamp := watch.nextStep(); step {
-						case watchCheck:
-							go func() {
-								err := checkNewEngine(watchCtx, executable, *data, installCheckTimeout)
-								switch rejected := watch.finish(stamp, err, time.Now()); {
-								case err == nil:
-									lg.Printf("新的執行檔核對通過，停手時交接")
-								case rejected:
-									lg.Printf("新的執行檔無法載入字典，暫不交接（檔案再變時重試）：%v", err)
-								default:
-									lg.Printf("新的執行檔暫時無法核對，稍後重試：%v", err)
-								}
-							}()
-						case watchHandOver:
-							lg.Printf("安裝的檔案已更新，交接到新版")
-							watchDrain.Store(true)
-							if !srv.Drain() {
-								watchDrain.Store(false)
-							}
-						}
-					}
-				}
-			}
 			if srv.Conns() > 0 {
 				lastBusy = time.Now()
 			} else if *idle > 0 && time.Since(lastBusy) > *idle {
@@ -562,11 +458,14 @@ func serve() string {
 		}
 	}()
 	sig := make(chan os.Signal, 1)
-	// SIGHUP：工作階段結束時也照常存檔再結束（學習最晚一分鐘才寫入，不能直接被終止）。
-	// Windows 登出／關機的 CTRL_LOGOFF_EVENT／CTRL_SHUTDOWN_EVENT 由 Go 轉成 SIGTERM；前提是引擎不載入
-	// user32／gdi32（見 logoff_windows_test.go）。
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	stopSignals := watchSignals(sig, closeAll, signal.Stop)
+	// 結束訊號都照常存檔再結束（學習最晚一分鐘才寫入，不能直接被終止）：Ctrl+C／Ctrl+Break 由 Go 轉成 SIGINT，
+	// 登出／關機的 CTRL_LOGOFF_EVENT／CTRL_SHUTDOWN_EVENT 轉成 SIGTERM；前提是引擎不載入 user32／gdi32
+	// （見 logoff_windows_test.go）。
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		closeAll()
+	}()
 
 	var wg sync.WaitGroup
 	for _, l := range listeners {
@@ -588,46 +487,4 @@ func serve() string {
 	// 最後一次存檔之後才放鎖（端點此時已關閉）：交接中等鎖的新引擎在這之後才讀個人檔。
 	// 神經 worker 等收尾在 main 返回後才執行，不佔著鎖。
 	writerLock.Release()
-	// 交接途中收到結束訊號（例如登出）：照常結束，不換成新的執行檔。stopSignals 之後的訊號照預設動作結束
-	// 行程，所以這裡回報沒收到，就一定不會有結束訊號被 exec 吃掉。
-	if handover.Load() {
-		if stopSignals() {
-			lg.Printf("交接途中收到結束訊號，不換成新的執行檔")
-			return ""
-		}
-		lg.Printf("換成新的執行檔：%s", executable)
-		return executable
-	}
-	return ""
-}
-
-// watchSignals 收到第一個結束訊號時呼叫 onSignal。回傳的 stop 停止接收（之後的結束訊號照預設動作結束行程），
-// 並回報在那之前有沒有收到過：signal.Stop 保證停止前到達的訊號不是已送進 sig，就是照預設動作結束行程，
-// 等處理的 goroutine 結束後再看一次 sig，送進來卻還沒被處理的那一個也算到。
-func watchSignals(sig chan os.Signal, onSignal func(), stopNotify func(chan<- os.Signal)) (stop func() (signaled bool)) {
-	quit, done := make(chan struct{}), make(chan struct{})
-	var got bool
-	go func() {
-		defer close(done)
-		select {
-		case <-sig:
-			got = true
-			onSignal()
-		case <-quit:
-		}
-	}()
-	return func() bool {
-		stopNotify(sig)
-		close(quit)
-		<-done
-		if got {
-			return true
-		}
-		select {
-		case <-sig:
-			return true
-		default:
-			return false
-		}
-	}
 }

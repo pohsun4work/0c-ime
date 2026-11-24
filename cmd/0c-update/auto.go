@@ -16,7 +16,6 @@ import (
 
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
 	"github.com/0c-biggo/0c-ime/internal/autoupdate"
-	"github.com/0c-biggo/0c-ime/internal/neural"
 	"github.com/0c-biggo/0c-ime/internal/settings"
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
@@ -27,17 +26,11 @@ const DefaultFeed = "https://github.com/pohsun4work/0c-ime/releases/latest/downl
 // pointerSince 是第一個認得引擎指標的完整安裝版本；更舊的外殼只能以完整安裝更新。
 const pointerSince = "0.1.0-dev.18"
 
-// unattendedInstall：這次安裝由背景自動更新執行、沒有使用者在看（macOS 的輸入法程式交接只在使用者離開時做，#178）。
-// 終端機、.pkg 與設定程式「立即安裝」（finish）都是使用者自己執行的安裝。這個程式一次只執行一個命令。
-var unattendedInstall bool
-
 // system 是真實作業系統上的 autoupdate.Platform。
 type system struct {
-	base      string
-	feed      string
-	consent   bool          // 使用者親自執行 finish：可以做需要確認的安裝
-	shellIdle time.Duration // 外殼切換前重新核對的閒置門檻
-	atLogin   bool          // 登入時、桌面啟動前（Linux login 單元）：可以換外殼
+	base    string
+	feed    string
+	consent bool // 使用者親自執行 finish：可以做需要確認的安裝
 }
 
 func (p *system) Installed() (string, error) {
@@ -92,7 +85,7 @@ func (p *system) Prepare(_ context.Context, archive string, t autoupdate.Target)
 		return "", autoupdate.ErrNeedsShell
 	}
 	goos, arch := p.Target()
-	return autoupdate.PrepareCore(p.base, scratchRoot(), archive, t, goos, arch, layout)
+	return autoupdate.PrepareCore(p.base, archive, t, goos, arch, layout)
 }
 func (p *system) SwitchCore(dir, version string) error {
 	return autoupdate.SwitchPointer(p.base, dir, version)
@@ -125,10 +118,7 @@ func waitForEngine(ctx context.Context, dial autoupdate.Dialer) error {
 	return fmt.Errorf("引擎未在 15 秒內開始服務")
 }
 func (p *system) InstallShell(ctx context.Context, archive string) (bool, error) {
-	if !p.ReloadsShell() && deferShell() && !p.atLogin {
-		return false, autoupdate.ErrAtLogin
-	}
-	if !p.consent && !p.atLogin && !shellUnattended() {
+	if !p.consent && !shellUnattended() {
 		return false, autoupdate.ErrNeedsConsent
 	}
 	s, err := autoupdate.Load(p.base)
@@ -136,7 +126,7 @@ func (p *system) InstallShell(ctx context.Context, archive string) (bool, error)
 		return false, fmt.Errorf("沒有待安裝的版本")
 	}
 	goos, arch := p.Target()
-	root, cleanup, err := update.StageIn(scratchRoot(), archive, s.Target.SHA256, goos, arch)
+	root, cleanup, err := update.Stage(archive, s.Target.SHA256, goos, arch)
 	if err != nil {
 		return false, err
 	}
@@ -148,25 +138,15 @@ func (p *system) InstallShell(ctx context.Context, archive string) (bool, error)
 	if r.Version != s.Target.Version {
 		return false, fmt.Errorf("套件版本 %s 與索引 %s 不符", r.Version, s.Target.Version)
 	}
-	if p.ReloadsShell() {
-		return p.installReloadableShell(ctx, root, r)
-	}
-	// 沒有使用者親自確認的安裝（背景自動更新）：macOS 只在使用者離開時交接輸入法程式（#178）。
-	unattendedInstall = !p.consent
 	if err = install(root, r); err != nil {
 		return false, err
 	}
 	afterInstall()
-	// Windows 不等重新登入（#253）；macOS 安裝時已請舊的輸入法程式結束（#170），只有要重新登入的情況才回 pending。
-	// 其餘由協調器接著以 ShellReady 與執行中的引擎核對。
-	return shellPendingAfterInstall(), nil
+	// 不等重新登入（#253）：由協調器接著以 ShellReady 與執行中的引擎核對。
+	return false, nil
 }
 
-func (p *system) ReloadsShell() bool { return reloadableShell() }
-
-func (p *system) ShellNeedsIdle() bool { return runtime.GOOS == "darwin" }
-
-// Conditions：OS 無法判斷閒置時（Wayland 非 GNOME、無桌面等），以引擎距上次按鍵的時間代替；
+// Conditions：OS 無法判斷閒置時（GetLastInputInfo 失敗），以引擎距上次按鍵的時間代替；
 // 引擎沒有執行即視為閒置。
 func (p *system) Conditions() autoupdate.Conditions {
 	c := conditions()
@@ -202,25 +182,7 @@ func (p *system) Activated(t autoupdate.Target, dir string) {
 	os.RemoveAll(filepath.Join(p.base, "update", "downloads"))
 }
 
-// installStagedShell 在登入時完成排定的外殼更新：已下載、已核對的套件以完整安裝套用。
-func installStagedShell(p *system) error {
-	s, err := autoupdate.Load(p.base)
-	if err != nil || s.Stage != autoupdate.StagePending || s.Target == nil || s.Target.Kind != "shell" || s.Download == "" {
-		return err
-	}
-	if v, _ := installedVersion(); v == s.Target.Version {
-		return nil
-	}
-	_, err = p.InstallShell(context.Background(), s.Download)
-	return err
-}
-
-func updaterName() string {
-	if runtime.GOOS == "windows" {
-		return "0c-update.exe"
-	}
-	return "0c-update"
-}
+func updaterName() string { return "0c-update.exe" }
 
 // stableUpdater 是排程執行的 0c-update 位置，不隨版本目錄移動。
 func stableUpdater(base string) string { return filepath.Join(base, "bin", updaterName()) }
@@ -449,13 +411,6 @@ func autoCommand(action string, args []string) (resultErr error) {
 		case "status":
 			fmt.Println(scheduleStatus())
 			return nil
-		case "adopt":
-			// 內部使用（macOS，#205）：status 發現 launchd 啟動不了排程時，在脫離的行程裡重新註冊。
-			adoptSchedule(true)
-			return nil
-		case "open-settings":
-			// macOS：使用者在系統設定關閉背景執行後，開啟登入項目頁讓他重新允許。
-			return openScheduleSettings()
 		}
 		return fmt.Errorf("未知的 schedule 動作：%s", sub)
 	}
@@ -463,7 +418,6 @@ func autoCommand(action string, args []string) (resultErr error) {
 	asJSON := flags.Bool("json", false, "以 JSON 回報更新結果")
 	feed := flags.String("feed", "", "本次改用的已簽章索引；預設為 schedule install -feed 設定的或正式索引")
 	now := flags.Bool("now", false, "立即查詢，不等下一次到期")
-	login := flags.Bool("login", false, "登入時、桌面啟動前執行（只做本機工作，不查詢或下載）")
 	report := flags.Bool("notify", false, "完成後以通知回報結果（從選單或通知按鈕啟動時）")
 	target := flags.String("target", "", "只完成此通知／選單指定的版本")
 	targetHash := flags.String("target-sha256", "", "通知／選單指定的資產 SHA-256")
@@ -519,7 +473,7 @@ func autoCommand(action string, args []string) (resultErr error) {
 		return err
 	}
 	// #284（Windows）：解除安裝之後留下的排程不再查詢、下載與通知，移除自己後結束。
-	if action == "auto" && !*login && !*asJSON && !*report && retireOrphanSchedule() {
+	if action == "auto" && !*asJSON && !*report && retireOrphanSchedule() {
 		return nil
 	}
 	if *feed == "" {
@@ -528,52 +482,15 @@ func autoCommand(action string, args []string) (resultErr error) {
 			*feed = s.Feed
 		}
 	}
-	p := &system{base: base, feed: *feed, consent: action == "finish", atLogin: *login}
-	if *login && !p.ReloadsShell() {
-		if err := installStagedShell(p); err != nil {
-			fmt.Fprintln(os.Stderr, "0c-update: 登入時安裝排定的更新失敗：", err)
-		}
-	}
-	// macOS 的 launchd 在登入時以 auto 喚起（不帶 -login）；新安裝的輸入法要重新登入後才登記得到，所以每次都補試。
-	// macOS 看安裝時留下的記號（inputSourcePending），不看 ProfileAtLogin（#195）；記號留著時每個登入工作階段補試一次，
-	// 失敗的重試只會一直跳系統詢問，連續幾個工作階段都失敗就停止（addInputMethod）。不補做時只有背景排程的 auto
-	// 查詢使用者是不是已經自己加入（一個工作階段一次）；設定程式「立即安裝」、選單、通知按鈕不必等這個查詢。
-	if *login || retriesInputMethodEveryRun {
-		if s, err := autoupdate.Load(base); err == nil && (s.ProfileAtLogin || inputSourcePending(base)) {
-			if err := retryLoginInputMethod(action == "auto" && !*asJSON && !*report); err != nil {
-				fmt.Fprintln(os.Stderr, "0c-update: 加入輸入法清單失敗：", err)
-			} else if s.ProfileAtLogin { // macOS 只有記號時不必改狀態檔；改了也不印狀態，免得混進 -json 的結果
-				_, _ = autoupdate.EditState(base, func(s *autoupdate.State) error { s.ProfileAtLogin = false; return nil })
-			}
-		}
-	}
-	// #93 卡住時換上的外殼：重新登入後把 Fcitx5 存掉的靈犀注音補回輸入法清單（一次）。
-	restoreStuckInputMethod(base, *login)
-	// #204 KDE Plasma Wayland：補寫上次沒寫回的 kwinrc 虛擬鍵盤（登入時也做，KWin 啟動時就讀得到）；背景排程另外把
-	// 舊版更新器自己啟動的 Fcitx5 在閒置時交還 KWin（一次性修復，條件不成立時不動）。
-	finishKWinIM(base)
-	if action == "auto" && !*login && !*asJSON && !*report {
-		repairKWinFcitx(base)
-	}
-	// 登入單元排在 graphical-session-pre.target 之前，桌面要等它結束才會啟動；
-	// 這裡只做上面的本機工作。查詢索引、下載（可達數百 MB、背景限速）與外殼重載／
-	// 中斷回復都交給 0c-update.timer，否則使用者登入後會停在黑畫面直到完成或逾時。
-	// #120：0.2.0 起引擎常駐，引擎沒在跑就叫起來。以暫時性 service 啟動只要幾十毫秒、不等它載入，
-	// 登入單元也做，引擎在登入當下就起來，不必等 timer 第一次喚起（OnStartupSec=5min）。
+	p := &system{base: base, feed: *feed, consent: action == "finish"}
+	// #120：0.2.0 起引擎常駐，引擎沒在跑就叫起來（登入時的引擎排程沒有成功、或引擎之後結束了）。
 	ensureEngineService(base)
 	// Windows：背景完整更新由舊的穩定更新器安裝，它不會請舊版的 0c-ui 結束；新版的穩定副本每次喚起時補上。
 	handOverUI(uiWaitAuto)
-	if *login {
-		return nil
-	}
 	co := &autoupdate.Coordinator{Base: base, Platform: p, Force: *now, Consent: action == "finish", ConsentVersion: *target, ConsentSHA256: *targetHash}
 	if s, err := autoupdate.Load(base); err == nil && s.Test != nil && update.E2EBuild {
 		co.CheckEvery, co.IdleNeeded, co.RemindAfter = time.Duration(s.Test.CheckEvery), time.Duration(s.Test.IdleNeeded), time.Duration(s.Test.RemindAfter)
 		co.CheckJitter = time.Second
-	}
-	p.shellIdle = co.IdleNeeded
-	if p.shellIdle == 0 {
-		p.shellIdle = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -603,12 +520,6 @@ func autoCommand(action string, args []string) (resultErr error) {
 	return nil
 }
 
-// retriesInputMethodEveryRun：每次 auto／finish 都補做登入時的輸入法清單（macOS，見 autoCommand 裡的說明）；測試在 Linux 上打開它走同一條路。
-var retriesInputMethodEveryRun = runtime.GOOS == "darwin"
-
-// retryLoginInputMethod 是 autoCommand 補做輸入法清單的入口（retryInputMethod）；測試替換用，確認只有背景排程會查詢。
-var retryLoginInputMethod = retryInputMethod
-
 // notifyOutcome 回報使用者親自要求（選單、通知按鈕）的結果；背景排程不發這類通知。
 func notifyOutcome(s *autoupdate.State, err error) {
 	var installed string
@@ -628,11 +539,11 @@ func outcomeBody(s *autoupdate.State, err error, installed string, now time.Time
 		if s.StaleEngine != "" {
 			return installed + " " + s.StaleEngine + "。"
 		}
-		if shellWithoutRelogin && justInstalledShell(s, installed, now) {
+		if justInstalledShell(s, installed, now) {
 			return "已更新至 " + installed + "，不必登出。之後開啟的應用程式直接使用新版；已經開著的要重新開啟才會換成新版。"
 		}
 		return "已是最新版本 " + installed + "。"
-	case shellWithoutRelogin && s.Stage == autoupdate.StagePending && s.Target != nil && s.Target.Kind == "shell" && s.Blocked != nil:
+	case s.Stage == autoupdate.StagePending && s.Target != nil && s.Target.Kind == "shell" && s.Blocked != nil:
 		return s.Target.Version + " " + s.Blocked.Detail + "。"
 	case s.Blocked != nil && s.Blocked.Reason == "needs_relogin":
 		return s.Target.Version + " " + s.Blocked.Detail + "。"
@@ -658,18 +569,12 @@ func justInstalledShell(s *autoupdate.State, installed string, now time.Time) bo
 	return false
 }
 
-// shellWithoutRelogin：這個平台的外殼裝好不等重新登入（Windows，#253；協調器看 ShellActiveWithoutRelogin）。測試可替換。
-var shellWithoutRelogin = runtime.GOOS == "windows"
-
 // settleWait 是 settleInstalledShell 等協調器的上限：0.2.7 按「立即安裝」時，提權的舊更新器還在收尾。登入工作只有 2 分鐘。
 const settleWait = 45 * time.Second
 
 // settleInstalledShell（登入工作、每日修復）：這一版已裝好、狀態還沒收尾時核對一次，不必等 15 分鐘後的排程。
 // 舊的穩定更新器裝完會把狀態寫成 pending／needs_relogin；它還拿著協調器的鎖時等它寫完。其他情況都是一次讀檔就結束。
 func settleInstalledShell(base string) {
-	if !shellWithoutRelogin {
-		return
-	}
 	s, err := autoupdate.Load(base)
 	if err != nil || s.Target == nil || s.Target.Kind != "shell" {
 		return
@@ -742,7 +647,7 @@ func pointFeed(s *autoupdate.State, feed string) {
 	}
 }
 
-// directAfterInstall 是 after-install 指令要做的事（測試換掉：go test 不動這台機器的 systemd 排程）。
+// directAfterInstall 是 after-install 指令要做的事（測試換掉：go test 不動這台機器的工作排程器）。
 var directAfterInstall = afterInstall
 
 // afterInstall：完整安裝成功後建立（或更新）自動更新排程；失敗只提示，不影響安裝結果。
@@ -750,12 +655,6 @@ func afterInstall() {
 	defer restartRetiredUI() // Windows：排程與穩定副本都處理完才帶起新版 0c-ui；排程建不起來時也要帶（#243）
 	if os.Getenv("ZC_NO_SCHEDULE") != "" {
 		return
-	}
-	// 0.2.3 以前的 worker 會讓 onnxruntime 留下未送出的遙測事件；新版不再讀寫，安裝後刪掉，免得別的程式送出（docs/46）。
-	if home, err := os.UserHomeDir(); err == nil {
-		if err := neural.RemoveTelemetryQueue(home); err != nil {
-			fmt.Fprintln(os.Stderr, "0c-update: 舊的推論元件遙測暫存未刪除：", err)
-		}
 	}
 	// Windows：第一次安裝（或從還沒有這一步的版本更新）時把靈犀注音加入這個帳號的輸入法清單（#191）。
 	listInputMethod(basePath())
@@ -824,10 +723,6 @@ func printState(s *autoupdate.State) {
 		switch s.Blocked.Reason {
 		case "needs_consent":
 			fmt.Println("執行 0c-update finish 完成安裝。")
-		case "needs_relogin":
-			if !shellWithoutRelogin {
-				fmt.Println("登出再登入後生效。")
-			}
 		}
 	}
 	if !s.LastSuccess.IsZero() {
@@ -853,17 +748,7 @@ func statusJSON(installed string, diagnostics bool) error {
 func statusMap(base, installed string, dial autoupdate.Dialer) map[string]any {
 	out := map[string]any{"schema": contractSchema, "installed": installed, "engine": autoupdate.PointerVersion(base)}
 	out["runtime"] = modelStatus(dial)
-	// #181：怎麼更新（self／package-manager），以及這台電腦上找得到的安裝（Linux；外殼用的那一份 active）。
-	managed := packageManaged()
-	out["updates"] = updatesMode()
-	if list := installList(); len(list) > 0 {
-		out["installs"] = list
-	}
-	if managed {
-		// 系統套件的引擎不跟官網安裝的核心更新指標（外殼以 -data 指定系統字典）；更新狀態也是官網安裝的。
-		out["engine"] = ""
-	}
-	if s, err := autoupdate.Load(base); err == nil && !managed {
+	if s, err := autoupdate.Load(base); err == nil {
 		hideLegacyRelogin(s)
 		appendUpdateStateStatus(out, s, time.Now())
 		if p := updaterProblem(base, s, platformRepair); p != "" {
@@ -885,7 +770,7 @@ func statusMap(base, installed string, dial autoupdate.Dialer) map[string]any {
 	}
 	f := featuresOf()
 	f.EngineService = true // 0.2.0 起一律常駐（#120）
-	f.EngineServiceState, f.EngineServiceUnit = engineServiceState()
+	f.EngineServiceState = "login_task"
 	out["features"] = f
 	if err == nil {
 		st := r.Settings
@@ -925,7 +810,7 @@ func appendUpdateStateStatus(out map[string]any, s *autoupdate.State, now time.T
 // hideLegacyRelogin：舊版更新器寫的 needs_relogin 在 Windows 已經不是真的（#253），協調器下一次核對就會換掉。在那之前
 // 選單與設定程式（可能還是舊版 DLL，直接顯示這段說明）不要再叫人登出。只改讀出來的這一份，狀態檔照舊由協調器收尾。
 func hideLegacyRelogin(s *autoupdate.State) {
-	if shellWithoutRelogin && s.Blocked != nil && s.Blocked.Reason == "needs_relogin" {
+	if s.Blocked != nil && s.Blocked.Reason == "needs_relogin" {
 		b := *s.Blocked
 		b.Reason, b.Detail = "waiting_idle", autoupdate.ShellEngineIdleDetail
 		s.Blocked = &b
@@ -937,7 +822,7 @@ func actionFor(s *autoupdate.State) string {
 	switch {
 	case s.Target == nil:
 		return ""
-	case (reloadableShell() || shellWithoutRelogin) && s.Target.Kind == "shell" && s.Stage == autoupdate.StagePending:
+	case s.Target.Kind == "shell" && s.Stage == autoupdate.StagePending:
 		return "finish"
 	case s.Blocked == nil:
 		return ""

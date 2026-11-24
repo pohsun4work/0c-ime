@@ -1,9 +1,19 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+func writeReceipt(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "install-receipt.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func TestInstalledSettingsFromReceiptReadsTheVersionDirectory(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "Zuin")

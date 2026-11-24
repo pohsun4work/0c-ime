@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """官網套件內建的神經模型：取得 Hugging Face 原檔、配對到出貨字典、核對出貨結果（#180）。
 
-0.2.3 起官網三平台套件內建的 neural/select、neural/punct 就是 models/models.lock.json 記的 Hugging Face 公開版
-（與 Linux 系統安裝讓使用者下載的同一份），不再用內部匯出。做法：
+0.2.3 起官網套件內建的 neural/select、neural/punct 就是 models/models.lock.json 記的 Hugging Face 公開版，
+不再用內部匯出。做法：
 
 - 權重：model.onnx、LICENSE、README.md 從 --from 指定的目錄（<dir>/<select|punct>/<檔名>，例如 0c-ime 的 models/）、
   快取（build/cache/models/<role>/<revision>/）或 Hugging Face（<repo>/resolve/<revision>/<檔名>）取得，逐檔核對
@@ -13,8 +13,7 @@
 - worker：sequence_runtime.py、punct_runtime.py 一律換成 repo 的 platforms/neural/runtime/ 版本（不沿用舊 neural/ 的），
   worker 的修正（例如關掉 onnxruntime 遙測）才會跟著出貨。
 - 核對（check）：出貨的 neural/ 兩個模型的 manifest.json、vocab.json 等於出貨字典的 pairing.lock，model.onnx（與
-  LICENSE、README.md）等於 models.lock，兩個 worker 與 repo 的逐位相同。公開包打包時（package_release／package_windows／
-  package_macos）自動執行。
+  LICENSE、README.md）等於 models.lock，兩個 worker 與 repo 的逐位相同。公開包打包時（package_windows）自動執行。
 
 0.2.2 以前官網套件內建的 model.onnx（cef689f1…、2d98c7c6…）與公開版權重相同、只差匯出資訊，記在
 models/equivalent.json；model_identity() 兩種都認，給比較新舊套件的發版檢查用。發版出貨的一律是公開版原檔。

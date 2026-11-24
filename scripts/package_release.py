@@ -1,28 +1,33 @@
-#!/usr/bin/env python3
-"""Build a local Linux bundle with an explicit file list and source checks; never upload."""
+"""Shared checks and staging helpers for the Windows bundle (scripts/package_windows.py) and release tools.
 
-import argparse
+Licenses, release docs, dictionary provenance and model pairing are validated here without rewriting anything.
+"""
+
 import hashlib
 import json
-import os
 from pathlib import Path
-import platform
 import re
 import shutil
 import subprocess
-import sys
-import tarfile
-import tempfile
 
-from collect_notices import collect
-from install_package import digest, regular, verify
-from pairing_lock import write_pairing_lock
-import hf_models
-
-PAIRING_LOCK_NAME = "pairing.lock.json"
 
 ROOT = Path(__file__).resolve().parents[1]
-PLATFORM = ROOT / "platforms/linux-fcitx5"
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def regular(path):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"需要一般檔案：{path}")
+    return path
+
+
 LICENSE_FILES = {
     "LICENSE": "LICENSE",
     "legal/README.md": "legal/README.md",
@@ -247,157 +252,3 @@ def copy_neural(source, stage):
     for name in ("sequence_runtime.py", "punct_runtime.py", "punct/manifest.json"):
         regular(source / name)
     shutil.copytree(source, stage / "neural")
-
-
-def server_version(args, binary):
-    """E2E fault package F: the engine reports a different version, so the post-switch health check fails."""
-    if args.e2e_fault == "version-mismatch" and binary == "0c-server":
-        return args.version + "-fault"
-    return args.version
-
-
-ELF_MACHINE = {"x86_64": 62, "aarch64": 183}
-
-
-def add_settings(stage, directory, machine=None):
-    """附上預先建好的設定程式（scripts/build_settings_linux.py 的輸出：0c-settings 與 NOTICES.txt）。
-
-    不在打包機上建置：Tauri 需要 Rust 與 WebKitGTK 開發套件，這些只放在建置容器裡。回傳要接在第三方聲明
-    後面的授權文字。檔案必須是這個套件的 CPU 架構的 ELF，避免把錯的二進位打進去。
-    """
-    machine = machine or platform.machine()
-    program = regular(Path(directory) / "0c-settings")
-    notices = regular(Path(directory) / "NOTICES.txt").read_text(encoding="utf-8")
-    if not notices.strip():
-        raise ValueError("設定程式缺少第三方授權聲明")
-    header = program.read_bytes()[:20]
-    if len(header) < 20 or header[:4] != b"\x7fELF" or int.from_bytes(header[18:20], "little") != ELF_MACHINE.get(machine):
-        raise ValueError(f"設定程式不是 {machine} 的 Linux 執行檔：{program}")
-    target = stage / "bin/0c-settings"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(program, target)
-    target.chmod(0o755)
-    return notices
-
-
-def build(args):
-    if sys.platform != "linux":
-        raise ValueError("目前僅提供 Linux 原生建置")
-    if not valid_version(args.version):
-        raise ValueError("版本請用 0.1.0-beta.1 形式")
-    public = not args.preview
-    data = args.data.resolve()
-    manifest = check_data(data, public)
-    check_licenses()
-    release_docs = check_release_docs(getattr(args, "release_docs", None))
-    if public:
-        dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True)
-        if dirty.strip():
-            raise ValueError("公開包需要乾淨且已提交的程式碼；未提交版本請用 --preview")
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
-    args.out.mkdir(parents=True, exist_ok=True)
-    arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine())
-    if not arch:
-        raise ValueError("目前只支援 Linux amd64 與 arm64 原生建置")
-    name = f"0c-{args.version}-linux-{arch}" + ("-preview" if args.preview else "")
-    archive = args.out / (name + ".tar.gz")
-    if archive.exists() or archive.with_suffix(archive.suffix + ".sha256").exists():
-        raise ValueError(f"輸出已存在，請使用新版本或新目錄：{archive}")
-    with tempfile.TemporaryDirectory(prefix="0c-package-") as temp:
-        stage = Path(temp) / name
-        stage.mkdir()
-        def copy(src, dst):
-            target = stage / dst
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(regular(src), target)
-        # Always rebuild the addon, including changes to flags or the toolchain.
-        subprocess.run(["make", "-B", f"SHELL_VERSION={args.version}", "build/lib0c.so"], cwd=PLATFORM, check=True)
-        for binary in ("0c-server", "0c-trace", "0c-update", "0c-ibus", "0c-mcp"):
-            target = stage / "bin" / binary
-            target.parent.mkdir(exist_ok=True)
-            tags = ["-tags", "e2etest"] if args.e2etest and binary == "0c-update" else []
-            # 0c-update 也是一行安裝下載的 bootstrap，靜態連結才能在各發行版直接執行；
-            # IBus 外殼由 ibus-daemon 啟動，同樣不依賴系統的 C 函式庫；0c-mcp 由使用者的 AI 工具啟動（#126）。
-            env = dict(os.environ, CGO_ENABLED="0") if binary in ("0c-update", "0c-ibus", "0c-mcp") else None
-            subprocess.run([args.go, "build", "-trimpath", *tags, "-ldflags", f"-X main.buildVersion={server_version(args, binary)}", "-o", str(target),
-                            f"./cmd/{binary}"], cwd=ROOT, env=env, check=True)
-        copy(PLATFORM / "build/lib0c.so", "lib/lib0c.so")
-        settings_notices = add_settings(stage, args.settings) if args.settings else ""
-        for filename in ("0c-addon.conf", "0c-im.conf"):
-            copy(PLATFORM / filename, "config/" + filename)
-        copy(PLATFORM / "kimpanel-spacing.js", "config/kimpanel-spacing.js")
-        for filename in ("0c-zhuyin.svg", "0c-english.svg"):
-            copy(PLATFORM / "icons" / filename, "icons/" + filename)
-        for filename in DATA_FILES:
-            copy(data / filename, "data/" + filename)
-        copy_english(data, stage / "data", args.go)
-        if args.neural:
-            copy_neural(args.neural, stage)
-        seal_data(stage, args.go, public=public)
-        if args.neural:  # #180：出貨字典的模型配對清單（官網套件內建模型，用不到下載；每個出貨字典都有一份）
-            if public:  # 公開包內建 Hugging Face 公開版，配對結果就是這份 pairing.lock
-                hf_models.check_shipped(stage / "neural", stage / "data")
-            write_pairing_lock(stage / "data", stage / "neural" / PAIRING_LOCK_NAME)
-        copy(ROOT / "scripts/install_package.py", "install.py")
-        copy_release_docs(release_docs, stage)
-        copy_licenses(stage)
-        (stage / "THIRD_PARTY_NOTICES.txt").write_text(
-            collect("linux-amd64", stage / "neural" if args.neural else None, go=args.go) + ("\n" + settings_notices if settings_notices else ""),
-            encoding="utf-8")
-        if not public:
-            (stage / "PREVIEW.txt").write_text("內部驗證包，非公開發行版。\n")
-        subprocess.run([args.go, "run", "./cmd/0c-cli", "-data", str(stage / "data")],
-                       cwd=ROOT, input="", text=True, stdout=subprocess.DEVNULL, check=True)
-        release = {"schema": 1, "product": "0c", "name": "靈犀注音", "version": args.version,
-                   "channel": "internal-preview" if args.preview else "public-beta",
-                   "revision": revision, "dirty": dirty, "machine": platform.machine(),
-                   "os": "linux", "arch": arch,
-                   "build_platform": platform.platform(), "libc": list(platform.libc_ver()),
-                   "data_format": manifest["format"], "data_manifest_sha256": digest(stage / "data/manifest.json"),
-                   "files": {str(p.relative_to(stage)): digest(p) for p in sorted(stage.rglob("*")) if p.is_file()}}
-        (stage / "release.json").write_text(json.dumps(release, ensure_ascii=False, indent=2) + "\n")
-        verify(stage)
-        (stage / "SHA256SUMS").write_text("".join(f"{digest(p)}  {p.relative_to(stage)}\n"
-                                                  for p in sorted(stage.rglob("*")) if p.is_file() and p.name != "SHA256SUMS"))
-        temporary = Path(temp) / archive.name
-        with tarfile.open(temporary, "w:gz") as tar:
-            tar.add(stage, arcname=name)
-        # Copy to a temporary file on the output filesystem, then publish atomically.
-        fd, output_temp = tempfile.mkstemp(prefix=".0c-", dir=args.out)
-        os.close(fd)
-        try:
-            shutil.copyfile(temporary, output_temp)
-            os.replace(output_temp, archive)
-        finally:
-            Path(output_temp).unlink(missing_ok=True)
-        archive.with_suffix(archive.suffix + ".sha256").write_text(f"{digest(archive)}  {archive.name}\n")
-    return archive
-
-
-def main():
-    parser = argparse.ArgumentParser(description="建立靈犀注音 Linux 完整套件；不安裝、不上傳")
-    parser.add_argument("--release-docs", required=True, type=Path, help="外部文件目錄，須含 INSTALL.md、PRIVACY.md、UPDATING.md")
-    parser.add_argument("--data", required=True, type=Path)
-    parser.add_argument("--version", required=True)
-    parser.add_argument("--out", type=Path, default=ROOT / "build/release")
-    parser.add_argument("--preview", action="store_true", help="產生明確標示為內部驗證的套件")
-    parser.add_argument("--e2e-fault", choices=["version-mismatch"], help="E2E 故障套件 F：引擎回報不符的版本（須搭配 --e2etest）")
-    parser.add_argument("--e2etest", action="store_true", help="E2E 測試版：0c-update 以 -tags e2etest 建置（信任測試金鑰與測試 CA）；須搭配 --preview")
-    parser.add_argument("--go", default="go", help="Go 工具鏈執行檔")
-    parser.add_argument("--neural", type=Path, help="scripts/prepare_neural.py 產生的 neural/ 目錄；省略則不內附神經模型")
-    parser.add_argument("--settings", type=Path, help="scripts/build_settings_linux.py 產生的目錄（0c-settings 與 NOTICES.txt）；省略則不內附設定程式")
-    args = parser.parse_args()
-    if args.e2etest and not args.preview:
-        parser.error("--e2etest 只能用於 --preview 套件")
-    if args.e2e_fault and not args.e2etest:
-        parser.error("--e2e-fault 只能用於 --e2etest 套件")
-    try:
-        print(build(args))
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-        print(f"打包失敗：{error}", file=sys.stderr)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

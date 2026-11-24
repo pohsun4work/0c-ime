@@ -5,16 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
 func TestFuturePersonalStoreContinuesInputWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "0c-cli")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
-	}
+	binary := filepath.Join(dir, "0c-cli.exe")
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, out)
 	}

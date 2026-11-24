@@ -100,7 +100,7 @@ func TestCheckSaysWhyAnUpdateIsNotOfferedYet(t *testing.T) {
 		}, ReasonWithdrawn, false},
 		{"沒有此平台的安裝包", func() *fakePlatform {
 			f := feedFor("0.1.0-dev.18", "core", 100)
-			f.Assets[0].OS = "windows"
+			f.Assets[0].Arch = "arm64"
 			return &fakePlatform{installed: "0.1.0-dev.17", feed: f}
 		}, ReasonNoAsset, false},
 		{"可更新", func() *fakePlatform {
@@ -218,16 +218,5 @@ func TestLockIOErrorsAreNotBusy(t *testing.T) {
 	_, err = lockFile(filepath.Join(base, "update", "coordinator.lock"), "test.lock")
 	if err == nil || errors.Is(err, ErrLocked) {
 		t.Fatalf("invalid base: %v", err)
-	}
-}
-
-// 設定程式以完整文字辨識「仍開著舊版外殼」（#98），兩邊要一起改。
-func TestSettingsUIRecognizesOldShellDetail(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "platforms", "settings", "ui", "app.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "const OLD_SHELL = '"+OldShellDetail+"';") {
-		t.Fatalf("app.js does not match OldShellDetail %q", OldShellDetail)
 	}
 }

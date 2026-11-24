@@ -1,10 +1,8 @@
-"""Real-browser regression tests (#268): python3 platforms/settings/test/scroll_position_test.py.
+"""Real-browser regression tests (#268): python platforms/settings/test/scroll_position_test.py.
 
-Runs in Chromium (WebView2 on Windows) and WebKit (WebKitGTK on Linux, WKWebView
-on macOS). Requires Playwright; Chromium from PATH or CHROMIUM, WebKit from
-`python3 -m playwright install webkit`. An engine that is missing is skipped.
-Mocks only the Tauri command boundary, using the actual HTML/CSS/JS. Does not
-run an engine or access personal settings.
+Runs in Chromium, the engine of WebView2. Requires Playwright and Chromium from PATH or
+CHROMIUM; skipped when either is missing. Mocks only the Tauri command boundary, using the
+actual HTML/CSS/JS. Does not run an engine or access personal settings.
 """
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -28,14 +26,7 @@ def launch_chromium(playwright):
     return playwright.chromium.launch(executable_path=executable, headless=True, args=["--no-sandbox"])
 
 
-def launch_webkit(playwright):
-    try:
-        return playwright.webkit.launch(headless=True)
-    except Exception as error:  # Playwright's WebKit build is not installed.
-        raise unittest.SkipTest("requires Playwright WebKit (python3 -m playwright install webkit): " + str(error).splitlines()[0])
-
-
-class PositionTests:
+class PositionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         try:
@@ -44,7 +35,7 @@ class PositionTests:
             raise unittest.SkipTest("requires Playwright")
         cls.playwright = sync_playwright().start()
         try:
-            cls.browser = cls.launch(cls.playwright)
+            cls.browser = launch_chromium(cls.playwright)
         except unittest.SkipTest:
             cls.playwright.stop()
             raise
@@ -76,8 +67,7 @@ class PositionTests:
           window.testIntervals = [];
           window.setInterval = (callback, delay) => window.testIntervals.push({callback, delay});
           window.testSettings = FIXTURE;
-          // Lets render() and anything the engine defers to a task or the next frame happen
-          // (WebKit scrolls a focused element into view from a queued task, not inside focus()).
+          // Lets render() and anything the engine defers to a task or the next frame happen.
           window.testSettle = async () => {
             await new Promise(resolve => setTimeout(resolve, 50));
             await new Promise(requestAnimationFrame);
@@ -131,7 +121,7 @@ class PositionTests:
         self.assert_position_preserved('extra-0')
 
     def test_background_refresh_with_previously_clicked_choice(self):
-        # #268: the radio input is focused again before WebKit has laid it out.
+        # #268: the radio input is focused again before it has been laid out.
         self.assert_position_preserved('extra-1:a')
 
     def test_background_refresh_without_focused_control(self):
@@ -156,16 +146,6 @@ class PositionTests:
         self.page.locator('.nav[data-page="mode"]').click()
         self.assertEqual(self.page.evaluate("document.querySelector('main').scrollTop"), 0)
         self.assertEqual(self.errors, [])
-
-
-class ChromiumPositionTests(PositionTests, unittest.TestCase):
-    """WebView2 (Windows) is Chromium."""
-    launch = staticmethod(launch_chromium)
-
-
-class WebKitPositionTests(PositionTests, unittest.TestCase):
-    """WebKitGTK (Linux) and WKWebView (macOS) are WebKit."""
-    launch = staticmethod(launch_webkit)
 
 
 if __name__ == '__main__':

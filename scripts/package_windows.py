@@ -16,9 +16,9 @@ import sys
 import tempfile
 import zipfile
 
-from install_package import digest, regular
 from collect_notices import collect
-from package_release import ROOT, DATA_FILES, check_licenses, copy_licenses, check_release_docs, copy_release_docs, check_data, copy_neural, copy_english, seal_data
+from package_release import (ROOT, DATA_FILES, check_licenses, copy_licenses, check_release_docs, copy_release_docs, check_data,
+                             copy_neural, copy_english, digest, regular, seal_data, valid_version)
 import hf_models
 
 # 內嵌 Python 的 ._pth 或 PYTHONPATH 指向另一份原始碼時，會打包出那份程式（2026-10-01 曾因沿用舊建置目錄的
@@ -299,7 +299,6 @@ def build(args):
     if dirty and not args.preview:
         raise ValueError("公開包需要乾淨且已提交的程式碼；未提交版本請用 --preview")
     # Keep version syntax identical to the updater before using it in a path.
-    from package_release import valid_version
     if not valid_version(args.version):
         raise ValueError("版本請用 0.1.0-beta.1 形式")
     settings, settings_notices = check_settings(args.settings) if args.settings else (None, "")
@@ -374,7 +373,7 @@ def build(args):
         copy_release_docs(release_docs, stage)
         copy_licenses(stage)
         (stage / "THIRD_PARTY_NOTICES.txt").write_text(
-            collect("windows-amd64", stage / "neural" if args.neural else None, go=args.go, cargo=args.cargo)
+            collect(stage / "neural" if args.neural else None, go=args.go, cargo=args.cargo)
             + ("\n" + settings_notices if settings_notices else ""), encoding="utf-8")
         if args.preview:
             (stage / "PREVIEW.txt").write_text("內部驗證包，非公開發行版。\n", encoding="utf-8")
@@ -412,7 +411,7 @@ def main():
     parser.add_argument("--e2e-fault", choices=["version-mismatch"], help="E2E 故障套件 F：引擎回報不符的版本（須搭配 --e2etest）")
     parser.add_argument("--e2etest", action="store_true", help="E2E 測試版：更新器信任測試金鑰／CA，更新器與引擎包含可控同步點；須搭配 --preview")
     parser.add_argument("--go", default="go")
-    parser.add_argument("--neural", type=Path, help="scripts/prepare_neural.py --platform windows-amd64 產生的 neural/ 目錄")
+    parser.add_argument("--neural", type=Path, help="scripts/prepare_neural.py 產生的 neural/ 目錄")
     parser.add_argument("--cargo", default="cargo")
     parser.add_argument("--settings", type=Path, help="scripts/build_settings_windows.py 產生的目錄（0c-settings.exe 與 NOTICES.txt）；省略則不內附設定程式")
     parser.add_argument("--signtool", type=Path, help="Windows SDK x64 signtool.exe")

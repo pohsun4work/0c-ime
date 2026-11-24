@@ -1,5 +1,3 @@
-//go:build !windows
-
 package main
 
 import (
@@ -7,11 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -22,86 +17,36 @@ import (
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
-func buildServer(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "0c-server")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	return binary
-}
-
-func waitDial(t *testing.T, sock string) {
-	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if c, err := net.Dial("unix", sock); err == nil {
-			c.Close()
-			return
-		}
-	}
-	t.Fatalf("連不上 %s", sock)
-}
-
-// 升級過渡期：0c-server 同時服務新舊 socket；舊名稱已有 server（舊版 zuin-server）時不另起第二個寫入者。
+// 升級過渡期：0c-server 同時服務新舊管道；舊名稱已有 server（舊版 zuin-server）時不另起第二個寫入者。
 func TestServesLegacySocketAndDefersToRunningLegacyServer(t *testing.T) {
 	binary := buildServer(t)
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
-	sock, legacy := filepath.Join(dir, "0c.sock"), filepath.Join(dir, "zuin.sock")
+	sock, legacy := testPipe("0c"), testPipe("zuin")
 	args := []string{"-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-legacy-socket", legacy}
 
-	server := exec.Command(binary, args...)
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
+	server, _ := startServer(t, binary, args...)
 	waitDial(t, sock)
 	waitDial(t, legacy)
-	second := exec.Command(binary, args...)
+	second := serverCommand(binary, args...)
 	if out, err := second.CombinedOutput(); err != nil {
 		t.Fatalf("第二個實例應直接結束：%v\n%s", err, out)
 	}
-	server.Process.Signal(os.Interrupt)
-	server.Wait()
+	stopServer(t, server)
 	for _, name := range []string{sock, legacy} {
-		if _, err := os.Stat(name); !os.IsNotExist(err) {
-			t.Errorf("結束後仍留下 %s", name)
+		if serving(name) {
+			t.Errorf("結束後仍在服務 %s", name)
 		}
 	}
 
 	// 只有舊名稱被佔用時也不能啟動，否則兩個 server 會同時寫個人詞庫。
-	old, err := net.Listen("unix", legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer old.Close()
-	if out, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
+	occupyPipe(t, legacy)
+	if out, err := serverCommand(binary, args...).CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if _, err := os.Stat(sock); !os.IsNotExist(err) {
-		t.Fatal("舊版執行中仍佔用新 socket")
+	if serving(sock) {
+		t.Fatal("舊版執行中仍佔用新管道")
 	}
-}
-
-// 隔離測試只指定 -socket 時，不得碰使用者真正的舊 socket。
-func TestExplicitSocketDisablesLegacyDefault(t *testing.T) {
-	binary := buildServer(t)
-	dir := t.TempDir()
-	runtime := filepath.Join(dir, "runtime")
-	os.MkdirAll(filepath.Join(runtime, "zuin"), 0o700)
-	legacy, err := net.Listen("unix", filepath.Join(runtime, "zuin", "zuin.sock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer legacy.Close()
-	data, _ := filepath.Abs("../../testdata/toy")
-	sock := filepath.Join(dir, "test.sock")
-	server := exec.Command(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock)
-	server.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtime)
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
-	waitDial(t, sock)
 }
 
 // 回復到舊版後讀到較新格式的個人詞庫：照常輸入，但不得寫回覆蓋。
@@ -112,15 +57,10 @@ func TestNewerUserStoreIsNeverOverwritten(t *testing.T) {
 	user := filepath.Join(dir, "user.json")
 	original := []byte(`{"Format":99,"Uni":{"麻婆":5},"Later":{"x":1}}` + "\n")
 	os.WriteFile(user, original, 0o600)
-	sock := filepath.Join(dir, "0c.sock")
-	server := exec.Command(binary, "-data", data, "-user", user, "-socket", sock)
-	var logs bytes.Buffer
-	server.Stderr = &logs
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
+	sock := testPipe("newer")
+	server, logs := startServer(t, binary, "-data", data, "-user", user, "-socket", sock)
 	waitDial(t, sock)
-	c, err := net.Dial("unix", sock)
+	c, err := dial(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,8 +85,7 @@ func TestNewerUserStoreIsNeverOverwritten(t *testing.T) {
 	}
 	c.Close()
 	time.Sleep(saveIdle + 2*saveTick) // 跨過一次停止打字後的存檔時機；結束時的存檔也不得寫回
-	server.Process.Signal(os.Interrupt)
-	server.Wait()
+	stopServer(t, server)
 	if got, _ := os.ReadFile(user); !bytes.Equal(got, original) {
 		t.Fatalf("較新格式的個人詞庫被改寫：%s\n%s", got, logs.String())
 	}
@@ -166,14 +105,11 @@ func TestSelectionSettingAndBundledDiscovery(t *testing.T) {
 		if settingsJSON != "" {
 			os.WriteFile(filepath.Join(filepath.Dir(user), "settings.json"), []byte(settingsJSON), 0o600)
 		}
-		sock := filepath.Join(root, "0c.sock")
-		server := exec.Command(binary, "-data", filepath.Join(root, "data"), "-user", user, "-socket", sock)
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+		sock := testPipe("selection")
+		server, _ := startServer(t, binary, "-data", filepath.Join(root, "data"), "-user", user, "-socket", sock)
+		defer stopServer(t, server)
 		waitDial(t, sock)
-		c, err := net.Dial("unix", sock)
+		c, err := dial(sock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,12 +125,19 @@ func TestSelectionSettingAndBundledDiscovery(t *testing.T) {
 	}
 	layout := func(t *testing.T, withBundle bool) string {
 		root := t.TempDir()
-		os.Symlink(toy, filepath.Join(root, "data"))
+		os.Mkdir(filepath.Join(root, "data"), 0o755)
+		for _, name := range []string{"lexicon.tsv", "lm.tsv"} {
+			b, err := os.ReadFile(filepath.Join(toy, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			os.WriteFile(filepath.Join(root, "data", name), b, 0o644)
+		}
 		if withBundle {
 			n := filepath.Join(root, "neural")
-			os.MkdirAll(filepath.Join(n, "python", "bin"), 0o755)
+			os.MkdirAll(filepath.Join(n, "python"), 0o755)
 			os.MkdirAll(filepath.Join(n, "select"), 0o755)
-			os.WriteFile(filepath.Join(n, "python", "bin", "python3"), []byte("#!/bin/sh\nexit 1\n"), 0o755)
+			os.WriteFile(filepath.Join(n, "python", "python.exe"), nil, 0o755)
 			os.WriteFile(filepath.Join(n, "sequence_runtime.py"), nil, 0o644)
 			os.WriteFile(filepath.Join(n, "select", "manifest.json"), []byte(`{}`), 0o644)
 		}
@@ -268,15 +211,13 @@ func TestHealthReportsBackgroundWorkerFailureWhileInputContinues(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sock := filepath.Join(dir, "e.sock")
-	server := exec.Command(binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock,
-		"-neural-package", filepath.Join(dir, "select"), "-punct-package", filepath.Join(dir, "punct"), "-neural-python", "/usr/bin/false")
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+	sock := testPipe("worker-failure")
+	fails := filepath.Join(os.Getenv("SystemRoot"), "System32", "whoami.exe") // 不認得 Python 的參數，立即以結束碼 1 結束
+	server, _ := startServer(t, binary, "-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock,
+		"-neural-package", filepath.Join(dir, "select"), "-punct-package", filepath.Join(dir, "punct"), "-neural-python", fails)
+	defer stopServer(t, server)
 	waitDial(t, sock)
-	c, err := net.Dial("unix", sock)
+	c, err := dial(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,13 +265,10 @@ func TestDrainSavesLearningAndExits(t *testing.T) {
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
 	user := filepath.Join(dir, "user.json")
-	sock := filepath.Join(dir, "0c.sock")
-	server := exec.Command(binary, "-data", data, "-user", user, "-socket", sock)
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
+	sock := testPipe("drain")
+	server, _ := startServer(t, binary, "-data", data, "-user", user, "-socket", sock)
 	waitDial(t, sock)
-	c, err := net.Dial("unix", sock)
+	c, err := dial(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,16 +295,12 @@ func TestDrainSavesLearningAndExits(t *testing.T) {
 	// 明確刪除學習一定寫入個人詞庫（tombstone），用來確認交接前的變更有存檔。
 	call(ipc.Envelope{Op: ipc.OpHandle, Session: open.Session, Req: &proto.Request{Type: proto.Forget, Word: "麻婆豆腐"}})
 	call(ipc.Envelope{Op: ipc.OpDrain})
-	done := make(chan error, 1)
-	go func() { done <- server.Wait() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("server exit: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		server.Process.Kill()
+	exited, err := waitFor(server, 10*time.Second)
+	if !exited {
 		t.Fatal("server did not exit after drain")
+	}
+	if err != nil {
+		t.Fatalf("server exit: %v", err)
 	}
 	b, err := os.ReadFile(user)
 	if err != nil || !bytes.Contains(b, []byte(`"麻婆豆腐":true`)) {
@@ -380,14 +314,11 @@ func TestSaveWaitsForPauseButForgetIsPrompt(t *testing.T) {
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
 	user := filepath.Join(dir, "user.json")
-	sock := filepath.Join(dir, "0c.sock")
-	server := exec.Command(binary, "-data", data, "-user", user, "-socket", sock)
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { server.Process.Signal(os.Interrupt); server.Wait() }()
+	sock := testPipe("save")
+	server, _ := startServer(t, binary, "-data", data, "-user", user, "-socket", sock)
+	defer stopServer(t, server)
 	waitDial(t, sock)
-	c, err := net.Dial("unix", sock)
+	c, err := dial(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,38 +353,5 @@ func TestSaveWaitsForPauseButForgetIsPrompt(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("刪除學習後 3 秒內沒有寫入個人詞庫")
 		}
-	}
-}
-
-// engine.json 指向另一個版本目錄時，預設啟動改由該版引擎與配對字典執行；明確 -data 不轉交。
-func TestEnginePointerRedirectsDefaultLaunch(t *testing.T) {
-	binary := buildServer(t)
-	home := t.TempDir()
-	base := filepath.Join(home, ".local/share/zuin")
-	ver := filepath.Join(base, "versions", "0.1.0-dev.99-test")
-	os.MkdirAll(filepath.Join(ver, "data"), 0o700)
-	// 目標「引擎」是一支腳本，記錄它收到的參數後結束，證明轉交發生且帶入配對字典。
-	marker := filepath.Join(home, "redirected")
-	os.WriteFile(filepath.Join(ver, "0c-server"), []byte("#!/bin/sh\necho \"$@\" > "+marker+"\n"), 0o755)
-	os.WriteFile(filepath.Join(ver, "data", "manifest.json"), []byte("{}"), 0o600)
-	os.WriteFile(filepath.Join(base, "engine.json"), []byte(`{"schema":1,"directory":"versions/0.1.0-dev.99-test","version":"0.1.0-dev.99"}`), 0o600)
-	cmd := exec.Command(binary, "-idle-exit", "1s")
-	cmd.Env = append(os.Environ(), "HOME="+home, "XDG_RUNTIME_DIR="+t.TempDir(), "ZC_ENGINE_REDIRECTED=")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%v %s", err, out)
-	}
-	got, err := os.ReadFile(marker)
-	if err != nil || !strings.Contains(string(got), "-data "+filepath.Join(ver, "data")) || !strings.Contains(string(got), "-idle-exit 1s") {
-		t.Fatalf("not redirected with paired data: %q %v", got, err)
-	}
-	os.Remove(marker)
-	toy, _ := filepath.Abs("../../testdata/toy")
-	explicit := exec.Command(binary, "-check-data", "-data", toy)
-	explicit.Env = append(os.Environ(), "HOME="+home, "ZC_ENGINE_REDIRECTED=")
-	if out, err := explicit.CombinedOutput(); err != nil || !strings.Contains(string(out), "可載入") {
-		t.Fatalf("explicit -data must not redirect: %v %s", err, out)
-	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Fatal("explicit -data was redirected")
 	}
 }

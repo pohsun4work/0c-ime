@@ -19,7 +19,7 @@ go run ./cmd/0c-english -source data/english -out build/english
 
 輸出包含 `words.bin`、獨立的 `manifest.json` 與 `NOTICE.txt`。輸出須為新目錄或空目錄；已有產物時選新目錄。任何來源雜湊、等級、排序、權重或授權錯誤都在建立產物前拒絕。相同輸入產生相同位元組，不寫時間戳。
 
-Linux／Windows／macOS 打包器在簽章與資料混淆前加入 `data/english/`。若輸入中文包已有英文子包，先驗證再沿用；否則從本來源編譯。中文 `manifest.json` 不加英文欄位，中文／神經模型配對雜湊保持原值。English `words.bin` 沿用既有混淆，執行期解開後核對明文 SHA256。
+Windows 打包器在簽章與資料混淆前加入 `data/english/`。若輸入中文包已有英文子包，先驗證再沿用；否則從本來源編譯。中文 `manifest.json` 不加英文欄位，中文／神經模型配對雜湊保持原值。English `words.bin` 沿用既有混淆，執行期解開後核對明文 SHA256。
 
 沒有英文子包的舊資料仍使用 104 詞試用表。部分檔案缺漏、損壞、格式不支援或來源／授權缺漏的子包會拒絕載入；不把破損包當完整字典。降版／回復留下的空目錄可使用舊資料回退。
 

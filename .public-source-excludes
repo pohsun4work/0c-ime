@@ -9,9 +9,6 @@ build/
 data/raw/
 data/research
 migration
-Mac-E2E.md
-platforms/macos/Tests/E2E
-platforms/macos/Tests/Acceptance
 data/pipeline/probe_lexicon
 **/HANDOFF.md
 

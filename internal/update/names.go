@@ -8,9 +8,6 @@ import (
 // Releases through 0.1.0-dev.15 installed the original zuin-* program names. The updater keeps
 // recognizing them so it can upgrade from, clean up after, and roll back to those releases.
 
-// LinuxLegacyServer marks a Linux bundle that still uses the zuin-* names.
-const LinuxLegacyServer = "bin/zuin-server"
-
 // WindowsLayout names the program files of one naming generation.
 type WindowsLayout struct{ DLL, Server, UI string }
 

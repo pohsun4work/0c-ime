@@ -1,6 +1,6 @@
 // Package enginedir 管理「目前使用的引擎版本」：個人資料目錄下的 engine.json 指向
 // versions/ 內的一個版本目錄（引擎、配對字典與神經模型）。相容核心更新只改這個指標，
-// 外殼（TSF DLL、Fcitx addon）不變；檔案不存在或無效時，外殼沿用原本的引擎位置。
+// 外殼（TSF DLL）不變；檔案不存在或無效時，外殼沿用原本的引擎位置。
 package enginedir
 
 import (
@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/0c-biggo/0c-ime/internal/robustio"
@@ -97,12 +96,7 @@ func Remove(base string) error {
 }
 
 // Executable 是版本目錄中的引擎檔名。
-func Executable() string {
-	if runtime.GOOS == "windows" {
-		return "0c-server.exe"
-	}
-	return "0c-server"
-}
+func Executable() string { return "0c-server.exe" }
 
 // Resolve 回傳指標所指的引擎與配對字典目錄；指標不存在、無效或檔案不齊全時 ok 為 false。
 func Resolve(base string) (exe, data string, ok bool) {
@@ -160,12 +154,7 @@ func ReadFiles(dir string) (map[string]string, error) {
 }
 
 // SettingsExecutable 是版本目錄中設定程式的檔名。
-func SettingsExecutable() string {
-	if runtime.GOOS == "windows" {
-		return "0c-settings.exe"
-	}
-	return "0c-settings"
-}
+func SettingsExecutable() string { return "0c-settings.exe" }
 
 // Dir 回傳目前引擎指標所指的版本目錄的實際路徑；沒有有效指標時 ok 為 false。
 func Dir(base string) (dir string, ok bool) {

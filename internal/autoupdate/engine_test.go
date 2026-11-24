@@ -1,19 +1,19 @@
-//go:build !windows
-
 package autoupdate
 
 import (
-	"archive/tar"
-	"compress/gzip"
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/Microsoft/go-winio"
 
 	"github.com/0c-biggo/0c-ime/bridge/ipc"
 	"github.com/0c-biggo/0c-ime/core/engine"
@@ -23,86 +23,92 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
 
-// linuxArchive 產生一個最小的 Linux 套件壓縮包；引擎以殼腳本代替，-check-data 依 fail 決定成敗。
-func linuxArchive(t *testing.T, version string, fail bool) (string, string) {
-	t.Helper()
-	return linuxArchiveWith(t, version, fail, nil)
+// TestMain：PrepareCore 以 -check-data 執行套件裡的引擎，測試套件的引擎就是這個測試執行檔（windowsArchiveWith），
+// 字典的 report.txt 是 broken 時當成檢查失敗。
+func TestMain(m *testing.M) {
+	if len(os.Args) == 4 && os.Args[1] == "-check-data" && os.Args[2] == "-data" {
+		if b, _ := os.ReadFile(filepath.Join(os.Args[3], "report.txt")); string(b) == "broken" {
+			fmt.Fprintln(os.Stderr, "broken")
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
 }
 
-// linuxArchiveWith 同上，另外加入 extra 指定的檔案（路徑 → 內容）。
-func linuxArchiveWith(t *testing.T, version string, fail bool, extra map[string]string) (string, string) {
+// windowsArchive 產生一個最小的 Windows 套件 ZIP；引擎是這個測試執行檔，-check-data 依 fail 決定成敗。
+func windowsArchive(t *testing.T, version string, fail bool) (string, string) {
 	t.Helper()
-	dir := t.TempDir()
-	root := filepath.Join(dir, "0c-"+version)
-	server := "#!/bin/sh\nexit 0\n"
+	return windowsArchiveWith(t, version, fail, nil)
+}
+
+// windowsArchiveWith 同上，另外加入 extra 指定的檔案（路徑 → 內容）。
+func windowsArchiveWith(t *testing.T, version string, fail bool, extra map[string]string) (string, string) {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := "r"
 	if fail {
-		server = "#!/bin/sh\necho broken >&2\nexit 3\n"
+		report = "broken"
 	}
-	files := map[string]string{"bin/0c-server": server, "bin/0c-update": "u", "install.py": "i", "lib/lib0c.so": "so",
-		"data/manifest.json": "{}", "data/lexicon.bin": "l", "data/lm.bin": "m", "data/NOTICE.txt": "n", "data/report.txt": "r",
-		"neural/select/manifest.json": "{}"}
+	files := map[string][]byte{"0c-server.exe": server, "0c-update.exe": []byte("u"), "0c_tsf.dll": []byte("dll"), "0c-ui.exe": []byte("ui"),
+		"data/manifest.json": []byte("{}"), "data/lexicon.bin": []byte("l"), "data/lm.bin": []byte("m"), "data/NOTICE.txt": []byte("n"),
+		"data/report.txt": []byte(report), "neural/select/manifest.json": []byte("{}")}
 	for name, body := range extra {
-		files[name] = body
+		files[name] = []byte(body)
 	}
-	r := update.Release{Schema: 1, Product: "0c", Version: version, Channel: "public-beta", OS: "linux", Arch: "amd64", Files: map[string]string{}}
+	r := update.Release{Schema: 1, Product: "0c", Version: version, Channel: "public-beta", OS: "windows", Arch: "amd64", Files: map[string]string{}}
 	for name, body := range files {
-		p := filepath.Join(root, name)
-		os.MkdirAll(filepath.Dir(p), 0o700)
-		mode := os.FileMode(0o600)
-		if name == "bin/0c-server" || name == "bin/0c-settings" {
-			mode = 0o700
-		}
-		if err := os.WriteFile(p, []byte(body), mode); err != nil {
+		sum := sha256.Sum256(body)
+		r.Files[name] = hex.EncodeToString(sum[:])
+	}
+	files["release.json"], _ = json.Marshal(r)
+	archive := filepath.Join(t.TempDir(), "bundle.zip")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z := zip.NewWriter(f)
+	for name, body := range files {
+		w, err := z.CreateHeader(&zip.FileHeader{Name: "0c-" + version + "/" + name, Method: zip.Store})
+		if err != nil {
 			t.Fatal(err)
 		}
-		r.Files[name], _ = update.Hash(p)
+		w.Write(body)
 	}
-	b, _ := json.Marshal(r)
-	os.WriteFile(filepath.Join(root, "release.json"), b, 0o600)
-	archive := filepath.Join(dir, "bundle.tar.gz")
-	f, _ := os.Create(archive)
-	gz := gzip.NewWriter(f)
-	tw := tar.NewWriter(gz)
-	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		rel, _ := filepath.Rel(dir, p)
-		h, _ := tar.FileInfoHeader(info, "")
-		h.Name = filepath.ToSlash(rel)
-		if info.IsDir() {
-			h.Name += "/"
-		}
-		tw.WriteHeader(h)
-		if !info.IsDir() {
-			c, _ := os.ReadFile(p)
-			tw.Write(c)
-		}
-		return nil
-	})
-	tw.Close()
-	gz.Close()
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
 	f.Close()
 	sum, _ := update.Hash(archive)
 	return archive, sum
 }
 
-var linuxCore = CoreLayout{Server: "bin/0c-server", Update: "bin/0c-update"}
+var windowsCore = CoreLayout{Server: "0c-server.exe", Update: "0c-update.exe"}
 
 func TestPrepareCoreSwitchRevertAndPrune(t *testing.T) {
 	base := t.TempDir()
-	archive, sum := linuxArchive(t, "0.1.0-dev.18", false)
+	archive, sum := windowsArchive(t, "0.1.0-dev.18", false)
 	target := Target{Version: "0.1.0-dev.18", Kind: "core", SHA256: sum}
-	dir, err := PrepareCore(base, "", archive, target, "linux", "amd64", linuxCore)
+	dir, err := PrepareCore(base, archive, target, "windows", "amd64", windowsCore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"0c-server", "0c-update", "data/manifest.json", "neural/select/manifest.json"} {
+	for _, p := range []string{"0c-server.exe", "0c-update.exe", "data/manifest.json", "neural/select/manifest.json"} {
 		if _, err := os.Stat(filepath.Join(base, dir, p)); err != nil {
 			t.Fatalf("missing %s: %v", p, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(base, dir, "install.py")); err == nil {
+	if _, err := os.Stat(filepath.Join(base, dir, "0c_tsf.dll")); err == nil {
 		t.Fatal("shell files must not be copied into a core directory")
 	}
-	if again, err := PrepareCore(base, "", archive, target, "linux", "amd64", linuxCore); err != nil || again != dir {
+	if again, err := PrepareCore(base, archive, target, "windows", "amd64", windowsCore); err != nil || again != dir {
 		t.Fatalf("prepare must be idempotent: %v %v", again, err)
 	}
 	if err := SwitchPointer(base, dir, target.Version); err != nil || PointerVersion(base) != "0.1.0-dev.18" {
@@ -149,26 +155,25 @@ func TestPrepareCoreSwitchRevertAndPrune(t *testing.T) {
 
 // 設定程式是核心版本目錄的選用成員：複製並記錄雜湊；舊版佈局（不認得它）與沒有它的套件都照常準備。
 func TestPrepareCoreCopiesSettingsProgramAndRecordsHashes(t *testing.T) {
-	withSettings := CoreLayout{Server: "bin/0c-server", Update: "bin/0c-update", Settings: "bin/0c-settings"}
-	archive, sum := linuxArchiveWith(t, "0.1.0-dev.43", false, map[string]string{"bin/0c-settings": "settings-program"})
+	withSettings := CoreLayout{Server: "0c-server.exe", Update: "0c-update.exe", Settings: "0c-settings.exe"}
+	archive, sum := windowsArchiveWith(t, "0.1.0-dev.43", false, map[string]string{"0c-settings.exe": "settings-program"})
 	target := Target{Version: "0.1.0-dev.43", Kind: "core", SHA256: sum}
 	want := sha256.Sum256([]byte("settings-program"))
 
 	base := t.TempDir()
-	dir, err := PrepareCore(base, "", archive, target, "linux", "amd64", withSettings)
+	dir, err := PrepareCore(base, archive, target, "windows", "amd64", withSettings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := os.Stat(filepath.Join(base, dir, "0c-settings"))
-	if err != nil || st.Mode().Perm()&0o100 == 0 {
-		t.Fatalf("設定程式應複製並保持可執行：%v %v", st, err)
+	if _, err := os.Stat(filepath.Join(base, dir, "0c-settings.exe")); err != nil {
+		t.Fatalf("設定程式應複製：%v", err)
 	}
 	hashes, err := enginedir.ReadFiles(filepath.Join(base, dir))
-	if err != nil || hashes["0c-settings"] != hex.EncodeToString(want[:]) || hashes["0c-server"] == "" || hashes["0c-update"] == "" {
+	if err != nil || hashes["0c-settings.exe"] != hex.EncodeToString(want[:]) || hashes["0c-server.exe"] == "" || hashes["0c-update.exe"] == "" {
 		t.Fatalf("應記錄最上層檔案的雜湊：%v %v", hashes, err)
 	}
 	for name := range hashes {
-		if name != "0c-server" && name != "0c-update" && name != "0c-settings" {
+		if name != "0c-server.exe" && name != "0c-update.exe" && name != "0c-settings.exe" {
 			t.Errorf("不該記錄 %s（data／neural 檔案太多，不逐一記錄）", name)
 		}
 	}
@@ -184,20 +189,20 @@ func TestPrepareCoreCopiesSettingsProgramAndRecordsHashes(t *testing.T) {
 
 	// 舊版佈局不認得設定程式：略過它，其餘照常，也不在記錄裡出現。
 	old := t.TempDir()
-	dir, err = PrepareCore(old, "", archive, target, "linux", "amd64", linuxCore)
+	dir, err = PrepareCore(old, archive, target, "windows", "amd64", windowsCore)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(old, dir, "0c-settings")); err == nil {
+	if _, err := os.Stat(filepath.Join(old, dir, "0c-settings.exe")); err == nil {
 		t.Fatal("不認得設定程式的佈局不得複製它")
 	}
-	if hashes, _ := enginedir.ReadFiles(filepath.Join(old, dir)); hashes["0c-settings"] != "" || hashes["0c-server"] == "" {
+	if hashes, _ := enginedir.ReadFiles(filepath.Join(old, dir)); hashes["0c-settings.exe"] != "" || hashes["0c-server.exe"] == "" {
 		t.Fatalf("%v", hashes)
 	}
 
 	// 套件沒有設定程式：照常準備，只是沒有它。
-	plain, plainSum := linuxArchive(t, "0.1.0-dev.42", false)
-	dir, err = PrepareCore(t.TempDir(), "", plain, Target{Version: "0.1.0-dev.42", Kind: "core", SHA256: plainSum}, "linux", "amd64", withSettings)
+	plain, plainSum := windowsArchive(t, "0.1.0-dev.42", false)
+	dir, err = PrepareCore(t.TempDir(), plain, Target{Version: "0.1.0-dev.42", Kind: "core", SHA256: plainSum}, "windows", "amd64", withSettings)
 	if err != nil || dir == "" {
 		t.Fatal(err)
 	}
@@ -205,49 +210,49 @@ func TestPrepareCoreCopiesSettingsProgramAndRecordsHashes(t *testing.T) {
 
 // 0c-mcp（#126）同樣是選用成員：複製並記錄雜湊，切換後 Windows 由它換上 bin\0c-mcp.exe；不認得它的佈局略過。
 func TestPrepareCoreCopiesMCPAndRecordsItsHash(t *testing.T) {
-	withMCP := CoreLayout{Server: "bin/0c-server", Update: "bin/0c-update", MCP: "bin/0c-mcp"}
-	archive, sum := linuxArchiveWith(t, "0.2.0-dev.1", false, map[string]string{"bin/0c-mcp": "mcp-bridge"})
+	withMCP := CoreLayout{Server: "0c-server.exe", Update: "0c-update.exe", MCP: "0c-mcp.exe"}
+	archive, sum := windowsArchiveWith(t, "0.2.0-dev.1", false, map[string]string{"0c-mcp.exe": "mcp-bridge"})
 	target := Target{Version: "0.2.0-dev.1", Kind: "core", SHA256: sum}
 	want := sha256.Sum256([]byte("mcp-bridge"))
 	base := t.TempDir()
-	dir, err := PrepareCore(base, "", archive, target, "linux", "amd64", withMCP)
+	dir, err := PrepareCore(base, archive, target, "windows", "amd64", withMCP)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, err := os.ReadFile(filepath.Join(base, dir, "0c-mcp")); err != nil || string(b) != "mcp-bridge" {
+	if b, err := os.ReadFile(filepath.Join(base, dir, "0c-mcp.exe")); err != nil || string(b) != "mcp-bridge" {
 		t.Fatalf("0c-mcp 應複製到核心目錄最上層：%q %v", b, err)
 	}
-	if hashes, err := enginedir.ReadFiles(filepath.Join(base, dir)); err != nil || hashes["0c-mcp"] != hex.EncodeToString(want[:]) {
+	if hashes, err := enginedir.ReadFiles(filepath.Join(base, dir)); err != nil || hashes["0c-mcp.exe"] != hex.EncodeToString(want[:]) {
 		t.Fatalf("應記錄 0c-mcp 的雜湊：%v %v", hashes, err)
 	}
 	old := t.TempDir()
-	if dir, err = PrepareCore(old, "", archive, target, "linux", "amd64", linuxCore); err != nil {
+	if dir, err = PrepareCore(old, archive, target, "windows", "amd64", windowsCore); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(old, dir, "0c-mcp")); err == nil {
+	if _, err := os.Stat(filepath.Join(old, dir, "0c-mcp.exe")); err == nil {
 		t.Fatal("不認得 0c-mcp 的佈局不得複製它")
 	}
 }
 
 // 0c-updatew（#289，Windows 排程用的無主控台啟動器）同樣是選用成員：複製並記錄雜湊，切換後由它換上穩定副本。
 func TestPrepareCoreCopiesLauncherAndRecordsItsHash(t *testing.T) {
-	withLauncher := CoreLayout{Server: "bin/0c-server", Update: "bin/0c-update", Launcher: "bin/0c-updatew"}
-	archive, sum := linuxArchiveWith(t, "0.2.0-dev.1", false, map[string]string{"bin/0c-updatew": "launcher"})
+	withLauncher := CoreLayout{Server: "0c-server.exe", Update: "0c-update.exe", Launcher: "0c-updatew.exe"}
+	archive, sum := windowsArchiveWith(t, "0.2.0-dev.1", false, map[string]string{"0c-updatew.exe": "launcher"})
 	target := Target{Version: "0.2.0-dev.1", Kind: "core", SHA256: sum}
 	want := sha256.Sum256([]byte("launcher"))
 	base := t.TempDir()
-	dir, err := PrepareCore(base, "", archive, target, "linux", "amd64", withLauncher)
+	dir, err := PrepareCore(base, archive, target, "windows", "amd64", withLauncher)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hashes, err := enginedir.ReadFiles(filepath.Join(base, dir)); err != nil || hashes["0c-updatew"] != hex.EncodeToString(want[:]) {
+	if hashes, err := enginedir.ReadFiles(filepath.Join(base, dir)); err != nil || hashes["0c-updatew.exe"] != hex.EncodeToString(want[:]) {
 		t.Fatalf("應記錄 0c-updatew 的雜湊：%v %v", hashes, err)
 	}
 	old := t.TempDir()
-	if dir, err = PrepareCore(old, "", archive, target, "linux", "amd64", linuxCore); err != nil {
+	if dir, err = PrepareCore(old, archive, target, "windows", "amd64", windowsCore); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(old, dir, "0c-updatew")); err == nil {
+	if _, err := os.Stat(filepath.Join(old, dir, "0c-updatew.exe")); err == nil {
 		t.Fatal("不認得 0c-updatew 的佈局不得複製它")
 	}
 }
@@ -260,16 +265,16 @@ func TestReadFilesIsNilForDirectoriesPreparedByOlderUpdaters(t *testing.T) {
 
 func TestPrepareCoreRejectsBrokenEngineAndWrongVersion(t *testing.T) {
 	base := t.TempDir()
-	archive, sum := linuxArchive(t, "0.1.0-dev.18", true)
-	if _, err := PrepareCore(base, "", archive, Target{Version: "0.1.0-dev.18", SHA256: sum}, "linux", "amd64", linuxCore); err == nil {
+	archive, sum := windowsArchive(t, "0.1.0-dev.18", true)
+	if _, err := PrepareCore(base, archive, Target{Version: "0.1.0-dev.18", SHA256: sum}, "windows", "amd64", windowsCore); err == nil {
 		t.Fatal("an engine that fails -check-data must not be prepared")
 	}
 	entries, _ := os.ReadDir(filepath.Join(base, "versions"))
 	if len(entries) != 0 {
 		t.Fatalf("failed prepare must leave nothing: %v", entries)
 	}
-	archive, sum = linuxArchive(t, "0.1.0-dev.18", false)
-	if _, err := PrepareCore(base, "", archive, Target{Version: "0.1.0-dev.19", SHA256: sum}, "linux", "amd64", linuxCore); err == nil {
+	archive, sum = windowsArchive(t, "0.1.0-dev.18", false)
+	if _, err := PrepareCore(base, archive, Target{Version: "0.1.0-dev.19", SHA256: sum}, "windows", "amd64", windowsCore); err == nil {
 		t.Fatal("bundle version must match the signed feed")
 	}
 }
@@ -290,16 +295,16 @@ func toyEngine(t *testing.T) *engine.Engine {
 	return engine.New(lex, sys)
 }
 
-func TestHealthAndDrainOverSocket(t *testing.T) {
-	sock := filepath.Join(t.TempDir(), "e.sock")
-	dial := func(d time.Duration) (net.Conn, error) { return net.DialTimeout("unix", sock, d) }
+func TestHealthAndDrainOverPipe(t *testing.T) {
+	pipe := fmt.Sprintf(`\\.\pipe\0c-test-autoupdate-%d`, os.Getpid())
+	dial := func(d time.Duration) (net.Conn, error) { return winio.DialPipe(pipe, &d) }
 	if _, running, err := Health(dial); running || err != nil {
 		t.Fatal("no engine must report not running without error")
 	}
 	if err := Drain(context.Background(), dial, time.Second); err != nil {
 		t.Fatal(err)
 	}
-	l, err := net.Listen("unix", sock)
+	l, err := winio.ListenPipe(pipe, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

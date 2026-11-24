@@ -47,8 +47,8 @@ const (
 	ReasonMissingRuntime = "missing_runtime" // Python 擴充模組載入失敗：缺少系統 DLL
 	ReasonTimeout        = "timeout"         // 沒有在時限內回報就緒
 	ReasonFailed         = "failed"          // 其他原因：結束、回應不符
-	// ReasonRuntimeMissing：找不到 Python，或 Python 匯入不到 numpy、onnxruntime（Linux 系統安裝沒裝
-	// python3-numpy、python3-onnxruntime，#181）。health 的狀態直接報 runtime_missing，不當成模型故障。
+	// ReasonRuntimeMissing：找不到內附的 Python，或它匯入不到 numpy、onnxruntime（安裝不完整）。
+	// health 的狀態直接報 runtime_missing，不當成模型故障。
 	ReasonRuntimeMissing = "runtime_missing"
 )
 
@@ -100,8 +100,7 @@ func startupError(what string, err error, stderr string) *StartupError {
 	return &StartupError{Reason: ReasonFailed, what: what}
 }
 
-// launchError 分類啟動 worker 行程本身（exec）的錯誤：Python 執行檔不存在（Linux 系統安裝沒裝 python3，
-// 或還沒裝好）是 runtime_missing；其他錯誤照原樣回傳，歸為 failed。只用在 cmd.Start：manifest、model.onnx、
+// launchError 分類啟動 worker 行程本身（exec）的錯誤：Python 執行檔不存在（安裝不完整）是 runtime_missing；其他錯誤照原樣回傳，歸為 failed。只用在 cmd.Start：manifest、model.onnx、
 // vocab.json 讀不到同樣是 fs.ErrNotExist，那是模型檔的問題，不是缺推論環境（#181）。
 func launchError(what string, err error) error {
 	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
@@ -119,8 +118,8 @@ func startupReason(err error) string {
 	return ReasonFailed
 }
 
-// RuntimeMissingRetry 是缺少推論環境時重試啟動 worker 的間隔：使用者裝好 python3-onnxruntime 後
-// 不必重啟引擎，下一次重試就會載入；間隔夠長，缺套件時不會每幾秒啟動一次 Python。
+// RuntimeMissingRetry 是缺少推論環境時重試啟動 worker 的間隔：重新安裝補齊後不必重啟引擎，下一次重試
+// 就會載入；間隔夠長，缺元件時不會每幾秒啟動一次 Python。
 const RuntimeMissingRetry = 10 * time.Minute
 
 // retryCooldown 是啟動失敗後到下一次重試的冷卻。
@@ -295,12 +294,10 @@ func loadManifest(c Config) (Manifest, error) {
 }
 
 // NoTelemetryEnv 關掉 onnxruntime 的遙測，給所有會 import onnxruntime 的 Python 子行程（docs/46）。
-// 內附的 onnxruntime 1.30.0 在 import 時（建立全域 Env）就啟動遙測，變數必須在那之前就在環境裡：
-//   - Linux／macOS：1DS 每隔幾秒連 mobile.events.data.microsoft.com:443，並在 ~/.cache/Microsoft/DeveloperTools/.onnxruntime
-//     （macOS 為 ~/Library/Application Support/Microsoft/DeveloperTools/.onnxruntime）寫 deviceid 與 onnxruntime.db。
-//     ORT_DISABLE_TELEMETRY=1 是它公開的關閉方式，初始化時讀取。
-//   - Windows：不連網，改寫 ETW（Microsoft.ML.ONNXRuntime，交給系統的診斷資料服務），不讀 ORT_DISABLE_TELEMETRY。
-//     ORT_RUNNING_UNIT_TESTS=1 讓兩種實作都不註冊、不寫任何事件（1.30.0 只有遙測讀它；升級 onnxruntime 要重新確認）。
+// 內附的 onnxruntime 1.30.0 在 import 時（建立全域 Env）就啟動遙測，變數必須在那之前就在環境裡：Windows 版不連網，
+// 改寫 ETW（Microsoft.ML.ONNXRuntime，交給系統的診斷資料服務），不讀 ORT_DISABLE_TELEMETRY（那是其他平台 1DS 遙測的
+// 公開關閉方式，一併設定無妨）。ORT_RUNNING_UNIT_TESTS=1 讓它不註冊、不寫任何事件（1.30.0 只有遙測讀它；升級
+// onnxruntime 要重新確認）。
 //
 // worker 腳本另外再設一次並呼叫 disable_telemetry_events()。
 var NoTelemetryEnv = []string{"ORT_DISABLE_TELEMETRY=1", "ORT_RUNNING_UNIT_TESTS=1"}

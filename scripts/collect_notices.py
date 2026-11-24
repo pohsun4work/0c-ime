@@ -2,8 +2,8 @@
 """Collect third-party license texts for what a bundle actually ships.
 
 Sources are the shipped components themselves: the Go toolchain and modules linked into the
-binaries, the bundled CPython and its packages, Rust crates in the Windows build, and headers
-compiled into the Fcitx addon. The dictionary's source attributions stay in data/NOTICE.txt.
+Windows binaries, the bundled CPython and its packages, and the Rust crates of the Windows shell.
+The dictionary's source attributions stay in data/NOTICE.txt.
 """
 
 import json
@@ -13,28 +13,6 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 LICENSE_NAMES = ("LICENSE", "LICENCE", "COPYING", "NOTICE")
-NLOHMANN_MIT = """MIT License
-
-Copyright (c) 2013-2023 Niels Lohmann
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
 
 
 def license_files(directory):
@@ -56,18 +34,13 @@ def read(path):
     return Path(path).read_text(encoding="utf-8", errors="replace")
 
 
-def go_license(goroot):
-    # Homebrew 的 GOROOT 是 Cellar/go/<版本>/libexec，LICENSE 在上一層；Debian 的 golang-go 不放在 GOROOT（在 /usr/share/doc）。
-    return next((p for p in (Path(goroot) / "LICENSE", Path(goroot).parent / "LICENSE") if p.is_file()), None)
-
-
-def go_sections(go, goos, packages, goarch="amd64"):
-    env = dict(os.environ, GOOS=goos, GOARCH=goarch, CGO_ENABLED="0")
+def go_sections(go, packages):
+    env = dict(os.environ, GOOS="windows", GOARCH="amd64", CGO_ENABLED="0")
     goroot = subprocess.check_output([go, "env", "GOROOT"], text=True, encoding="utf-8", env=env).strip()
     version = subprocess.check_output([go, "env", "GOVERSION"], text=True, encoding="utf-8", env=env).strip()
-    license = go_license(goroot)
-    if license is None:
-        raise ValueError(f"找不到 Go 的 LICENSE（GOROOT {goroot}）；發版用官方或 Homebrew 的 Go")
+    license = Path(goroot) / "LICENSE"
+    if not license.is_file():
+        raise ValueError(f"找不到 Go 的 LICENSE（GOROOT {goroot}）；發版用官方的 Go")
     out = [section(f"Go 工具鏈與標準函式庫（{version}）", [read(license)])]
     listing = subprocess.check_output(
         [go, "list", "-deps", "-f", "{{with .Module}}{{if not .Main}}{{.Path}}\t{{.Version}}\t{{.Dir}}{{end}}{{end}}", *packages],
@@ -77,29 +50,16 @@ def go_sections(go, goos, packages, goarch="amd64"):
         out.append(section(f"Go 模組 {path} {version}", [read(p) for p in license_files(directory)]))
         if path == "github.com/clipperhouse/uax29/v2":
             out.append(section("Unicode 17 grapheme properties（uax29 產生的字元分段資料）", [read(ROOT / "legal/UNICODE-NOTICE.txt")]))
-    # 「輸出簡體字」的 OpenCC 字典編在 0c-server 裡（internal/simplified，#118），不是 Go 模組，另列。
-    out.append(section("OpenCC ver.1.4.2 字典（tw2s：TSCharacters、TSPhrases、TWVariants、TWVariantsRevPhrases、"
-                       "CJK_Compatibility_Ideographs，https://github.com/BYVoid/OpenCC）",
-                       [read(ROOT / "internal/simplified/opencc/LICENSE")]))
     # 英文補全排序用的詞頻也編在 0c-server 裡（internal/englishpack/wordfreq）。
     out.append(section("wordfreq 3.1.1 英文詞頻（https://github.com/rspeer/wordfreq）",
                        [read(ROOT / "data/sources/licenses/wordfreq.txt")]))
     return out
 
 
-def python_sections(neural, platform):
+def python_sections(neural):
     python = Path(neural) / "python"
-    if platform == "windows-amd64":
-        cpython, site = python / "LICENSE.txt", python / "Lib/site-packages"
-        version = "3.14"
-    else:
-        # Intel Mac 內附 3.13（prepare_neural.py 的 RUNTIMES）。
-        libs = [p for p in (python / "lib").glob("python3.*") if (p / "site-packages").is_dir()]
-        if len(libs) != 1:
-            raise ValueError(f"內附 Python 的 lib/python3.* 應恰有一個：{python}")
-        lib = libs[0]
-        cpython, site, version = lib / "LICENSE.txt", lib / "site-packages", lib.name.removeprefix("python")
-    out = [section(f"CPython {version}", [read(cpython)])]
+    site = python / "Lib/site-packages"
+    out = [section("CPython 3.14", [read(python / "LICENSE.txt")])]
     crt = [p.name for p in sorted(python.glob("msvcp140*.dll"))]
     if crt:
         # prepare_neural.py 隨 onnxruntime 附上的 C++ 執行階段（#80）。
@@ -130,26 +90,20 @@ def rust_sections(cargo, workspace, target="x86_64-pc-windows-msvc"):
     return out
 
 
-def collect(platform, neural=None, go="go", cargo=None):
-    """Return the notices text for a bundle; raises when an expected license text is missing."""
+def collect(neural=None, go="go", cargo="cargo"):
+    """Return the notices text for the Windows bundle; raises when an expected license text is missing."""
     header = ("靈犀注音（0c）第三方元件聲明\n\n"
               "自有程式依套件內 LICENSE 授權，授權範圍見 legal/README.md 與 TERMS.md。以下是隨套件出貨的第三方元件及其授權條款；"
               "字典資料的來源與授權另見 data/NOTICE.txt。\n\n")
-    if platform == "windows-amd64":
-        parts = go_sections(go, "windows", ["./cmd/0c-server", "./cmd/0c-update"])
-        parts += rust_sections(cargo, ROOT / "platforms/windows")
-    elif platform in ("macos-arm64", "macos-amd64"):
-        parts = go_sections(go, "darwin", ["./cmd/0c-server", "./cmd/0c-update"], platform.removeprefix("macos-"))
-    else:
-        parts = go_sections(go, "linux", ["./cmd/0c-server", "./cmd/0c-update", "./cmd/0c-trace"])
-        parts.append(section("nlohmann/json 3.11.3（Fcitx5 外殼）", [NLOHMANN_MIT]))
+    parts = go_sections(go, ["./cmd/0c-server", "./cmd/0c-update"])
+    parts += rust_sections(cargo, ROOT / "platforms/windows")
     if neural:
-        parts += python_sections(neural, platform)
+        parts += python_sections(neural)
     return header + "\n".join(parts)
 
 
 if __name__ == "__main__":
-    # 只輸出某個 Rust 工作區的授權文字（設定程式的建置容器用）：collect_notices.py rust --workspace DIR --target TRIPLE
+    # 只輸出某個 Rust 工作區的授權文字（build_settings_windows.py 用）：collect_notices.py rust --workspace DIR --target TRIPLE
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("what", choices=["rust"])

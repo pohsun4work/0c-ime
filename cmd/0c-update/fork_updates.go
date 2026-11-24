@@ -44,7 +44,7 @@ func claimForkUpdates(src, base string) {
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "0c-update: 沒有記下 fork 的更新索引：", err)
 	}
-	if prev := previousUpdater(base); keepsPreviousUpdater && foreignUpdater(prev) {
+	if prev := previousUpdater(base); foreignUpdater(prev) {
 		if err := replaceUpdater(src, prev); err != nil {
 			fmt.Fprintln(os.Stderr, "0c-update: 備用的上一版更新器沒有換成這一版：", err)
 		}

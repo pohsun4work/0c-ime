@@ -1,8 +1,8 @@
 """Build the website manifest feeds/<feed>-site.json (schema 1, 0c/ime#28).
 
 The website reads this file at runtime (same-origin /release.json proxy), so uploading it is the moment
-the download buttons, version and changelog change. The archive assets (Linux: the installer) must be
-exactly the assets of the signed feed; installers (Windows setup.exe, macOS .pkg) are --extra uploads.
+the download buttons, version and changelog change. The archive (the Windows ZIP) must be exactly the
+asset of the signed feed; the installer (setup.exe) is an --extra upload.
 The changelog comes only from the "### 公開摘要" subsections of CHANGELOG.md.
 
 Older changelog entries may carry their own "platforms" (0c/ime#81) so the download page can offer past
@@ -12,12 +12,11 @@ dropped for withdrawn versions. changelog[0] never carries platforms; the top le
 """
 import re
 
-PLATFORMS = {("windows", "amd64"): "windows-amd64", ("linux", "amd64"): "linux-amd64", ("darwin", "arm64"): "macos-arm64",
-             ("darwin", "amd64"): "macos-amd64"}  # 官網顯示順序
+PLATFORMS = {("windows", "amd64"): "windows-amd64"}
 RELEASED_STAGES = ("public-beta", "stable")
 SUMMARY = "### 公開摘要"
 HEADING = re.compile(r"^## (\S+)（(\d{4}-\d{2}-\d{2})，([a-z-]+)）$")
-FILE = re.compile(r"^0c-(?P<version>.+)-(?P<platform>linux-amd64|windows-amd64|macos-arm64|macos-amd64)(?P<setup>-setup)?\.(?P<ext>tar\.gz|zip|exe|pkg)$")
+FILE = re.compile(r"^0c-(?P<version>.+)-(?P<platform>windows-amd64)(?P<setup>-setup)?\.(?P<ext>zip|exe)$")
 LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ROLES = ("installer", "archive")
@@ -78,15 +77,9 @@ def classify(name, version):
     if not m or m["version"] != version:
         return None
     platform, ext = m["platform"], m["ext"]
-    if platform == "linux-amd64" and ext == "tar.gz" and not m["setup"]:
+    if ext == "exe" and m["setup"]:
         return platform, "installer"
-    if platform == "windows-amd64" and ext == "exe" and m["setup"]:
-        return platform, "installer"
-    if platform == "windows-amd64" and ext == "zip" and not m["setup"]:
-        return platform, "archive"
-    if platform.startswith("macos-") and ext == "pkg" and not m["setup"]:
-        return platform, "installer"
-    if platform.startswith("macos-") and ext == "tar.gz" and not m["setup"]:
+    if ext == "zip" and not m["setup"]:
         return platform, "archive"
     return None
 
@@ -167,14 +160,13 @@ def build(feed, uploads, changelog, published, withdrawn_reason=None, history=No
             raise ValueError(f"官網清單不支援的平台：{asset['os']}/{asset['arch']}")
         signed[platform] = {"url": asset["url"], "size": int(asset["size"]), "sha256": asset["sha256"]}
     for platform, entry in signed.items():
-        role = "installer" if platform == "linux-amd64" else "archive"
-        if platforms.get(platform, {}).get(role) != entry:
-            raise ValueError(f"{platform} 的 {role} 與已簽章索引的資產不一致")
+        if platforms.get(platform, {}).get("archive") != entry:
+            raise ValueError(f"{platform} 的 archive 與已簽章索引的資產不一致")
     for platform, roles in platforms.items():
         if platform not in signed:
             raise ValueError(f"{platform} 不在已簽章索引中，不能只上架安裝檔")
         if "installer" not in roles:
-            raise ValueError(f"{platform} 缺少官網主要下載（Windows setup.exe／macOS .pkg 請以 --extra 提供）")
+            raise ValueError(f"{platform} 缺少官網主要下載（setup.exe 請以 --extra 提供）")
     withdrawn = None
     if version in (feed.get("withdrawn") or []):
         if not withdrawn_reason:

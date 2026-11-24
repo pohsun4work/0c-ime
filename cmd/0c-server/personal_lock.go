@@ -26,8 +26,7 @@ const lockPoll = 50 * time.Millisecond
 //     一看到端點有人服務就讓位（yield），不白載資料包。
 //   - 端點不同、個人檔相同（不同參數叫起的第二個引擎）：等到 wait 仍拿不到，照常輸入但不存檔。
 //
-// 外殼把「連得上」當成引擎已就緒（macOS 據此重送冷啟動時暫存的按鍵、Linux 外殼的請求上限 2 秒），
-// 所以監聽仍在資料包載入之後；提早占住的是這把鎖。
+// 外殼把「連得上」當成引擎已就緒，所以監聽仍在資料包載入之後；提早占住的是這把鎖。
 func claimWriter(dir string, names []string, wait time.Duration, lg *log.Logger) (lock *userlock.Lock, state string, yield bool) {
 	deadline := time.Now().Add(wait)
 	waited := false
