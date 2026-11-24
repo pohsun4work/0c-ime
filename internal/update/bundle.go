@@ -2,9 +2,7 @@
 package update
 
 import (
-	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -285,55 +283,27 @@ func extract(archive, root string) error {
 		}
 		return closeErr
 	}
-	if strings.HasSuffix(strings.ToLower(archive), ".zip") {
-		z, err := zip.OpenReader(archive)
-		if err != nil {
-			return err
-		}
-		defer z.Close()
-		for _, f := range z.File {
-			if f.Mode()&os.ModeSymlink != 0 || (!f.FileInfo().IsDir() && !f.Mode().IsRegular()) {
-				return fmt.Errorf("archive links/devices are not allowed")
-			}
-			if f.UncompressedSize64 > uint64(MaxArchive) {
-				return fmt.Errorf("archive member too large")
-			}
-			r, err := f.Open()
-			if err != nil {
-				return err
-			}
-			err = put(f.Name, int64(f.UncompressedSize64), f.Mode(), f.FileInfo().IsDir(), r)
-			r.Close()
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	f, err := os.Open(archive)
+	z, err := zip.OpenReader(archive)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	tarReader := tar.NewReader(gz)
-	for {
-		h, err := tarReader.Next()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeDir {
+	defer z.Close()
+	for _, f := range z.File {
+		if f.Mode()&os.ModeSymlink != 0 || (!f.FileInfo().IsDir() && !f.Mode().IsRegular()) {
 			return fmt.Errorf("archive links/devices are not allowed")
 		}
-		if err = put(h.Name, h.Size, os.FileMode(h.Mode), h.Typeflag == tar.TypeDir, tarReader); err != nil {
+		if f.UncompressedSize64 > uint64(MaxArchive) {
+			return fmt.Errorf("archive member too large")
+		}
+		r, err := f.Open()
+		if err != nil {
+			return err
+		}
+		err = put(f.Name, int64(f.UncompressedSize64), f.Mode(), f.FileInfo().IsDir(), r)
+		r.Close()
+		if err != nil {
 			return err
 		}
 	}
+	return nil
 }

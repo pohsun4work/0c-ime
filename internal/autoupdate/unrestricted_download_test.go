@@ -57,7 +57,7 @@ func TestUnrestrictedNetworkDownloadClearsLegacyMeteredPending(t *testing.T) {
 			if state.Stage != StageActive || state.Blocked != nil || requests.Load() != before+1 || !strings.Contains(strings.Join(fake.calls, " "), "download") {
 				t.Fatal("cost blocked the real download or stale state survived", state, fake.calls, requests.Load())
 			}
-			data, err := os.ReadFile(filepath.Join(co.Base, "update", "downloads", "0c-"+sum+".tar.gz"))
+			data, err := os.ReadFile(filepath.Join(co.Base, "update", "downloads", "0c-"+sum+".zip"))
 			if err != nil || !bytes.Equal(data, payload) {
 				t.Fatal("downloaded archive did not match", err)
 			}

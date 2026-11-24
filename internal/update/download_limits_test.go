@@ -21,7 +21,7 @@ func TestLimitedDownloadVerifiesAndReusesCacheWithoutNetwork(t *testing.T) {
 	var calls atomic.Int64
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.Write(payload) }))
 	defer srv.Close()
-	asset := Asset{OS: "linux", Arch: "amd64", URL: srv.URL + "/archive", SHA256: fmt.Sprintf("%x", sum), Size: int64(len(payload))}
+	asset := Asset{OS: "windows", Arch: "amd64", URL: srv.URL + "/archive", SHA256: fmt.Sprintf("%x", sum), Size: int64(len(payload))}
 	dir := t.TempDir()
 	start := time.Now()
 	file, err := DownloadWithOptions(context.Background(), srv.Client(), asset, dir, DownloadOptions{BytesPerSecond: 64 << 10})
@@ -50,7 +50,7 @@ func TestLimitedDownloadCancellationRemovesPartialFile(t *testing.T) {
 	sum := sha256.Sum256(payload)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(payload) }))
 	defer srv.Close()
-	asset := Asset{OS: "linux", Arch: "amd64", URL: srv.URL + "/archive", SHA256: fmt.Sprintf("%x", sum), Size: int64(len(payload))}
+	asset := Asset{OS: "windows", Arch: "amd64", URL: srv.URL + "/archive", SHA256: fmt.Sprintf("%x", sum), Size: int64(len(payload))}
 	dir := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -128,7 +128,7 @@ func TestFailedHashNeverReportsInstallationReady(t *testing.T) {
 	payload := bytes.Repeat([]byte("bad-hash"), 1024)
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(payload) }))
 	defer srv.Close()
-	asset := Asset{OS: "linux", Arch: "amd64", URL: srv.URL, SHA256: strings.Repeat("a", 64), Size: int64(len(payload))}
+	asset := Asset{OS: "windows", Arch: "amd64", URL: srv.URL, SHA256: strings.Repeat("a", 64), Size: int64(len(payload))}
 	dir := t.TempDir()
 	var phases []string
 	if _, err := DownloadWithOptions(context.Background(), srv.Client(), asset, dir, DownloadOptions{Progress: func(p DownloadProgress) { phases = append(phases, p.Phase) }}); err == nil {

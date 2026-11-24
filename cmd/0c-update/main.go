@@ -251,14 +251,13 @@ func run(args []string) error {
 	flags := flag.NewFlagSet(action, flag.ContinueOnError)
 	feedURL := flags.String("feed", "", "HTTPS 更新索引 URL")
 	channel := flags.String("channel", "public-beta", "public-beta 或 internal-preview")
-	archive := flags.String("archive", "", "已下載的 tar.gz 或 zip")
+	archive := flags.String("archive", "", "已下載的 zip")
 	checksum := flags.String("sha256", "", "來自可信任來源的壓縮包 SHA-256")
 	bundle := flags.String("bundle", ".", "已解壓且完整的套件目錄")
 	out := flags.String("out", "", "下載保存目錄")
-	backup := flags.String("backup", "", "Linux 回復用備份目錄；Windows 依安裝收據回復上一版")
 	allowDowngrade := flags.Bool("allow-downgrade", false, "明確允許安裝較舊版本")
 	asJSON := flags.Bool("json", false, "status、check：以 JSON 輸出（輸入法選單與設定程式讀取）")
-	diagnostics := flags.Bool("diagnostics", false, "status -json：另附平台診斷（macOS 版本、正在執行的輸入法 App；Windows 的註冊位置、最近用過輸入法的程式與判定），供匯出狀態摘要；輸入法選單的輪詢不帶")
+	diagnostics := flags.Bool("diagnostics", false, "status -json：另附平台診斷（輸入法的註冊位置、最近用過輸入法的程式與判定），供匯出狀態摘要；輸入法選單的輪詢不帶")
 	online := flags.Bool("online", false, "install：從已簽章索引下載並安裝（一行安裝）")
 	restoreUser := flags.Bool("restore-user", false, "rollback 時一併還原升級前保存的個人詞庫（目前的詞庫另存於新備份）")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -305,7 +304,7 @@ func run(args []string) error {
 		printModelStatus(os.Stdout, modelStatus(dialEngine))
 		return nil
 	case "rollback":
-		return rollback(*backup, *restoreUser)
+		return rollback(*restoreUser)
 	case "uninstall":
 		if err := uninstall(); err != nil {
 			return err

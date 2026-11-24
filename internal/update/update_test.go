@@ -1,10 +1,8 @@
 package update
 
 import (
-	"archive/tar"
 	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -84,41 +82,31 @@ func TestSafeArchiveNames(t *testing.T) {
 	}
 }
 func TestArchivesRejectTraversalLinksAndDuplicateNames(t *testing.T) {
-	for _, kind := range []string{"traversal", "link", "duplicate", "hardlink"} {
+	for _, kind := range []string{"traversal", "link", "duplicate"} {
 		t.Run(kind, func(t *testing.T) {
-			file := filepath.Join(t.TempDir(), "bad.tar.gz")
+			file := filepath.Join(t.TempDir(), "bad.zip")
 			out, err := os.Create(file)
 			if err != nil {
 				t.Fatal(err)
 			}
-			gz := gzip.NewWriter(out)
-			tw := tar.NewWriter(gz)
-			h := &tar.Header{Name: "bundle/file", Mode: 0600, Size: 1, Typeflag: tar.TypeReg}
+			z := zip.NewWriter(out)
+			h := &zip.FileHeader{Name: "bundle/file", Method: zip.Store}
 			switch kind {
 			case "traversal":
 				h.Name = "../escape"
 			case "link":
-				h.Typeflag = tar.TypeSymlink
-				h.Linkname = "../../escape"
-				h.Size = 0
-			case "hardlink":
-				h.Typeflag = tar.TypeLink
-				h.Linkname = "../../escape"
-				h.Size = 0
+				h.SetMode(os.ModeSymlink | 0o777)
 			}
-			if err = tw.WriteHeader(h); err != nil {
+			w, err := z.CreateHeader(h)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if h.Size == 1 {
-				tw.Write([]byte("x"))
-			}
+			w.Write([]byte("x"))
 			if kind == "duplicate" {
-				h.Name = "bundle/FILE"
-				tw.WriteHeader(h)
-				tw.Write([]byte("x"))
+				w, _ = z.CreateHeader(&zip.FileHeader{Name: "bundle/FILE", Method: zip.Store})
+				w.Write([]byte("x"))
 			}
-			tw.Close()
-			gz.Close()
+			z.Close()
 			out.Close()
 			if err = extract(file, t.TempDir()); err == nil {
 				t.Fatal("accepted unsafe archive")

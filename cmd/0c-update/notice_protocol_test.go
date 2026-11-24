@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,9 +35,6 @@ func TestNoticeProtocolBindsBothActions(t *testing.T) {
 }
 
 func TestNoticeProtocolSnoozePersistsAndRejectsReplacement(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("Windows protocol; macOS uses the native notification delegate")
-	}
 	// Exercise the actual protocol -> CLI -> store path without a desktop or an install.
 	home := t.TempDir()
 	t.Setenv("HOME", home)

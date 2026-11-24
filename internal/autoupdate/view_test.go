@@ -100,7 +100,7 @@ func TestCheckSaysWhyAnUpdateIsNotOfferedYet(t *testing.T) {
 		}, ReasonWithdrawn, false},
 		{"沒有此平台的安裝包", func() *fakePlatform {
 			f := feedFor("0.1.0-dev.18", "core", 100)
-			f.Assets[0].OS = "windows"
+			f.Assets[0].Arch = "arm64"
 			return &fakePlatform{installed: "0.1.0-dev.17", feed: f}
 		}, ReasonNoAsset, false},
 		{"可更新", func() *fakePlatform {

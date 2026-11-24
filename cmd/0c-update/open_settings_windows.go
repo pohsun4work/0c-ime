@@ -21,7 +21,6 @@ func newSettingsOpener() settingsOpener {
 			installed, hash := installedFromReceipt(receiptPath(), base, enginedir.SettingsExecutable())
 			return settingsapp.Locate(base, installed, hash)
 		},
-		display: settingsapp.DisplayAvailable,
 		missing: settingsapp.MissingLibraries,
 		launch:  settingsapp.Launch,
 		notify: func(title, body string) {
@@ -30,7 +29,6 @@ func newSettingsOpener() settingsOpener {
 			}
 		},
 		entry:   ensureSettingsEntry,
-		hint:    func([]string) string { return settingsapp.WebView2Hint },
 		updater: updater,
 		log:     filepath.Join(base, "settings-last.log"),
 		wait:    1500 * time.Millisecond,

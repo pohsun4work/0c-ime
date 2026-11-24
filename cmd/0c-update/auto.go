@@ -26,17 +26,11 @@ const DefaultFeed = "https://github.com/pohsun4work/0c-ime/releases/latest/downl
 // pointerSince 是第一個認得引擎指標的完整安裝版本；更舊的外殼只能以完整安裝更新。
 const pointerSince = "0.1.0-dev.18"
 
-// unattendedInstall：這次安裝由背景自動更新執行、沒有使用者在看（macOS 的輸入法程式交接只在使用者離開時做，#178）。
-// 終端機、.pkg 與設定程式「立即安裝」（finish）都是使用者自己執行的安裝。這個程式一次只執行一個命令。
-var unattendedInstall bool
-
 // system 是真實作業系統上的 autoupdate.Platform。
 type system struct {
-	base      string
-	feed      string
-	consent   bool          // 使用者親自執行 finish：可以做需要確認的安裝
-	shellIdle time.Duration // 外殼切換前重新核對的閒置門檻
-	atLogin   bool          // 登入時、桌面啟動前（Linux login 單元）：可以換外殼
+	base    string
+	feed    string
+	consent bool // 使用者親自執行 finish：可以做需要確認的安裝
 }
 
 func (p *system) Installed() (string, error) {
@@ -124,7 +118,7 @@ func waitForEngine(ctx context.Context, dial autoupdate.Dialer) error {
 	return fmt.Errorf("引擎未在 15 秒內開始服務")
 }
 func (p *system) InstallShell(ctx context.Context, archive string) (bool, error) {
-	if !p.consent && !p.atLogin && !shellUnattended() {
+	if !p.consent && !shellUnattended() {
 		return false, autoupdate.ErrNeedsConsent
 	}
 	s, err := autoupdate.Load(p.base)
@@ -144,18 +138,15 @@ func (p *system) InstallShell(ctx context.Context, archive string) (bool, error)
 	if r.Version != s.Target.Version {
 		return false, fmt.Errorf("套件版本 %s 與索引 %s 不符", r.Version, s.Target.Version)
 	}
-	// 沒有使用者親自確認的安裝（背景自動更新）：macOS 只在使用者離開時交接輸入法程式（#178）。
-	unattendedInstall = !p.consent
 	if err = install(root, r); err != nil {
 		return false, err
 	}
 	afterInstall()
-	// Windows 不等重新登入（#253）；macOS 安裝時已請舊的輸入法程式結束（#170），只有要重新登入的情況才回 pending。
-	// 其餘由協調器接著以 ShellReady 與執行中的引擎核對。
+	// 不等重新登入（#253）：由協調器接著以 ShellReady 與執行中的引擎核對。
 	return false, nil
 }
 
-// Conditions：OS 無法判斷閒置時（Wayland 非 GNOME、無桌面等），以引擎距上次按鍵的時間代替；
+// Conditions：OS 無法判斷閒置時（GetLastInputInfo 失敗），以引擎距上次按鍵的時間代替；
 // 引擎沒有執行即視為閒置。
 func (p *system) Conditions() autoupdate.Conditions {
 	c := conditions()
@@ -189,19 +180,6 @@ func (p *system) Activated(t autoupdate.Target, dir string) {
 	refreshStableLauncher(p.base) // 同上，排程用的啟動器 0c-updatew（Windows，#289）
 	autoupdate.PruneCore(p.base)
 	os.RemoveAll(filepath.Join(p.base, "update", "downloads"))
-}
-
-// installStagedShell 在登入時完成排定的外殼更新：已下載、已核對的套件以完整安裝套用。
-func installStagedShell(p *system) error {
-	s, err := autoupdate.Load(p.base)
-	if err != nil || s.Stage != autoupdate.StagePending || s.Target == nil || s.Target.Kind != "shell" || s.Download == "" {
-		return err
-	}
-	if v, _ := installedVersion(); v == s.Target.Version {
-		return nil
-	}
-	_, err = p.InstallShell(context.Background(), s.Download)
-	return err
 }
 
 func updaterName() string { return "0c-update.exe" }
@@ -440,7 +418,6 @@ func autoCommand(action string, args []string) (resultErr error) {
 	asJSON := flags.Bool("json", false, "以 JSON 回報更新結果")
 	feed := flags.String("feed", "", "本次改用的已簽章索引；預設為 schedule install -feed 設定的或正式索引")
 	now := flags.Bool("now", false, "立即查詢，不等下一次到期")
-	login := flags.Bool("login", false, "登入時、桌面啟動前執行（只做本機工作，不查詢或下載）")
 	report := flags.Bool("notify", false, "完成後以通知回報結果（從選單或通知按鈕啟動時）")
 	target := flags.String("target", "", "只完成此通知／選單指定的版本")
 	targetHash := flags.String("target-sha256", "", "通知／選單指定的資產 SHA-256")
@@ -496,7 +473,7 @@ func autoCommand(action string, args []string) (resultErr error) {
 		return err
 	}
 	// #284（Windows）：解除安裝之後留下的排程不再查詢、下載與通知，移除自己後結束。
-	if action == "auto" && !*login && !*asJSON && !*report && retireOrphanSchedule() {
+	if action == "auto" && !*asJSON && !*report && retireOrphanSchedule() {
 		return nil
 	}
 	if *feed == "" {
@@ -505,31 +482,15 @@ func autoCommand(action string, args []string) (resultErr error) {
 			*feed = s.Feed
 		}
 	}
-	p := &system{base: base, feed: *feed, consent: action == "finish", atLogin: *login}
-	if *login {
-		if err := installStagedShell(p); err != nil {
-			fmt.Fprintln(os.Stderr, "0c-update: 登入時安裝排定的更新失敗：", err)
-		}
-	}
-	// 登入單元排在 graphical-session-pre.target 之前，桌面要等它結束才會啟動；
-	// 這裡只做上面的本機工作。查詢索引、下載（可達數百 MB、背景限速）與外殼重載／
-	// 中斷回復都交給 0c-update.timer，否則使用者登入後會停在黑畫面直到完成或逾時。
-	// #120：0.2.0 起引擎常駐，引擎沒在跑就叫起來。以暫時性 service 啟動只要幾十毫秒、不等它載入，
-	// 登入單元也做，引擎在登入當下就起來，不必等 timer 第一次喚起（OnStartupSec=5min）。
+	p := &system{base: base, feed: *feed, consent: action == "finish"}
+	// #120：0.2.0 起引擎常駐，引擎沒在跑就叫起來（登入時的引擎排程沒有成功、或引擎之後結束了）。
 	ensureEngineService(base)
 	// Windows：背景完整更新由舊的穩定更新器安裝，它不會請舊版的 0c-ui 結束；新版的穩定副本每次喚起時補上。
 	handOverUI(uiWaitAuto)
-	if *login {
-		return nil
-	}
 	co := &autoupdate.Coordinator{Base: base, Platform: p, Force: *now, Consent: action == "finish", ConsentVersion: *target, ConsentSHA256: *targetHash}
 	if s, err := autoupdate.Load(base); err == nil && s.Test != nil && update.E2EBuild {
 		co.CheckEvery, co.IdleNeeded, co.RemindAfter = time.Duration(s.Test.CheckEvery), time.Duration(s.Test.IdleNeeded), time.Duration(s.Test.RemindAfter)
 		co.CheckJitter = time.Second
-	}
-	p.shellIdle = co.IdleNeeded
-	if p.shellIdle == 0 {
-		p.shellIdle = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -686,7 +647,7 @@ func pointFeed(s *autoupdate.State, feed string) {
 	}
 }
 
-// directAfterInstall 是 after-install 指令要做的事（測試換掉：go test 不動這台機器的 systemd 排程）。
+// directAfterInstall 是 after-install 指令要做的事（測試換掉：go test 不動這台機器的工作排程器）。
 var directAfterInstall = afterInstall
 
 // afterInstall：完整安裝成功後建立（或更新）自動更新排程；失敗只提示，不影響安裝結果。

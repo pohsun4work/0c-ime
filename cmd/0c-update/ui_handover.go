@@ -62,7 +62,7 @@ type uiControl struct {
 	exited func(uiProcess, time.Duration) bool // 等它結束，最多等這麼久
 	sleep  func(time.Duration)
 	now    func() time.Time
-	quiet  time.Duration // 停手多久才關；零值為 uiQuiet（macOS 依情況另訂，見 shell_handover_darwin.go）
+	quiet  time.Duration // 停手多久才關；零值為 uiQuiet
 }
 
 // retireUI 在 wait 之內請過期的候選窗程式結束：只在它沒有顯示任何東西、使用者停手 uiQuiet 之後才關。
@@ -71,7 +71,7 @@ func retireUI(c uiControl, base, current string, wait time.Duration) (retired in
 	return retireProcesses(c, func() []uiProcess { return outdatedUI(c.list(), base, current) }, wait)
 }
 
-// retireProcesses 是交接的共同迴圈：pending 回傳目前還要結束的程式（Windows 的 0c-ui、macOS 的 0c.app）。
+// retireProcesses 是交接的迴圈：pending 回傳目前還要結束的 0c-ui。
 func retireProcesses(c uiControl, pending func() []uiProcess, wait time.Duration) (retired int, left []uiProcess) {
 	deadline := c.now().Add(wait)
 	for {

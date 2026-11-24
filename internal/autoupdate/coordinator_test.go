@@ -90,11 +90,11 @@ func (f *fakePlatform) Notify(n Notice) error {
 	f.actions = append(f.actions, n.Action)
 	return nil
 }
-func (f *fakePlatform) Target() (string, string) { return "linux", "amd64" }
+func (f *fakePlatform) Target() (string, string) { return "windows", "amd64" }
 
 func feedFor(version, kind string, rollout int, withdrawn ...string) *update.SignedFeed {
 	return &update.SignedFeed{Serial: 1, Version: version, Rollout: rollout, Withdrawn: withdrawn,
-		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "linux", Arch: "amd64", URL: "https://x/" + version, SHA256: strings.Repeat("a", 64), Size: 1}, Kind: kind}}}
+		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "windows", Arch: "amd64", URL: "https://x/" + version, SHA256: strings.Repeat("a", 64), Size: 1}, Kind: kind}}}
 }
 
 type clock struct{ t time.Time }
@@ -355,28 +355,6 @@ func TestAskModeWaitsForConsentThenApplies(t *testing.T) {
 	}
 }
 
-func TestShellUpdateDeferredToLoginNotifiesOnce(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.18", running: "0.1.0-dev.18", feed: feedFor("0.1.0-dev.19", "shell", 100), shellErr: ErrAtLogin}
-	co, clk := newCoordinator(t, p)
-	s := run(t, co)
-	if s.Stage != StagePending || s.Blocked.Reason != "needs_relogin" || len(p.notices) != 1 {
-		t.Fatalf("%s %+v %v", s.Stage, s.Blocked, p.notices)
-	}
-	clk.add(time.Hour)
-	p.calls = nil
-	run(t, co)
-	for _, c := range p.calls {
-		if c == "shell" {
-			t.Fatal("a staged shell update must not be reinstalled by the timer")
-		}
-	}
-	p.running = "0.1.0-dev.19" // 登入時安裝完成、新外殼啟動新引擎
-	clk.add(time.Hour)
-	if s = run(t, co); s.Stage != StageActive {
-		t.Fatalf("%s", s.Stage)
-	}
-}
-
 // Windows E23 發現：交接延到下一次喚起時，引擎沒執行也必須啟動並核對，不能直接視為生效。
 func TestPendingCoreIsVerifiedNotAssumed(t *testing.T) {
 	p := &fakePlatform{installed: "0.1.0-dev.17", running: "0.1.0-dev.17", feed: feedFor("0.1.0-dev.18", "core", 100),
@@ -564,15 +542,6 @@ func TestShellRequiresNewLoginEvenWhenNewEngineIsRunning(t *testing.T) {
 	if s.Stage != StageActive || s.Target != nil || s.Blocked != nil {
 		t.Fatalf("new login should activate: %+v", s)
 	}
-}
-
-func mustLoad(t *testing.T, co *Coordinator) *State {
-	t.Helper()
-	s, err := Load(co.Base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
 }
 
 // 只核對登入邊界的平台（Windows）仍要等新版引擎實際回報版本，引擎閒置不算生效。

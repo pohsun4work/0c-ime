@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -58,35 +57,10 @@ func TestSetPreview02IsRetired(t *testing.T) {
 	}
 }
 
-// vocab、api 子指令列在用法裡，也不再因為設定檔沒打開開關而拒絕。
-func TestVocabCommandsListedAndOpen(t *testing.T) {
+// vocab、api 子指令列在用法裡。
+func TestVocabCommandsListed(t *testing.T) {
 	err := run(nil)
 	if err == nil || !strings.Contains(err.Error(), "|vocab|api|") {
 		t.Fatalf("用法要列出 vocab 與 api：%v", err)
-	}
-	if runtime.GOOS != "linux" {
-		t.Skip("只有 Linux 的個人資料目錄跟著 HOME，測試裡換得掉")
-	}
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_RUNTIME_DIR", t.TempDir()) // 沒有引擎：vocab 走檔案鎖模式
-	if err := os.MkdirAll(basePath(), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeSettings(t, basePath(), `{"preview_0_2":false}`)
-	stdout := os.Stdout
-	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = devnull
-	verr := vocabCommand([]string{"status", "-json"})
-	aerr := apiCommand([]string{"status", "-json"})
-	os.Stdout = stdout
-	devnull.Close()
-	if verr != nil {
-		t.Fatalf("舊檔寫 preview_0_2=false 仍可用 vocab：%v", verr)
-	}
-	if aerr != nil {
-		t.Fatalf("api 不再拒絕：%v", aerr)
 	}
 }

@@ -21,7 +21,7 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/userlock"
 )
 
-// personalBase 建一個有學習資料、自訂詞彙與各平台升級前備份的個人資料目錄。
+// personalBase 建一個有學習資料、自訂詞彙與升級前備份的個人資料目錄。
 func personalBase(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
@@ -38,13 +38,7 @@ func personalBase(t *testing.T) string {
 	write("user.json", `{"Format":7,"Uni":{"秘密":3},"Total":3}`)
 	write("user.json.tmp", `{"Format":7,"Uni":{"秘密":4}}`)
 	write("vocab.json", `{"format":1,"words":[]}`)
-	// Linux：install.py 的 0c-install-*、restore-user 另存的 0c-user-*、make upgrade 的 upgrade-*
-	write("backups/0c-install-abcd1234/personal/user.json", "learning")
-	write("backups/0c-install-abcd1234/personal/vocab.json", "vocab")
-	write("backups/0c-install-abcd1234/home/.local/bin/0c-update", "program")
-	write("backups/0c-user-efgh5678/personal/user.json", "learning")
-	write("backups/upgrade-20261001-000000-x/personal/user.json", "learning")
-	// Windows：每次安裝、升級、回復與移除的 backups\windows-*
+	// 每次安裝、升級、回復與移除的 backups\windows-*
 	write("backups/windows-1234/user.json", "learning")
 	write("backups/windows-1234/vocab.json", "vocab")
 	write("backups/windows-1234/previous.json", "{}")
@@ -54,14 +48,13 @@ func personalBase(t *testing.T) string {
 
 func checkPersonalCleared(t *testing.T, base string) {
 	t.Helper()
-	for _, rel := range []string{"user.json.tmp", "backups/0c-install-abcd1234/personal/user.json", "backups/0c-user-efgh5678/personal/user.json",
-		"backups/upgrade-20261001-000000-x/personal/user.json", "backups/windows-1234/user.json", ".user-restore-999"} {
+	for _, rel := range []string{"user.json.tmp", "backups/windows-1234/user.json", ".user-restore-999"} {
 		if _, err := os.Lstat(filepath.Join(base, filepath.FromSlash(rel))); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s 沒有刪掉：%v", rel, err)
 		}
 	}
-	for rel, want := range map[string]string{"vocab.json": `{"format":1,"words":[]}`, "backups/0c-install-abcd1234/personal/vocab.json": "vocab",
-		"backups/windows-1234/vocab.json": "vocab", "backups/windows-1234/previous.json": "{}", "backups/0c-install-abcd1234/home/.local/bin/0c-update": "program"} {
+	for rel, want := range map[string]string{"vocab.json": `{"format":1,"words":[]}`, "backups/windows-1234/vocab.json": "vocab",
+		"backups/windows-1234/previous.json": "{}"} {
 		if b, err := os.ReadFile(filepath.Join(base, filepath.FromSlash(rel))); err != nil || string(b) != want {
 			t.Errorf("%s 要保留：%q %v", rel, b, err)
 		}
@@ -74,7 +67,7 @@ func noEngineDial(time.Duration) (net.Conn, error) { return nil, errors.New("沒
 func TestPersonalResetWithoutEngine(t *testing.T) {
 	base := personalBase(t)
 	res, err := resetPersonal(context.Background(), noEngineDial, base)
-	if err != nil || !res.OK || res.Engine != "not_running" || res.BackupsRemoved != 4 || res.Schema != contractSchema {
+	if err != nil || !res.OK || res.Engine != "not_running" || res.BackupsRemoved != 1 || res.Schema != contractSchema {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if _, err := os.Stat(filepath.Join(base, "user.json")); !errors.Is(err, os.ErrNotExist) {
@@ -154,7 +147,7 @@ func TestPersonalResetThroughRunningEngine(t *testing.T) {
 		t.Fatal("前提：引擎載入了學習資料")
 	}
 	res, err := resetPersonal(context.Background(), dial, base)
-	if err != nil || res.Engine != "running" || res.BackupsRemoved != 4 {
+	if err != nil || res.Engine != "running" || res.BackupsRemoved != 1 {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if len(e.Model.Store.Uni) != 0 {
@@ -174,7 +167,7 @@ func TestPersonalResetStopsOldEngineFirst(t *testing.T) {
 	base := personalBase(t)
 	dial, _ := resetEngine(t, base, false)
 	res, err := resetPersonal(context.Background(), dial, base)
-	if err != nil || res.Engine != "stopped" || res.BackupsRemoved != 4 {
+	if err != nil || res.Engine != "stopped" || res.BackupsRemoved != 1 {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if _, err := os.Stat(filepath.Join(base, "user.json")); !errors.Is(err, os.ErrNotExist) {

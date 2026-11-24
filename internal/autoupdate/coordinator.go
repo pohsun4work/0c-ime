@@ -19,9 +19,6 @@ import (
 // ErrNeedsConsent：平台需要使用者前景確認（例如 Windows 外殼更新的系統管理員權限）。
 var ErrNeedsConsent = errors.New("needs user consent")
 
-// ErrAtLogin：此平台的外殼只能在下次登入、桌面啟動前安裝。
-var ErrAtLogin = errors.New("shell update deferred to next login")
-
 // ErrShellBusy：外殼正在組字或使用中，保留已準備套件，稍後再試。
 var ErrShellBusy = errors.New("等待完成組字或閒置")
 
@@ -31,7 +28,7 @@ var ErrShellHealth = errors.New("更新檢查失敗，已回復原版")
 // A notification is consent for one verified asset, not for a later release.
 var ErrTargetChanged = errors.New("待辦版本已變更，請從更新選單確認目前版本")
 
-// ShellActivationChecker 核對外殼是否已生效。需要重新登入的平台（macOS）核對是否已跨過外殼安裝邊界；
+// ShellActivationChecker 核對外殼是否已生效。需要重新登入的平台核對是否已跨過外殼安裝邊界；
 // 不等重新登入的平台（ShellWithoutRelogin）只核對收據是這一版，讀得到而版本不同時回 (false, nil)。
 type ShellActivationChecker interface {
 	ShellReady(context.Context, string) (bool, error)
@@ -40,8 +37,7 @@ type ShellActivationChecker interface {
 // ShellWithoutRelogin：外殼裝好就算數、不等重新登入的平台（Windows，#253）。之後開啟的應用程式載入新版 DLL，
 // 已經開著的留在舊 DLL 照常打字（舊 DLL 和核心更新一樣能連新引擎），重新開啟才換成新版；檔案總管這類關不掉的宿主
 // 留到登出也不影響打字。所以要核對的只有兩件事：收據是這一版（ShellReady）、新引擎接手了。0.2.0 起引擎常駐不閒置
-// 結束（#120），舊引擎不換的話介面已是新版、引擎卻不支援新功能，這時不能報完成。macOS（#77／#98 自己的路徑）與
-// Linux（登入中重載外殼）不實作。
+// 結束（#120），舊引擎不換的話介面已是新版、引擎卻不支援新功能，這時不能報完成。
 type ShellWithoutRelogin interface{ ShellActiveWithoutRelogin() bool }
 
 // 外殼已裝好、新引擎還沒接手時的受阻說明（Windows）。設定程式與工作列選單直接顯示這幾段文字。
@@ -492,10 +488,6 @@ func (c *Coordinator) apply(ctx context.Context, s *State, now time.Time) {
 			s.block(now, "engine_busy", err.Error())
 		case errors.Is(err, ErrNeedsConsent):
 			s.block(now, "needs_consent", "需要確認安裝")
-		case errors.Is(err, ErrAtLogin):
-			s.Stage = StagePending
-			s.block(now, "needs_relogin", "登出再登入時自動完成安裝")
-			s.record(now, "staged_for_login", s.Target.Version, "")
 		case err != nil:
 			s.block(now, resourceReason(err, "install_failed"), err.Error())
 		case pending:
@@ -606,8 +598,7 @@ func (c *Coordinator) confirm(ctx context.Context, s *State, now time.Time) {
 	}
 }
 
-// confirmPendingShell 核對等待重新登入的外殼是否已生效，回傳是否因此生效。只用於需要重新登入的平台；
-// 可在登入中重載外殼的平台（Linux）由 confirm 接著安裝，不在這裡做。
+// confirmPendingShell 核對等待重新登入的外殼是否已生效，回傳是否因此生效。只用於需要重新登入的平台。
 func (c *Coordinator) confirmPendingShell(ctx context.Context, s *State, now time.Time) bool {
 	if s.Target == nil || s.Target.Kind != "shell" || s.Stage != StagePending {
 		return false
