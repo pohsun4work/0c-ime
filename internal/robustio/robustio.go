@@ -7,19 +7,18 @@
 // 其他錯誤（找不到、路徑錯、目的地是非空目錄……）立刻回傳。作法同 Go 的 cmd/internal/robustio
 // （ACCESS_DENIED、SHARING_VIOLATION 重試約 2 秒）與 node-graceful-fs 在 win32 的 rename（EACCES、EPERM、EBUSY）。
 //
-// 拒絕若是真的權限問題，最多多等 RetryBudget 才回報；非 Windows 平台不重試，行為同 os.Rename。
+// 拒絕若是真的權限問題，最多多等 RetryBudget 才回報。
 package robustio
 
 import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"syscall"
 	"time"
 )
 
-// Windows 的錯誤碼（syscall 套件只在 Windows 定義後兩個名稱，這裡用數值，讓判斷在任何平台都能測）。
+// Windows 的錯誤碼（syscall 套件沒有後兩個名稱，這裡用數值）。
 const (
 	AccessDenied     = syscall.Errno(5)  // ERROR_ACCESS_DENIED
 	SharingViolation = syscall.Errno(32) // ERROR_SHARING_VIOLATION
@@ -36,9 +35,8 @@ const (
 )
 
 var (
-	retrying = runtime.GOOS == "windows"
-	rename   = os.Rename
-	sleep    = time.Sleep
+	rename = os.Rename
+	sleep  = time.Sleep
 )
 
 // Transient 回報 err 是不是等一下就可能消失的 Windows 拒絕。
@@ -54,12 +52,12 @@ func Transient(err error) bool {
 	return false
 }
 
-// Retry 執行 op；在 Windows 上 op 回傳 Transient 錯誤時以 10 ms 起、倍增、最長 250 ms 的間隔重試，
+// Retry 執行 op；op 回傳 Transient 錯誤時以 10 ms 起、倍增、最長 250 ms 的間隔重試，
 // 累計等待超過 RetryBudget 就回傳最後一次的錯誤（仍可用 errors.Is／errors.As 取得原本的錯誤）。
 func Retry(op func() error) error {
 	err := op()
-	if err == nil || !retrying {
-		return err
+	if err == nil {
+		return nil
 	}
 	attempts := 1
 	var waited time.Duration
@@ -77,16 +75,15 @@ func Retry(op func() error) error {
 	return err
 }
 
-// Rename 同 os.Rename；在 Windows 上遇到暫時性拒絕時依 Retry 重試。
+// Rename 同 os.Rename；遇到暫時性拒絕時依 Retry 重試。
 func Rename(oldpath, newpath string) error {
 	return Retry(func() error { return rename(oldpath, newpath) })
 }
 
-// SetForTest 讓其他套件的測試在任何平台走重試邏輯：r 取代 os.Rename（nil 表示不換）、s 取代等待
-// （nil 表示不等）。回傳還原函式。只給測試用。
+// SetForTest 讓其他套件的測試模擬拒絕：r 取代 os.Rename（nil 表示不換）、s 取代等待（nil 表示不等）。
+// 回傳還原函式。只給測試用。
 func SetForTest(r func(oldpath, newpath string) error, s func(time.Duration)) (restore func()) {
-	oldRetrying, oldRename, oldSleep := retrying, rename, sleep
-	retrying = true
+	oldRename, oldSleep := rename, sleep
 	if r != nil {
 		rename = r
 	}
@@ -94,5 +91,5 @@ func SetForTest(r func(oldpath, newpath string) error, s func(time.Duration)) (r
 		s = func(time.Duration) {}
 	}
 	sleep = s
-	return func() { retrying, rename, sleep = oldRetrying, oldRename, oldSleep }
+	return func() { rename, sleep = oldRename, oldSleep }
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// 預設 0 或空值的新編譯參數不寫進 manifest：舊版字典資料（如 Debian 固定的 0c-ime-data）以新工具重建、
+// 預設 0 或空值的新編譯參數不寫進 manifest：舊版字典資料以新工具重建、
 // 參數設成 0 時，manifest 要與舊工具的產物逐位元組相同。
 func TestNewOptionsOmittedFromManifestWhenZero(t *testing.T) {
 	o := DefaultOptions()

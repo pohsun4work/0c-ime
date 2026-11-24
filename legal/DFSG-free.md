@@ -40,7 +40,6 @@
 | 模組 | 版本 | 授權 | Debian main |
 |---|---|---|---|
 | github.com/Microsoft/go-winio | v0.6.2 | MIT | golang-github-microsoft-go-winio |
-| github.com/godbus/dbus/v5 | v5.1.0 | BSD-2-Clause | golang-dbus |
 | github.com/clipperhouse/uax29/v2 | v2.7.0 | MIT（一個測試檔為 Apache-2.0） | golang-github-clipperhouse-uax29 |
 | golang.org/x/sys | v0.10.0 | BSD-3-Clause＋Go 專利授權 | golang-golang-x-sys |
 | github.com/sirupsen/logrus、golang.org/x/mod、golang.org/x/tools | — | MIT、BSD-3-Clause | 已收錄；只在模組圖中，不編進執行檔 |
