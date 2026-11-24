@@ -74,7 +74,6 @@ func TestMixedNumberWritingAfterLiteralDigit(t *testing.T) {
 // #176：數字鍵＋聲調鍵出的字（#175 的 03 俺、04 案、53 只、84 阿、103 版）後面緊接著數字標點再打數字，
 // 是時間或數字寫法（03:00、04:10、53,082、84.73、103,020）：那個字改回原按鍵，: 也是半形。
 func TestMixedDigitWordBeforeNumberPunct(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形（allSymbolsKey）繞過混打的英數 token 規則（a<b → a<ㄖ、03:00 → 俺:00），待修")
 	for _, tc := range []struct{ keys, want string }{
 		{"03:00", "03:00"},
 		{"04:10", "04:10"},

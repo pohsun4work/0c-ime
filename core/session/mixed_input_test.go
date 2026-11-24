@@ -34,13 +34,13 @@ func TestEnglishCursorMovesThroughPendingLiterals(t *testing.T) {
 	key(s, proto.KeyLeft)
 	key(s, "j")
 	key(s, "i")
-	key(s, "KP1") // ㄨㄛ 暫存成字面注音
+	key(s, "KP1") // ㄨㄛ 照原按鍵 ji 暫存
 	s.Handle(proto.Request{Type: proto.Toggle})
 	key(s, proto.KeyLeft)
-	if snap := key(s, proto.KeyLeft); snap.Text() != "ㄨㄛ1吃" || snap.Cursor.Rune != 1 {
-		t.Fatalf("英文模式應可移入字面注音：%+v", snap)
+	if snap := key(s, proto.KeyLeft); snap.Text() != "ji1吃" || snap.Cursor.Rune != 1 {
+		t.Fatalf("英文模式應可移入暫存的按鍵：%+v", snap)
 	}
-	if snap := key(s, "1"); snap.Text() != "ㄨ1ㄛ1吃" || snap.Cursor.Rune != 2 {
+	if snap := key(s, "1"); snap.Text() != "j1i1吃" || snap.Cursor.Rune != 2 {
 		t.Fatalf("英文插入位置應跟隨畫面游標：%+v", snap)
 	}
 	key(s, proto.KeyBackspace)
@@ -48,9 +48,9 @@ func TestEnglishCursorMovesThroughPendingLiterals(t *testing.T) {
 	key(s, proto.KeyRight)
 	key(s, proto.KeyBackspace)
 	s.Handle(proto.Request{Type: proto.Toggle})
-	// 已進入注音內部編輯，保留字面內容，不猜測使用者是否要重新組音。
-	if snap := key(s, "3"); snap.Text() != "ㄨㄛ3吃" {
-		t.Fatalf("編輯過的原樣注音不得還原舊狀態：%+v", snap)
+	// 已進入按鍵內部編輯，保留字面內容，不猜測使用者是否要重新組音。
+	if snap := key(s, "3"); snap.Text() != "ji3吃" {
+		t.Fatalf("編輯過的暫存按鍵不得還原舊狀態：%+v", snap)
 	}
 }
 
@@ -66,32 +66,60 @@ func TestFirstToneAfterRestoringPendingZhuyin(t *testing.T) {
 }
 
 func TestPendingLiteralRestorationDoesNotUndoEdits(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形時，照字面留下的待定注音鍵在編輯／選回後沒有還原，待修")
 	s := newSession()
 	key(s, "j")
 	key(s, "i")
 	key(s, "KP1")
 	key(s, proto.KeyLeft)
 	key(s, proto.KeyLeft)
-	key(s, proto.KeyBackspace) // 真正刪掉 ㄨ，不能之後又還原它。
+	key(s, proto.KeyBackspace) // 真正刪掉 j，不能之後又還原它。
 	key(s, proto.KeyRight)
 	key(s, proto.KeyRight)
-	if snap := key(s, proto.KeyBackspace); snap.Text() != "ㄛ" {
-		t.Fatalf("刪數字不能復活已刪注音：%+v", snap)
+	if snap := key(s, proto.KeyBackspace); snap.Text() != "i" {
+		t.Fatalf("刪數字不能復活已刪的按鍵：%+v", snap)
 	}
-	if snap := key(s, "3"); snap.Text() != "ㄛ3" {
-		t.Fatalf("修改後的原樣注音應維持原樣：%+v", snap)
+	if snap := key(s, "3"); snap.Text() != "i3" {
+		t.Fatalf("修改後的暫存按鍵應維持原樣：%+v", snap)
 	}
 }
 
+// 撤銷英數插入後回到插入前的待定按鍵，接下來的退格跟沒按數字鍵盤時一樣（先 ㄛ 再 ㄨ，畫面 ㄨㄛ，退格剩 ㄨ）。
 func TestPendingLiteralKeepsOriginalBackspaceOrder(t *testing.T) {
-	s := newSession()
-	key(s, "i") // 先 ㄛ，再 ㄨ（畫面 ㄨㄛ），退格照畫面順序刪 ㄛ（#309）。
-	key(s, "j")
-	key(s, "KP1")
-	key(s, proto.KeyBackspace)
-	if snap := key(s, proto.KeyBackspace); snap.Text() != "ㄨ" {
-		t.Fatalf("撤銷英數插入後應恢復組音，退格刪畫面上最後的 ㄛ：%+v", snap)
+	typed := func(keys ...string) string {
+		s := newSession()
+		var snap proto.Snapshot
+		for _, k := range keys {
+			snap = key(s, k)
+		}
+		return snap.Text()
+	}
+	if got, plain := typed("i", "j", "KP1", proto.KeyBackspace, proto.KeyBackspace), typed("i", "j", proto.KeyBackspace); got != plain {
+		t.Fatalf("撤銷英數插入後退格 %q，沒插入時 %q", got, plain)
+	}
+}
+
+// 混打顯示成注音的待定按鍵，退格跟一般注音一樣照畫面順序刪（#309）；照字面顯示的刪最後按的。
+func TestMixedBackspaceFollowsDisplayOrder(t *testing.T) {
+	for _, tc := range []struct {
+		keys string
+		want []string // 每按一次退格的畫面
+	}{
+		{"ij", []string{"ㄨ", ""}},
+		{"ix", []string{"ㄌ", ""}},
+		{"ulv", []string{"ㄒㄧ", "ㄒ", ""}},
+		{"hello", []string{"hell"}},
+		// 移動游標照原按鍵留下（畫面 mn），退格回到後面時刪畫面最後的 n，剩下的 m 收回成 ㄩ
+		{"mn\tLeft\t\tRight\t", []string{"ㄩ", ""}},
+	} {
+		s := newSession()
+		for _, k := range splitProbeKeys(tc.keys) {
+			key(s, k)
+		}
+		for i, want := range tc.want {
+			if got := key(s, proto.KeyBackspace).Text(); got != want {
+				t.Fatalf("%q 退格 %d 次是 %q，要 %q", tc.keys, i+1, got, want)
+			}
+		}
 	}
 }
 
@@ -209,7 +237,7 @@ func TestReplacingSymbolDoesNotConsumePendingZhuyin(t *testing.T) {
 	key(s, "j")
 	key(s, "]")
 	key(s, proto.KeyDown)
-	if snap := pickText(t, s, "」"); snap.Text() != "ㄨ」" {
+	if snap := pickText(t, s, "」"); snap.Text() != "j」" {
 		t.Fatalf("換符號不能順便還原或刪除前面的注音：%+v", snap)
 	}
 	key(s, proto.KeyBackspace)

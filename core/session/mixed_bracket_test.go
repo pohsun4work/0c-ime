@@ -23,7 +23,7 @@ func TestMixedBracketsStayHalfWidth(t *testing.T) {
 	}
 }
 
-// Ctrl＋Shift＋0（#231）是明確要全形，不跟著開括號（#168）；Ctrl＋( 之後一般打的 ) 照微軟是半形。
+// Ctrl＋Shift＋0（#231）是明確要全形，不跟著開括號（#168）；Ctrl＋( 之後一般打的 ) 跟著開括號是全形（#232）。
 func TestMixedCtrlParenIsAlwaysFullWidth(t *testing.T) {
 	s := newSession()
 	mixedType(s, "DNS(ji3")
@@ -35,8 +35,8 @@ func TestMixedCtrlParenIsAlwaysFullWidth(t *testing.T) {
 	mixedType(s, "DNS")
 	key(s, proto.KeyCtrlParenLeft)
 	mixedType(s, "ji3)")
-	if got := key(s, proto.KeyEnter).Commit; got != "DNS（我)" {
-		t.Fatalf("Ctrl+( 之後的 ) 是半形：%q", got)
+	if got := key(s, proto.KeyEnter).Commit; got != "DNS（我）" {
+		t.Fatalf("Ctrl+( 之後的 ) 跟著開括號是全形：%q", got)
 	}
 }
 

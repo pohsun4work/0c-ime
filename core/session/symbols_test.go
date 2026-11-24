@@ -134,7 +134,6 @@ func TestLiteralEditsAndLearningBoundaries(t *testing.T) {
 
 // 混打下單按 . 先照原鍵顯示，↓ 清單裡有原鍵與注音 ㄡ 可選。
 func TestPendingZhuyinCanBeSelectedAsLiteral(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形時，照字面留下的待定注音鍵在編輯／選回後沒有還原，待修")
 	s := newSession()
 	key(s, ".") // ㄡ 尚未按聲調
 	snap := key(s, proto.KeyDown)
@@ -179,10 +178,10 @@ func TestPunctuationPreservesPendingAndPrefix(t *testing.T) {
 		t.Fatalf("加標點不能把前綴換字：%q → %+v", before, snap)
 	}
 	key(s, "v") // ㄒ 尚未完成
-	if snap := key(s, "]"); snap.Text() != before+">ㄒ]" {
-		t.Fatalf("標點前的未完成注音不能消失或先送出：%+v", snap)
+	if snap := key(s, "]"); snap.Text() != before+">v]" {
+		t.Fatalf("標點前的未完成注音照原按鍵留下，不能消失或先送出：%+v", snap)
 	}
-	if snap := key(s, proto.KeyEnter); snap.Commit != before+">ㄒ]" {
+	if snap := key(s, proto.KeyEnter); snap.Commit != before+">v]" {
 		t.Fatalf("提交所見文字：%+v", snap)
 	}
 }

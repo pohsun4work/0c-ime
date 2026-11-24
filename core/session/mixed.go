@@ -18,6 +18,11 @@ import (
 
 const maxMixedPending = 64
 
+// mixedJoinSymbols 是不在注音鍵上、併進打到一半的英文的符號（search?q=1&x=2、C:\Users、don't、say"hi"、a<b，#233）。
+// 併進去是暫定的：後面的按鍵接聲調組成中文時從符號後面切開（DNS<ji3 是 DNS<我，mixedBoundary）；
+// 定案時結尾的符號單獨留下，↓ 第二項是全形（hello< ↓ 換成 hello，，insertMixedPrefix）。
+const mixedJoinSymbols = `:\'"<>?&`
+
 // pendingKeys keeps the physical spelling until a tone/boundary resolves it.
 // Neither a repeated phonetic slot nor a proposed correction overwrites keys.
 type pendingKeys struct {
@@ -146,15 +151,39 @@ func (s *Session) mixedPending(text string) (zhuyin.Composer, bool) {
 	return c, !s.englishWord && ok && s.mixed.accepted == "" && text == c.String()
 }
 
-// Flushing preserves exactly what is displayed. An unfinished phonetic segment
-// uses the existing pending-literal restoration mechanism for cursor edits.
-func (s *Session) flushMixed() {
+// mixedEraseAt 回傳退格要刪的待定按鍵位置。顯示成注音時跟一般注音一樣照畫面順序刪最後一個符號（#309：
+// i j 畫面 ㄨㄛ，退格剩 ㄨ），照字面顯示時刪最後按的。asTyped：這次退格才收回、畫面上還是原按鍵（mn ← → 退格剩 m）。
+func (s *Session) mixedEraseAt(asTyped bool) int {
+	raw := s.mixed.raw
+	at := len(raw) - 1
+	if asTyped {
+		return at
+	}
+	if _, phonetic := s.mixedPending(s.mixedText()); !phonetic {
+		return at
+	}
+	last := zhuyin.None
+	for i, k := range raw {
+		sym, _ := layout.Standard.Symbol(k)
+		if cl := zhuyin.ClassOf(sym); cl > last {
+			at, last = i, cl
+		}
+	}
+	return at
+}
+
+// flushMixed 讓待定按鍵照畫面定案；顯示成還沒打完的注音時照原按鍵留下（insertPendingKeys），↓ 選過注音的照注音。
+func (s *Session) flushMixed() { s.settleMixed(false) }
+
+// settleMixed：keepZhuyin 時顯示成還沒打完的注音照注音留下（Enter 照畫面送出、點注音鍵接著組）。
+func (s *Session) settleMixed(keepZhuyin bool) {
 	if s.mixed.raw == "" {
 		return
 	}
 	s.settleTokenAn()
-	text := s.mixedText()
+	raw, text := s.mixed.raw, s.mixedText()
 	c, phonetic := s.mixedPending(text)
+	zhuyinText := phonetic && (keepZhuyin || s.mixed.choice == 2)
 	if !phonetic {
 		s.reviseLetterI(text)
 	}
@@ -163,11 +192,14 @@ func (s *Session) flushMixed() {
 	assisted, explicit := s.mixed.accepted != "", s.mixed.choice == 1
 	assistedPrefix := s.mixed.assistedPrefix
 	s.clearMixed()
-	if phonetic {
+	switch {
+	case zhuyinText:
 		s.comp = c
 		s.insertPendingLiteral()
-	} else {
-		s.insertMixedLiteral(text, assisted, explicit)
+	case phonetic:
+		s.insertPendingKeys(raw)
+	default:
+		s.insertMixedPrefix(text, assisted, explicit)
 		for pos := at; pos < at+min(assistedPrefix, len([]rune(text))); pos++ {
 			origin := s.mixedOrigins[pos]
 			origin.assisted = true
@@ -176,6 +208,26 @@ func (s *Session) flushMixed() {
 	}
 	s.refresh() // Enter must include newly materialized literals even with neural display caching.
 	s.keepMixedDisplay(previous, at, len(s.syls)-before)
+}
+
+// mixedTrailingSymbol：待定按鍵是英文後面接著剛併進去的 mixedJoinSymbols（hello<）。
+func (s *Session) mixedTrailingSymbol() bool {
+	return s.mixed.accepted == "" && joinedSymbolAtEnd(s.mixed.raw)
+}
+
+func joinedSymbolAtEnd(text string) bool {
+	return len(text) > 1 && strings.ContainsRune(mixedJoinSymbols, rune(text[len(text)-1]))
+}
+
+// insertMixedPrefix 照字面插入待定按鍵定案的文字；結尾是併進英文的符號時那個符號單獨插入（insertPunctKey），
+// ↓ 第二項是全形：hello< 定案後在 < 上按 ↓ 換得到「，」。
+func (s *Session) insertMixedPrefix(text string, assisted, explicit bool) {
+	if !joinedSymbolAtEnd(text) {
+		s.insertMixedLiteral(text, assisted, explicit)
+		return
+	}
+	s.insertMixedLiteral(text[:len(text)-1], assisted, explicit)
+	s.insertPunctKey(text[len(text)-1:])
 }
 
 // reviseLetterI（#69）：「i␣」先當成「喔」；緊接著打出的是完整英文單字（i am、i think、
@@ -554,14 +606,14 @@ func (s *Session) finishMixedTone(key string) bool {
 	if at, done, ok := s.mixedBoundary(raw, key, sym); ok {
 		prefix := raw[:at]
 		s.clearMixed()
-		s.insertMixedLiteral(prefix, false, false)
+		s.insertMixedPrefix(prefix, false, false)
 		s.insertMixedTyped(done, raw[at:]+key)
 		return true
 	}
-	// 畫面顯示成注音、空白組不成字（單獨的聲母 c ㄏ、x ㄌ，#190），或 ↓ 選了注音解釋後的聲調組不成字（2 ↓ㄉ，#208）：
-	// 比照一般注音模式（#109）原樣留下注音，空白當一聲吃掉，不另外插入空白（c␣c␣ 是「ㄏㄏ」，不是「ㄏ ㄏ 」）。
-	// 結尾是聲調鍵、照字面顯示的按鍵（co6）照舊。
-	if key == " " || s.mixed.choice == 2 {
+	// 畫面顯示成注音、空白組不成字而 mixedKeepsZhuyin 的，或 ↓ 選了注音解釋後的聲調組不成字（2 ↓ㄉ，#208）：
+	// 比照一般注音模式（#109）原樣留下注音，空白當一聲吃掉（c␣c␣ 是「ㄏㄏ」）。
+	// 其他照原按鍵、空白照打（npm␣ 是 npm␣，mixedKey 的 flushMixed）；結尾是聲調鍵、照字面顯示的按鍵（co6）照舊。
+	if s.mixed.choice == 2 || key == " " && s.mixedKeepsZhuyin(raw) {
 		at, picked := s.cursor, s.mixed.choice == 2 && key == " " && len(raw) == 1
 		kept := s.keepMixedSyllable(sym, raw+key)
 		if kept && picked {
@@ -625,6 +677,15 @@ const (
 func (s *Session) mixedBoundary(raw, key string, tone rune) (int, zhuyin.Syllable, bool) {
 	if key == " " && (s.englishThenPunct(raw) || capsThenDigits(raw)) {
 		return 0, "", false
+	}
+	// 併進英文的符號（mixedJoinSymbols）不在注音鍵上，後面有字母的按鍵照順序打、接聲調組成中文時從符號後面切開：
+	// DNS<ji3 是 DNS<我、OK?ji3 是 OK?我。接空白照字面（a<b␣ 不是 a<日）；只有數字的後段是數字寫法（10:04、page:103），
+	// 同 mixedLiteralPrefix。
+	if at := strings.LastIndexAny(raw, mixedJoinSymbols) + 1; at > 0 && at < len(raw) && key != " " &&
+		strings.ContainsFunc(raw[at:], unicode.IsLetter) && s.keysInSyllableOrder(raw[at:]) {
+		if done, ok := s.mixedReading(raw[at:], tone); ok && s.mixedSyllableScore(done) >= mixedRareFloor {
+			return at, done, true
+		}
 	}
 	best, bestScore, bestSyl := 0, 0.0, zhuyin.Syllable("")
 	for at := len(raw) - 1; at >= 1; at-- {
@@ -1309,7 +1370,7 @@ func (s *Session) numberAfterLiteral(raw, key string) bool {
 
 // reviseDigitWord（#176）：數字鍵＋聲調鍵出的字（#175 的 03 俺、04 案、53 只、84 阿、103 版），可能隔著照字面送出的數字
 // （846,000 的 6），後面緊接著一個數字標點再打數字時（03:00、04:10、53,082、846,000、04-06），是時間或數字寫法：
-// 把那個字改回原按鍵，後面的按鍵照數字寫法接上（: 在字後面已打成全形「：」，改回半形）。比照 #69 的 i 回頭改成英文。
+// 把那個字改回原按鍵，後面的按鍵照數字寫法接上。比照 #69 的 i 回頭改成英文。
 // 沒有選過字（鎖定）才改；標點鍵和這個聲調鍵組得成有字的音節時是中文（294-3 戴爾、284-6 大而），也不改。
 // 不是數字的（「只：」「案」後面接中文）照舊。那個字緊接在中文後面時（#201）只在它自己緊接著半形 . , /
 // 再打數字時改回（我53,082、毛利率54.88、莫忘04/09）：冒號是「答案：1」，- 是負數（三大-800、跌至-13），
@@ -1319,7 +1380,11 @@ func (s *Session) reviseDigitWord(k string) {
 		return
 	}
 	end, raw := s.cursor, s.mixed.raw
-	colon := raw == "" && end > 0 && s.literals[end-1] && string(s.syls[end-1]) == "："
+	typedColon := ":"
+	if s.fullWidth {
+		typedColon = "：" // 全形時 : 打全形
+	}
+	colon := raw == "" && end > 0 && s.literals[end-1] && string(s.syls[end-1]) == typedColon
 	switch {
 	case colon:
 		end--
@@ -1505,6 +1570,10 @@ func (s *Session) mixedReachable(raw string) bool {
 	return false
 }
 
+// mixedKeepsZhuyin：顯示成注音的待定按鍵在空白、Enter 時照官方留下注音：單鍵（c 是 ㄏ，#190），
+// 或加某個聲調組得成字的（ㄋㄩ）。多鍵又怎樣都組不成字的（npm 的 ㄙㄩㄣ）照原按鍵。
+func (s *Session) mixedKeepsZhuyin(raw string) bool { return len(raw) == 1 || s.mixedReachable(raw) }
+
 // mixedAfterChinese：待定按鍵要插入的位置前面是中文音節（不是字面的英文、數字、空白或標點）。
 func (s *Session) mixedAfterChinese() bool {
 	if _, ok := s.prefixLiteralBefore(); ok {
@@ -1535,13 +1604,14 @@ func (s *Session) mixedKey(k string) bool {
 	if !s.mixedInput() || s.english {
 		return false
 	}
-	if s.mixed.raw == "" {
-		s.restorePendingLiteral()
+	rs := []rune(k)
+	// 暫存的未打完注音或按鍵（pendingLiteral）後面接著打字時收回來接著組；方向鍵、Enter 等不收，游標照常移動。
+	if s.mixed.raw == "" && len(rs) == 1 && unicode.IsPrint(rs[0]) {
+		s.restorePending(true)
 	}
 	if !s.comp.Empty() {
 		return false
 	}
-	rs := []rune(k)
 	if len(rs) == 1 && rs[0] > unicode.MaxASCII && unicode.IsPrint(rs[0]) {
 		s.flushMixed()
 		return false
@@ -1560,9 +1630,10 @@ func (s *Session) mixedKey(k string) bool {
 	}
 	// #208：↓ 選了注音解釋（2 → ㄉ、1 → ㄅ）之後接著打的鍵和它組不成同一個音節時（ㄉ 後面的 ㄊ），選好的注音先原樣留下，
 	// 這一鍵開始新的待定按鍵；以前併成同一串、整串照字面顯示（我2wu0）。組得成的（ㄉ＋ㄜ）照舊接著組字，空白與聲調鍵由 finishMixedTone 完成。
+	// 不照聲母、介音、韻母順序的（ㄡ 後面的 ㄨ）也是新的音節。
 	if s.mixed.choice == 2 && k != " " {
 		if sym, ok := layout.Standard.Symbol(rs[0]); !ok || zhuyin.ClassOf(sym) != zhuyin.Tone {
-			if _, ok := s.mixedComposer(s.mixed.raw + k); !ok {
+			if _, ok := s.mixedComposer(s.mixed.raw + k); !ok || !s.keysInSyllableOrder(s.mixed.raw+k) {
 				s.keepMixedSyllable(zhuyin.Tone1, s.mixed.raw)
 			}
 		}
@@ -1593,24 +1664,14 @@ func (s *Session) mixedKey(k string) bool {
 			}
 			return false
 		}
-		literal := s.mixedText() == s.mixed.raw
-		// Colon/backslash belong to URLs and paths while an English token is pending.
-		if strings.ContainsAny(k, ":\\'") && (literal || s.mixed.choice == 0 && s.mixedEnglishWord(s.mixed.raw)) {
+		// 網址、路徑、縮寫、引號裡的符號併進打到一半的英文（mixedJoinSymbols），不先送出英文、把後面的字母當注音。
+		if strings.ContainsAny(k, mixedJoinSymbols) && (s.mixedText() == s.mixed.raw || s.mixed.choice == 0 && s.mixedEnglishWord(s.mixed.raw)) {
 			s.mixed.raw += k
 			return true
 		}
+		// 其他符號讓英文先定案（DNS(我)、hello!）。
 		s.flushMixed()
-		// 緊接在照字面的英數後面，Shift＋, Shift＋. 也是「，」「。」（#201：我2026，我、我OK，），↓ 第二項是原按鍵 < >；
-		// 其他標點照字面（hello! 、x^2）。閉括號跟著組字區裡配對的開括號（#232：我（DNS））。
-		if s.insertPairedBracket(k) {
-			return true
-		}
-		if literal && k != "<" && k != ">" {
-			s.insertMixedLiteral(k, false, false)
-		} else {
-			p, _ := layout.Standard.Punct(rs[0])
-			s.insertPunctKey(k, p)
-		}
+		s.insertPunctKey(k)
 		return true
 	}
 	if s.mixed.raw == "" && (s.explicitSymbol(k) || s.digitAfterExplicitSymbol(k)) {

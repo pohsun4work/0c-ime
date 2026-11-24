@@ -327,7 +327,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.finishSymbolPending()
 		handled, commit = s.key(r.Key)
 	case proto.Symbol:
-		s.flushMixed()
+		s.settleMixed(true) // 顯示成注音的待定按鍵交給注音接著組（nm 再點 ㄅ 是 ㄅㄩ）
 		for _, sym := range r.Symbol {
 			handled = s.symbolNear(sym, r.Near) && handled
 		}
@@ -496,9 +496,6 @@ func (s *Session) key(k string) (handled bool, commit string) {
 	s.untonedRun = nil
 	if s.hoshiSymbolKey(k) {
 		return true, ""
-	}
-	if handled, commit, done := s.allSymbolsKey(k); done {
-		return handled, commit
 	}
 	if handled, commit, done := s.styleKey(k); done {
 		return handled, commit
@@ -792,9 +789,9 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		}
 	}
 	// 標點保留在組字區，可移動、替換候選；Enter 才提交。
-	if p, ok := layout.Standard.Punct(runes[0]); ok {
+	if _, ok := layout.Standard.Punct(runes[0]); ok {
 		s.insertPendingLiteral()
-		s.insertPunctKey(k, p)
+		s.insertPunctKey(k)
 		return true, ""
 	}
 	// 其他可見字元（Shift＋字母、@、#、落單聲調鍵等）在游標處逐字保留；明確打的符號（@ #）沒在組字時也一樣。
@@ -944,23 +941,24 @@ func (s *Session) backspace() bool {
 			for s.cursor > span.start {
 				s.eraseBeforeCursor()
 			}
-			s.restorePendingLiteral()
+			s.restorePending(true)
 			return true
 		}
 	}
+	asTyped := s.restorePending(true)
 	if s.mixed.raw != "" {
 		if s.mixed.accepted != "" {
 			s.mixed.accepted = ""
 		} else {
-			s.mixed.raw = s.mixed.raw[:len(s.mixed.raw)-1]
-			s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, len(s.mixed.raw))
+			at := s.mixedEraseAt(asTyped)
+			s.mixed.raw = s.mixed.raw[:at] + s.mixed.raw[at+1:]
+			s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, at)
 			if s.mixed.raw == "" {
 				s.clearMixed()
 			}
 		}
 		return true
 	}
-	s.restorePendingLiteral()
 	if !s.comp.Empty() {
 		s.comp = layout.Standard.Backspace(s.comp)
 		return true
@@ -972,7 +970,7 @@ func (s *Session) backspace() bool {
 	for s.cursor > to {
 		s.eraseBeforeCursor()
 	}
-	s.restorePendingLiteral()
+	s.restorePending(true)
 	return true
 }
 
@@ -1195,6 +1193,10 @@ func (s *Session) openCandidates(length int) {
 		s.refreshEnglishCandidates()
 		return
 	}
+	symbol := s.mixedTrailingSymbol()
+	if symbol {
+		s.flushMixed() // hello< 的 ↓ 是游標前那個 < 的候選（第二項是全形「，」），不是整串
+	}
 	if s.mixed.raw != "" {
 		s.openMixedCandidates()
 		return
@@ -1206,7 +1208,7 @@ func (s *Session) openCandidates(length int) {
 	if len(s.syls) == 0 {
 		return
 	}
-	before := s.candidateBefore()
+	before := symbol || s.candidateBefore()
 	pos := min(s.cursor, len(s.syls)-1)
 	if before {
 		pos = max(0, s.cursor-1)
@@ -1659,7 +1661,7 @@ func (s *Session) commitComposed() string {
 
 func (s *Session) commit() string {
 	// Resolve pending English exactly as displayed; never accept a suggestion on Enter.
-	s.flushMixed()
+	s.settleMixed(s.mixedKeepsZhuyin(s.mixed.raw))
 	s.finishUntoned() // 聲調選填：最後一個沒打聲調的音節也照解碼結果送出（#150）
 	if s.Rerank.Scorer == nil {
 		s.refresh()

@@ -28,12 +28,13 @@ func TestKeypadInsertsHalfWidthWhileComposing(t *testing.T) {
 	}
 }
 
-func TestKeypadKeepsPendingZhuyinAsSymbols(t *testing.T) {
+// 按過的鍵不丟：未打完的注音照原按鍵留下（e 數字鍵盤 2 e 是 e2e）。
+func TestKeypadKeepsPendingKeys(t *testing.T) {
 	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	key(s, "j") // ㄨ 還沒打完
-	if snap := key(s, "KP2"); !snap.Handled || snap.Text() != "我ㄨ2" {
-		t.Fatalf("未打完的注音保留成符號，數字接在後面：%q", snap.Text())
+	if snap := key(s, "KP2"); !snap.Handled || snap.Text() != "我j2" {
+		t.Fatalf("未打完的注音照原按鍵留下，數字接在後面：%q", snap.Text())
 	}
 }
 

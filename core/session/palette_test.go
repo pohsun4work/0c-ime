@@ -174,7 +174,7 @@ func TestPaletteDefaultEqualsChoiceAndOptOut(t *testing.T) {
 			key(s, proto.KeyEscape)
 			key(s, "r")
 			key(s, "=")
-			if snap = key(s, "="); snap.Text() != "ㄐ=" || snap.Commit != "" || snap.PersonalChanged {
+			if snap = key(s, "="); snap.Text() != "r=" || snap.Commit != "" || snap.PersonalChanged {
 				t.Fatalf("double equals lost pending composition: %+v", snap)
 			}
 		}

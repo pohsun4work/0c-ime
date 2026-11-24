@@ -150,7 +150,6 @@ func TestMixedVocabEnglishKeepsToken(t *testing.T) {
 // #241：型號、編號的長度超過切出來的音節：下一鍵是聲調鍵或 @ _ 時回頭改成原按鍵，0 看再下一鍵（TestMixedTokenDigitsThenAn）；
 // 1 2 5 是聲母、8 9 常是下一個字，照常接下去；選過的字不改。
 func TestMixedTokenDigitsTurnBackOnNextDigit(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形（allSymbolsKey）繞過混打的英數 token 規則（a<b → a<ㄖ、03:00 → 俺:00），待修")
 	s := tokenBoundarySession()
 	mixedType(s, "GT103")
 	snap := key(s, proto.KeyDown)
@@ -179,7 +178,6 @@ func TestMixedTokenDigitsTurnBackOnNextDigit(t *testing.T) {
 // 英文後面只用數字鍵打出的字，下一鍵是 ㄢ 的 0 時還不能判斷：接聲調鍵或空白組成中文就留著（Mac版安裝），
 // 接別的鍵、Enter 或結束才是型號，回頭改成原按鍵。0.2.7 之後 #241 一看到 0 就退回，吃掉組好的字。
 func TestMixedTokenDigitsThenAn(t *testing.T) {
-	t.Skip("P4 起就有的 bug：所有符號鍵打半形（allSymbolsKey）繞過混打的英數 token 規則（a<b → a<ㄖ、03:00 → 俺:00），待修")
 	for _, tc := range []struct{ keys, want string }{
 		// 接聲調鍵：案、俺
 		{"hello10304", "hello版案"}, {"Mac10304", "Mac版案"}, {"GT10304", "GT版案"}, {"CPI28604", "CPI答案"}, {"hello10303", "hello版俺"},
