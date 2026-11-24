@@ -6,33 +6,33 @@
 
 `qsel/` 是手機選字模型（q4x-b16）不經 onnxruntime 的 C 推論，權重留在唯讀 mmap（#336，見 [qsel/README.md](qsel/README.md)）；桌面不用。
 
-## 使用發行版提供的 Python
+## 使用自備的 Python
 
 從完整 tarball 根目錄啟動已編譯的 server：
 
-```sh
-build/0c-server -data assets/data \
-  -neural-python /usr/bin/python3 \
-  -neural-package models/select -neural-worker platforms/neural/runtime/sequence_runtime.py \
-  -punct-package models/punct -punct-worker platforms/neural/runtime/punct_runtime.py
+```powershell
+build\0c-server.exe -data assets\data `
+  -neural-python C:\path\to\python.exe `
+  -neural-package models\select -neural-worker platforms\neural\runtime\sequence_runtime.py `
+  -punct-package models\punct -punct-worker platforms\neural\runtime\punct_runtime.py
 ```
 
-系統 Python 須已安裝 numpy 與 onnxruntime；server 依使用者設定啟動模型。補標點仍預設關閉。安裝時依發行版目錄配置調整上述路徑，並保留字典與模型的固定配對。
+這份 Python 須已安裝 numpy 與 onnxruntime；server 依使用者設定啟動模型。補標點仍預設關閉。字典與模型保持固定配對。
 
 ## 官網可攜套件
 
 ```sh
-python3 scripts/prepare_neural.py --platform linux-amd64 \
+python3 scripts/prepare_neural.py \
   --dictionary assets/data --models models \
-  --out build/neural-linux-amd64
+  --out build/neural-windows-amd64
 ```
 
-Windows 使用 `windows-amd64`，Apple Silicon 使用 `macos-arm64`（onnxruntime 需 macOS 14 以上）。Intel Mac 使用 `macos-amd64`：onnxruntime 1.30.0 沒有 Intel Mac 版，改用最後一版有的 1.23.2 與它支援的 CPython 3.13.15；兩個模型的輸出與 1.30.0 逐請求比對過相同。工具下載並校驗固定版本的 Python 與 wheel，快取在 `build/cache/neural`。
+工具下載並校驗固定版本的 Python 與 wheel，快取在 `build/cache/neural`。
 
-`windows-amd64` 的 `neural/` 要在 Linux x86-64 上準備，再把輸出目錄複製到 Windows 建置機交給 `scripts/package_windows.py --neural`：工具用同一版 CPython 的 Linux 版（python-build-standalone 的 `x86_64-unknown-linux-gnu`）把 numpy、onnxruntime 編成 bytecode，這個直譯器在 Windows 上跑不起來。同一版 CPython 的 bytecode 不分平台，Windows 內附 Python 的標準函式庫本來就是 `python314.zip` 裡的 bytecode，所以不必在 Windows 上編。macOS 的兩個平台在 Linux 或 Mac 上準備都可以。
+`neural/` 要在 Linux x86-64 上準備，再把輸出目錄複製到 Windows 建置機交給 `scripts/package_windows.py --neural`：工具用同一版 CPython 的 Linux 版（python-build-standalone 的 `x86_64-unknown-linux-gnu`）把 numpy、onnxruntime 編成 bytecode，這個直譯器在 Windows 上跑不起來。同一版 CPython 的 bytecode 不分平台，Windows 內附 Python 的標準函式庫本來就是 `python314.zip` 裡的 bytecode，所以不必在 Windows 上編。
 
 模型是 `models/models.lock.json` 記的 Hugging Face 公開版（#180，0.2.3 起；0.2.2 以前是權重相同的內部匯出，見 `models/equivalent.json`）。`--models` 指定的目錄須有 `<select|punct>/model.onnx`、`LICENSE`、`README.md`，完整 tarball 的 `models/` 即可；省略時用 `build/cache/models`，缺的從 Hugging Face 下載，一律逐檔核對 `models.lock`。`manifest.json`、`vocab.json` 由 `models/upstream` 配對到 `--dictionary`，結果等於這份字典的 `pairing.lock.json`。只換字典或只換模型、沿用現有的可攜 Python 時用 `scripts/hf_models.py neural`。
 
-以 `--neural` 將輸出目錄交給平台打包工具，並用同一份字典作為 `--data`。發行版離線建置應自行提供相依套件，不直接使用會下載 runtime 的可攜套件流程。
+以 `--neural` 將輸出目錄交給 `scripts/package_windows.py`，並用同一份字典作為 `--data`。
 
 worker 必須以 `-I -B -X utf8` 執行；安裝後檔案不得在執行時改變。換模型須同步更換配對字典並重新產生 runtime，不手動改寫 manifest。公開包打包時核對 `neural/` 就是公開版模型配對出貨字典的結果（`hf_models.check_shipped`）。

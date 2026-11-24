@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,11 +90,11 @@ func (f *fakePlatform) Notify(n Notice) error {
 	f.actions = append(f.actions, n.Action)
 	return nil
 }
-func (f *fakePlatform) Target() (string, string) { return "linux", "amd64" }
+func (f *fakePlatform) Target() (string, string) { return "windows", "amd64" }
 
 func feedFor(version, kind string, rollout int, withdrawn ...string) *update.SignedFeed {
 	return &update.SignedFeed{Serial: 1, Version: version, Rollout: rollout, Withdrawn: withdrawn,
-		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "linux", Arch: "amd64", URL: "https://x/" + version, SHA256: strings.Repeat("a", 64), Size: 1}, Kind: kind}}}
+		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "windows", Arch: "amd64", URL: "https://x/" + version, SHA256: strings.Repeat("a", 64), Size: 1}, Kind: kind}}}
 }
 
 type clock struct{ t time.Time }
@@ -356,28 +355,6 @@ func TestAskModeWaitsForConsentThenApplies(t *testing.T) {
 	}
 }
 
-func TestShellUpdateDeferredToLoginNotifiesOnce(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.18", running: "0.1.0-dev.18", feed: feedFor("0.1.0-dev.19", "shell", 100), shellErr: ErrAtLogin}
-	co, clk := newCoordinator(t, p)
-	s := run(t, co)
-	if s.Stage != StagePending || s.Blocked.Reason != "needs_relogin" || len(p.notices) != 1 {
-		t.Fatalf("%s %+v %v", s.Stage, s.Blocked, p.notices)
-	}
-	clk.add(time.Hour)
-	p.calls = nil
-	run(t, co)
-	for _, c := range p.calls {
-		if c == "shell" {
-			t.Fatal("a staged shell update must not be reinstalled by the timer")
-		}
-	}
-	p.running = "0.1.0-dev.19" // 登入時安裝完成、新外殼啟動新引擎
-	clk.add(time.Hour)
-	if s = run(t, co); s.Stage != StageActive {
-		t.Fatalf("%s", s.Stage)
-	}
-}
-
 // Windows E23 發現：交接延到下一次喚起時，引擎沒執行也必須啟動並核對，不能直接視為生效。
 func TestPendingCoreIsVerifiedNotAssumed(t *testing.T) {
 	p := &fakePlatform{installed: "0.1.0-dev.17", running: "0.1.0-dev.17", feed: feedFor("0.1.0-dev.18", "core", 100),
@@ -507,43 +484,6 @@ func TestScheduleChoiceChangedDuringDownloadSurvives(t *testing.T) {
 	}
 }
 
-// #195：平台安裝器在 InstallShell 裡記下「登入時補做輸入法設定」（ProfileAtLogin），協調器結束時寫回整份狀態不能蓋掉它。
-type profileDuringInstall struct {
-	*fakePlatform
-	base string
-}
-
-func (p *profileDuringInstall) InstallShell(ctx context.Context, archive string) (bool, error) {
-	if _, err := EditState(p.base, func(s *State) error { s.ProfileAtLogin = true; return nil }); err != nil {
-		return false, err
-	}
-	return p.fakePlatform.InstallShell(ctx, archive)
-}
-
-func TestProfileAtLoginSetDuringInstallSurvives(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.17", running: "0.1.0-dev.17", feed: feedFor("0.1.0-dev.18", "shell", 100), shellPend: true}
-	co, _ := newCoordinator(t, p)
-	co.Consent = true
-	initial, _ := Load(co.Base)
-	if err := Save(co.Base, initial); err != nil {
-		t.Fatal(err)
-	}
-	co.Platform = &profileDuringInstall{p, co.Base}
-	s := run(t, co)
-	saved, err := Load(co.Base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.Join(p.calls, ","), "shell") {
-		t.Fatalf("shell was not installed: %v", p.calls)
-	}
-	for _, got := range []*State{s, saved} {
-		if !got.ProfileAtLogin {
-			t.Fatalf("coordinator save dropped ProfileAtLogin written by the installer: %+v", got)
-		}
-	}
-}
-
 // 選單在協調器執行中改了暫停：Download 期間模擬另一個行程寫入暫停。
 func (p *pauseDuringRun) Download(ctx context.Context, t Target, dir string) (string, error) {
 	s, _ := Load(p.base)
@@ -567,131 +507,6 @@ func TestUserSettingsChangedDuringRunAreKept(t *testing.T) {
 	saved, _ := Load(co.Base)
 	if saved.PausedUntil.IsZero() || saved.Mode != ModeManual {
 		t.Fatal("saved state lost the user's settings")
-	}
-}
-
-// Linux 外殼可重載時才走這條分支，其他平台維持原有權限／登入規則。
-type liveShellFake struct {
-	*fakePlatform
-	base string
-	t    *testing.T
-}
-
-func (p *liveShellFake) ReloadsShell() bool { return true }
-func (p *liveShellFake) InstallShell(ctx context.Context, archive string) (bool, error) {
-	s, err := Load(p.base)
-	if err != nil || s.Target == nil {
-		p.t.Fatalf("安裝前必須先保存目標：%v", err)
-	}
-	pending, err := p.fakePlatform.InstallShell(ctx, archive)
-	if err == nil && !pending {
-		p.installed = s.Target.Version
-		p.running = s.Target.Version
-	}
-	return pending, err
-}
-func TestLiveShellWaitsForIdleThenVerifiesWithoutLogin(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.40", running: "0.1.0-dev.40", feed: feedFor("0.1.0-dev.41", "shell", 100), cond: Conditions{IdleKnown: true, Idle: time.Second}}
-	co, _ := newCoordinator(t, p)
-	co.Platform = &liveShellFake{p, co.Base, t}
-	s := run(t, co)
-	if s.Stage != StagePrepared || s.Blocked.Reason != "waiting_idle" || strings.Contains(strings.Join(p.calls, " "), "shell") {
-		t.Fatalf("%+v %v", s, p.calls)
-	}
-	p.cond.Idle = 6 * time.Minute
-	p.calls = nil
-	s = run(t, co)
-	if s.Stage != StageActive || s.Blocked != nil || strings.Join(p.calls, " ") != "shell" {
-		t.Fatalf("%+v %v", s, p.calls)
-	}
-}
-func TestManualFinishCanApplyLiveShellWhileBusyTimeAndManualMode(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.40", running: "0.1.0-dev.40", feed: feedFor("0.1.0-dev.41", "shell", 100), cond: Conditions{IdleKnown: true, Idle: time.Second}}
-	co, _ := newCoordinator(t, p)
-	co.Platform = &liveShellFake{p, co.Base, t}
-	run(t, co)
-	s, _ := Load(co.Base)
-	s.Mode = ModeManual
-	_ = Save(co.Base, s)
-	co.Consent = true
-	if s = run(t, co); s.Stage != StageActive || s.Mode != ModeManual {
-		t.Fatalf("%+v", s)
-	}
-}
-func TestLiveShellKeepsCompositionAndRetries(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.40", running: "0.1.0-dev.40", feed: feedFor("0.1.0-dev.41", "shell", 100), cond: Conditions{IdleKnown: true, Idle: 6 * time.Minute}, shellErr: ErrShellBusy}
-	co, _ := newCoordinator(t, p)
-	co.Platform = &liveShellFake{p, co.Base, t}
-	s := run(t, co)
-	if s.Stage != StagePrepared || s.Blocked.Reason != "engine_busy" || p.running != "0.1.0-dev.40" {
-		t.Fatalf("%+v", s)
-	}
-	p.shellErr = nil
-	if s = run(t, co); s.Stage != StageActive {
-		t.Fatalf("%+v", s)
-	}
-}
-func TestLiveShellTakesOverOldPendingAndDoesNotTrustEngineAlone(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.40", running: "0.1.0-dev.41", feed: feedFor("0.1.0-dev.41", "shell", 100), cond: Conditions{IdleKnown: true, Idle: 6 * time.Minute}, shellErr: ErrShellBusy}
-	co, _ := newCoordinator(t, p)
-	co.Platform = &liveShellFake{p, co.Base, t}
-	s := run(t, co)
-	s.Stage = StagePending
-	s.block(co.Now(), "needs_relogin", "登出再登入時自動完成安裝")
-	_ = Save(co.Base, s)
-	p.calls = nil
-	s = run(t, co)
-	if s.Stage != StagePending || s.Blocked.Reason != "engine_busy" || strings.Join(p.calls, " ") != "shell" {
-		t.Fatalf("%+v %v", s, p.calls)
-	}
-	p.shellErr = nil
-	if s = run(t, co); s.Stage != StageActive {
-		t.Fatalf("%+v", s)
-	}
-}
-
-func TestExplicitCheckInManualModePreparesButWaitsForFinish(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.40", running: "0.1.0-dev.40", feed: feedFor("0.1.0-dev.41", "shell", 100), cond: Conditions{IdleKnown: true, Idle: time.Hour}}
-	co, _ := newCoordinator(t, p)
-	co.Platform = &liveShellFake{p, co.Base, t}
-	s, _ := Load(co.Base)
-	s.Mode = ModeManual
-	_ = Save(co.Base, s)
-	co.Force = true
-	s = run(t, co)
-	if s.Mode != ModeManual || s.Stage != StagePrepared || s.Blocked.Reason != "needs_consent" || strings.Join(p.calls, " ") != "fetch download" {
-		t.Fatalf("%+v %v", s, p.calls)
-	}
-	co.Force = false
-	co.Consent = true
-	if s = run(t, co); s.Stage != StageActive || s.Mode != ModeManual {
-		t.Fatalf("%+v", s)
-	}
-}
-
-type recoveredShellFake struct{ *liveShellFake }
-
-func (p *recoveredShellFake) RecoverShell(context.Context) (bool, error) {
-	p.calls = append(p.calls, "recover")
-	s, err := Load(p.base)
-	if err != nil {
-		return false, err
-	}
-	p.running = s.Target.Version
-	p.installed = s.Target.Version
-	return true, nil
-}
-func TestRecoveredShellBecomesActiveEvenInManualMode(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.40", running: "0.1.0-dev.40"}
-	co, _ := newCoordinator(t, p)
-	s, _ := Load(co.Base)
-	s.Mode = ModeManual
-	s.Stage = StagePrepared
-	s.Target = &Target{Version: "0.1.0-dev.41", Kind: "shell"}
-	_ = Save(co.Base, s)
-	co.Platform = &recoveredShellFake{&liveShellFake{p, co.Base, t}}
-	if s = run(t, co); s.Stage != StageActive || s.Target != nil || s.Mode != ModeManual || strings.Join(p.calls, " ") != "recover" {
-		t.Fatalf("%+v %v", s, p.calls)
 	}
 }
 
@@ -727,115 +542,6 @@ func TestShellRequiresNewLoginEvenWhenNewEngineIsRunning(t *testing.T) {
 	if s.Stage != StageActive || s.Target != nil || s.Blocked != nil {
 		t.Fatalf("new login should activate: %+v", s)
 	}
-}
-
-type provingShellPlatform struct{ *loginShellPlatform }
-
-func (provingShellPlatform) ShellLoadProven() bool { return true }
-
-// #77：新外殼已確認載入時，引擎剛好閒置結束不應讓「重新登入後生效」一直留著；舊引擎還在跑時仍要等。
-func TestConfirmedShellActivatesWhileEngineIsIdle(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.17", running: "0.1.0-dev.17", feed: feedFor("0.1.0-dev.18", "shell", 100), shellPend: true}
-	co, clk := newCoordinator(t, p)
-	lp := &loginShellPlatform{fakePlatform: p}
-	co.Platform = provingShellPlatform{lp}
-	run(t, co)
-	p.installed = p.feed.Version
-	lp.ready = true
-	clk.add(time.Minute)
-	if s := run(t, co); s.Stage != StagePending || s.Blocked == nil || s.Blocked.Reason != "needs_relogin" {
-		t.Fatalf("old engine still running must wait: %+v", s)
-	}
-	p.running = ""
-	clk.add(time.Minute)
-	if s := run(t, co); s.Stage != StageActive || s.Target != nil || s.Blocked != nil {
-		t.Fatalf("idle engine after confirmed shell should activate: %+v", s)
-	}
-}
-
-// #98：重新登入後還沒打字（外殼與引擎都沒在跑）時，平台確認沒有舊外殼就生效；手動模式、暫停中，
-// 或只按「檢查更新」也要重新核對，不能一直顯示「等待重新登入後生效」。
-func TestPendingShellConfirmedAfterReloginWithoutTyping(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(*Coordinator, *State)
-		check bool
-	}{
-		{"auto", func(*Coordinator, *State) {}, false},
-		{"manual", func(_ *Coordinator, s *State) { s.Mode = ModeManual }, false},
-		{"paused", func(co *Coordinator, s *State) { s.PausedUntil = co.Now().Add(24 * time.Hour) }, false},
-		{"check-button", func(_ *Coordinator, s *State) { s.Mode = ModeManual }, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := &fakePlatform{installed: "0.1.0-dev.54", running: "0.1.0-dev.54", feed: feedFor("0.1.0-dev.59", "shell", 100), shellPend: true}
-			co, clk := newCoordinator(t, p)
-			lp := &loginShellPlatform{fakePlatform: p}
-			co.Platform = provingShellPlatform{lp}
-			if s := run(t, co); s.Stage != StagePending || s.Blocked == nil || s.Blocked.Reason != "needs_relogin" {
-				t.Fatalf("install should wait for a new login: %+v", s)
-			}
-			p.installed = p.feed.Version
-			s, _ := Load(co.Base)
-			tc.setup(co, s)
-			_ = Save(co.Base, s)
-			// 重新開機、登入，還沒用靈犀打字：引擎沒有執行，平台也沒看到舊外殼。
-			lp.ready, p.running = true, ""
-			clk.add(time.Minute)
-			p.calls = nil
-			if tc.check {
-				var err error
-				if s, err = co.Check(context.Background()); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				s = run(t, co)
-			}
-			if s.Stage != StageActive || s.Target != nil || s.Blocked != nil {
-				t.Fatalf("pending shell not confirmed after relogin: %+v", s)
-			}
-			if slices.Contains(p.calls, "install") || slices.Contains(p.calls, "download") {
-				t.Fatalf("confirmation must stay local: %v", p.calls)
-			}
-			if v := ViewOf(s, p.installed); v.Target != nil || v.Stage != StageActive {
-				t.Fatalf("view still shows the pending shell: %+v", v)
-			}
-		})
-	}
-}
-
-// #98：重新登入後仍有舊版外殼（例如系統開到 backups 裡的舊 App）時，繼續等待並說明原因；
-// 舊外殼結束、下一次登入後生效。
-func TestPendingShellExplainsOldShellStillLoaded(t *testing.T) {
-	p := &fakePlatform{installed: "0.1.0-dev.54", running: "", feed: feedFor("0.1.0-dev.59", "shell", 100), shellPend: true}
-	co, clk := newCoordinator(t, p)
-	lp := &loginShellPlatform{fakePlatform: p}
-	co.Platform = provingShellPlatform{lp}
-	run(t, co)
-	p.installed = p.feed.Version
-	since := mustLoad(t, co).Blocked.Since
-	lp.readyErr = fmt.Errorf("%w：/Users/test-user/Library/Application Support/0c/backups/macos-1/0c.app", ErrOldShellLoaded)
-	clk.add(time.Hour)
-	s, err := co.Check(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Stage != StagePending || s.Blocked == nil || s.Blocked.Reason != "needs_relogin" || s.Blocked.Detail != OldShellDetail || !s.Blocked.Since.Equal(since) {
-		t.Fatalf("old shell should keep the pending shell with an explanation: %+v", s.Blocked)
-	}
-	lp.ready, lp.readyErr = true, nil
-	clk.add(time.Minute)
-	if s = run(t, co); s.Stage != StageActive || s.Blocked != nil {
-		t.Fatalf("shell should activate once the old copy is gone: %+v", s)
-	}
-}
-
-func mustLoad(t *testing.T, co *Coordinator) *State {
-	t.Helper()
-	s, err := Load(co.Base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
 }
 
 // 只核對登入邊界的平台（Windows）仍要等新版引擎實際回報版本，引擎閒置不算生效。

@@ -42,7 +42,6 @@ func TestFullEnglishPackMixedInputAndValidSpellings(t *testing.T) {
 			t.Fatalf("valid spelling %s unrecognized", word)
 		}
 	}
-	e.MixedInput = true
 	for _, tc := range []struct{ keys, want string }{{"ji3hellot ", "我hello吃"}, {"helloji3", "hello我"}, {"aji3", "a我"}, {"Iji3", "I我"}, {"a ", "a "}, {"I ", "I "}, {"t ", "吃"}, {"https://example.com/a?q=1", "https://example.com/a?q=1"}, {"foo_bar123", "foo_bar123"}} {
 		id := e.OpenSession()
 		for _, k := range tc.keys {
@@ -82,9 +81,6 @@ func TestFullEnglishPackMixedInputAndValidSpellings(t *testing.T) {
 		}
 		e.CloseSession(id)
 	}
-	if e.MixedInput = false; e.Session(e.OpenSession()).MixedInput {
-		t.Fatal("off switch ignored with full pack")
-	}
 }
 
 func TestFullEnglishPackKeepsFirstToneChinese(t *testing.T) {
@@ -95,54 +91,48 @@ func TestFullEnglishPackKeepsFirstToneChinese(t *testing.T) {
 	if !e.English.Has("up") {
 		t.Fatal("regression requires the shipped English word up")
 	}
-	for _, mixed := range []bool{false, true} {
-		e.MixedInput = mixed
-		id := e.OpenSession()
-		do := func(r proto.Request) proto.Snapshot {
-			t.Helper()
-			snap, err := e.Do(id, r)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return snap
+	id := e.OpenSession()
+	do := func(r proto.Request) proto.Snapshot {
+		t.Helper()
+		snap, err := e.Do(id, r)
+		if err != nil {
+			t.Fatal(err)
 		}
-		do(proto.Request{Type: proto.Key, Key: "u"})
-		if snap := do(proto.Request{Type: proto.Key, Key: "p"}); snap.Text() != "ㄧㄣ" || snap.SuggestionEdit != nil {
-			t.Fatalf("mixed=%v pending: %+v", mixed, snap)
-		}
-		do(proto.Request{Type: proto.Key, Key: " "})
-		snap := do(proto.Request{Type: proto.Candidates, Length: 1})
-		found := false
-		if snap.Candidates != nil {
-			for _, item := range snap.Candidates.Items {
-				if item.Text == "音" {
-					found = true
-					do(proto.Request{Type: proto.Select, Index: item.ID})
-					break
-				}
+		return snap
+	}
+	do(proto.Request{Type: proto.Key, Key: "u"})
+	if snap := do(proto.Request{Type: proto.Key, Key: "p"}); snap.Text() != "ㄧㄣ" || snap.SuggestionEdit != nil {
+		t.Fatalf("pending: %+v", snap)
+	}
+	do(proto.Request{Type: proto.Key, Key: " "})
+	snap := do(proto.Request{Type: proto.Candidates, Length: 1})
+	found := false
+	if snap.Candidates != nil {
+		for _, item := range snap.Candidates.Items {
+			if item.Text == "音" {
+				found = true
+				do(proto.Request{Type: proto.Select, Index: item.ID})
+				break
 			}
 		}
-		if !found {
-			t.Fatalf("mixed=%v missing 音: %+v", mixed, snap)
-		}
-		if snap = do(proto.Request{Type: proto.Commit}); snap.Commit != "音" {
-			t.Fatalf("mixed=%v commit: %+v", mixed, snap)
-		}
-		// A user-selected English spelling still resolves the identical keys.
-		if mixed {
-			do(proto.Request{Type: proto.Key, Key: "u"})
-			do(proto.Request{Type: proto.Key, Key: "p"})
-			snap = do(proto.Request{Type: proto.Candidates})
-			if snap.Candidates == nil || snap.Candidates.Items[0].Text != "up" {
-				t.Fatalf("missing raw English: %+v", snap)
-			}
-			do(proto.Request{Type: proto.Select, Index: snap.Candidates.Items[0].ID})
-			do(proto.Request{Type: proto.Key, Key: " "})
-			if snap = do(proto.Request{Type: proto.Commit}); snap.Commit != "up " {
-				t.Fatalf("explicit English commit: %+v", snap)
-			}
-		}
-		e.CloseSession(id)
+	}
+	if !found {
+		t.Fatalf("missing 音: %+v", snap)
+	}
+	if snap = do(proto.Request{Type: proto.Commit}); snap.Commit != "音" {
+		t.Fatalf("commit: %+v", snap)
+	}
+	// A user-selected English spelling still resolves the identical keys.
+	do(proto.Request{Type: proto.Key, Key: "u"})
+	do(proto.Request{Type: proto.Key, Key: "p"})
+	snap = do(proto.Request{Type: proto.Candidates})
+	if snap.Candidates == nil || snap.Candidates.Items[0].Text != "up" {
+		t.Fatalf("missing raw English: %+v", snap)
+	}
+	do(proto.Request{Type: proto.Select, Index: snap.Candidates.Items[0].ID})
+	do(proto.Request{Type: proto.Key, Key: " "})
+	if snap = do(proto.Request{Type: proto.Commit}); snap.Commit != "up " {
+		t.Fatalf("explicit English commit: %+v", snap)
 	}
 }
 
@@ -152,7 +142,6 @@ func TestFullEnglishPackEnglishModeTabCompletionAndCorrection(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.EnglishAutocomplete = true
-	e.MixedInput = true
 	for _, tc := range []struct{ typed, want string }{
 		// fork：補全照 wordfreq 詞頻排序，hel 的補全是 help、held、hell（官方是 hello）
 		{"hel", "help"}, {"recieve", "receive"}, {"teh", "the"},
@@ -226,7 +215,6 @@ func TestFullEnglishPackKeepsCompleteWordSpace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.MixedInput = true
 	for _, tc := range []struct{ keys, text, want string }{
 		{"hello ", "hello ", "hello "}, {"thank you ", "thank you ", "thank you "},
 		{"open the door ", "open the door ", "open the door "}, {"see you ", "see you ", "see you "},

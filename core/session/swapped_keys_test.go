@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/english"
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -42,30 +41,25 @@ func swappedKeysSession() *Session {
 	return s
 }
 
-// #256：標準、倚天 41 鍵每個鍵只屬於一個位置，注音照位置組字（同新酷音、小麥注音）：快打時介音、韻母或聲母
+// #256：每個鍵只屬於一個位置，注音照位置組字（同新酷音、小麥注音）：快打時介音、韻母或聲母
 // 晚一鍵到達，組成的音節和照順序打的一樣，組字區照聲母、介音、韻母的順序顯示。
 func TestSwappedKeysComposeByPosition(t *testing.T) {
 	for _, tc := range []struct {
-		l          layout.Layout
 		keys, want string
 		shown      string // 聲調前的組字區
 	}{
-		{layout.Standard, "2/u4", "定", "ㄉㄧㄥ"}, {layout.Standard, "u2/4", "定", "ㄉㄧㄥ"},
-		{layout.Standard, "ij3", "我", "ㄨㄛ"}, {layout.Standard, "0u3", "演", "ㄧㄢ"}, {layout.Standard, "/u ", "應", "ㄧㄥ"},
-		{layout.Standard, "r0u4", "見", "ㄐㄧㄢ"}, {layout.Standard, "20u4", "電", "ㄉㄧㄢ"},
-		{layout.ETen, "d-e4", "定", "ㄉㄧㄥ"}, {layout.ETen, "ox3", "我", "ㄨㄛ"},
-		// 許氏同一鍵依狀態代表聲母或韻母：聲母打在前面時，介音、韻母顛倒照樣組得起來
-		{layout.Hsu, "dlej", "定", "ㄉㄧㄥ"},
+		{"2/u4", "定", "ㄉㄧㄥ"}, {"u2/4", "定", "ㄉㄧㄥ"},
+		{"ij3", "我", "ㄨㄛ"}, {"0u3", "演", "ㄧㄢ"}, {"/u ", "應", "ㄧㄥ"},
+		{"r0u4", "見", "ㄐㄧㄢ"}, {"20u4", "電", "ㄉㄧㄢ"},
 	} {
 		s := swappedKeysSession()
-		s.SetLayout(tc.l)
 		body := tc.keys[:len(tc.keys)-1]
-		if got := typeKeys(s, body).Text(); got != tc.shown {
-			t.Errorf("%s %q 的組字區：%q，要 %q", tc.l.Name(), body, got, tc.shown)
+		if got := mixedType(s, body).Text(); got != tc.shown {
+			t.Errorf("%q 的組字區：%q，要 %q", body, got, tc.shown)
 		}
 		key(s, tc.keys[len(tc.keys)-1:])
 		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
-			t.Errorf("%s %q：%q，要 %q", tc.l.Name(), tc.keys, got, tc.want)
+			t.Errorf("%q：%q，要 %q", tc.keys, got, tc.want)
 		}
 	}
 }
@@ -87,7 +81,6 @@ func TestMixedSwappedVowelsCompose(t *testing.T) {
 		{"2u/4", "定"}, {"ru04", "見"},
 	} {
 		s := swappedKeysSession()
-		s.MixedInput = true
 		mixedType(s, tc.keys)
 		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
 			t.Errorf("%q：%q，要 %q", tc.keys, got, tc.want)
@@ -95,7 +88,6 @@ func TestMixedSwappedVowelsCompose(t *testing.T) {
 	}
 	for _, keys := range []string{"2/u", "u2/"} {
 		s := swappedKeysSession()
-		s.MixedInput = true
 		if got := mixedType(s, keys).Text(); got != "ㄉㄧㄥ" {
 			t.Errorf("%s 的組字區：%q，要 ㄉㄧㄥ", keys, got)
 		}
@@ -109,7 +101,6 @@ func TestMixedSwappedVowelsBeforeYi(t *testing.T) {
 		{"20u4", "電"}, {"10u4", "變"}, {"20u3", "點"}, {"20u ", "顛"}, {"0u3", "演"}, {"8u4", "亞"}, {"ji320u4", "我電"},
 	} {
 		s := swappedKeysSession()
-		s.MixedInput = true
 		mixedType(s, tc.keys)
 		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
 			t.Errorf("%q：%q，要 %q", tc.keys, got, tc.want)
@@ -125,7 +116,6 @@ func TestMixedSwappedVowelsKeepNumbers(t *testing.T) {
 		{"40m6", "40餘"}, {"30m4", "30遇"}, {"302j4", "30度"}, {"3.5u4", "3.5億"}, {"u2", "u2"}, {"o1 ", "o1 "},
 	} {
 		s := swappedKeysSession()
-		s.MixedInput = true
 		mixedType(s, tc.keys)
 		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
 			t.Errorf("%q：%q，要 %q", tc.keys, got, tc.want)

@@ -5,23 +5,18 @@ import (
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/english"
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/vocab"
 )
 
-// englishLayouts 是混打有開、沒開、開了沒作用的各種情況（#247）：許氏與倚天不支援混打，聲調選填和混打二選一。
+// englishLayouts 是混打有作用、沒作用的情況（#247）：聲調選填（手機）和混打二選一。
 // 英文模式補字與英文學習在這些情況都一樣。
 var englishLayouts = []struct {
 	name  string
 	setup func(*Session)
 }{
-	{"許氏", func(s *Session) { s.SetLayout(layout.Hsu) }},
-	{"許氏開混打", func(s *Session) { s.SetLayout(layout.Hsu); s.MixedInput = true }},
-	{"倚天", func(s *Session) { s.SetLayout(layout.ETen) }},
-	{"標準沒開混打", func(s *Session) {}},
-	{"標準開混打", func(s *Session) { s.MixedInput = true }},
-	{"聲調選填", func(s *Session) { s.Toneless = true; s.MixedInput = true }},
+	{"混打", func(s *Session) {}},
+	{"聲調選填", func(s *Session) { s.Toneless = true }},
 }
 
 func vocabAutocompleteSession(t *testing.T, words ...string) *Session {
@@ -161,7 +156,7 @@ func typeEnglishWord(s *Session, word string) proto.Snapshot {
 	return key(s, proto.KeyEnter)
 }
 
-// #247：英文學習跟著「英文模式自動補字」走，混打沒開、排列不支援混打也學得到；門檻照舊（三次、跨兩天，每天最多兩次）。
+// #247：英文學習跟著「英文模式自動補字」走，混打沒作用（聲調選填）也學得到；門檻照舊（三次、跨兩天，每天最多兩次）。
 func TestEnglishAutocompleteLearnsInEveryLayout(t *testing.T) {
 	for _, l := range englishLayouts {
 		t.Run(l.name, func(t *testing.T) {
@@ -242,7 +237,7 @@ func TestEnglishAutocompleteProtectedStatesDoNotLearn(t *testing.T) {
 // 英文補字關閉、混打也沒作用時不學：字母直接交給程式，引擎看不到。
 func TestEnglishAutocompleteOffDoesNotLearn(t *testing.T) {
 	for _, l := range englishLayouts {
-		if l.name == "標準開混打" {
+		if l.name == "混打" {
 			continue // 混打開著本來就從混打學
 		}
 		t.Run(l.name, func(t *testing.T) {
@@ -260,48 +255,5 @@ func TestEnglishAutocompleteOffDoesNotLearn(t *testing.T) {
 				t.Fatal(s.model.Store.English)
 			}
 		})
-	}
-}
-
-// 這個開關只管英文模式：補字開著、混打沒開時，中文模式組字裡的大寫英文不學。
-func TestEnglishAutocompleteDoesNotLearnFromChineseMode(t *testing.T) {
-	s := autocompleteSession()
-	s.Handle(proto.Request{Type: proto.Mode, On: false})
-	s.model.AdvanceTime(100 * englishDay)
-	mixedType(s, "ji3Rclone")
-	if end := key(s, proto.KeyEnter); end.Commit == "" || len(s.model.Store.English) != 0 {
-		t.Fatalf("%+v %+v", end, s.model.Store.English)
-	}
-}
-
-// 防誤學照舊（混打沒開）：接受補字或修正不算獨立確認，網址、路徑、含數字底線的片段不學前綴。
-func TestEnglishAutocompleteWithoutMixedKeepsLearningFilters(t *testing.T) {
-	s := autocompleteSession()
-	s.SetLayout(layout.Hsu)
-	s.model.AdvanceTime(100 * englishDay)
-	mixedType(s, "hel")
-	key(s, proto.KeyTab)
-	mixedType(s, "sx")
-	key(s, proto.KeyBackspace)
-	key(s, proto.KeyEscape)
-	if end := key(s, proto.KeyEnter); end.Commit != "hellos" || len(s.model.Store.English) != 0 {
-		t.Fatalf("接受補字後編輯：%+v %+v", end, s.model.Store.English)
-	}
-	s.English = english.Prototype()
-	mixedType(s, "recieve")
-	key(s, proto.KeyTab)
-	if end := key(s, proto.KeyEnter); end.Commit != "receive" || len(s.model.Store.English) != 0 {
-		t.Fatalf("接受修正：%+v %+v", end, s.model.Store.English)
-	}
-	for _, raw := range []string{"name@example.com", "my_name", "name123", "https://example.com", "file.txt", "folder/file", "name-value"} {
-		s := autocompleteSession()
-		s.SetLayout(layout.Hsu)
-		s.model.AdvanceTime(100 * englishDay)
-		for _, r := range raw + " " {
-			key(s, string(r))
-		}
-		if len(s.model.Store.English) != 0 {
-			t.Errorf("%q 學到前綴：%+v", raw, s.model.Store.English)
-		}
 	}
 }

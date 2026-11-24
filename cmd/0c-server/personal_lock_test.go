@@ -1,12 +1,9 @@
-//go:build !windows
-
 package main
 
 import (
 	"bytes"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,7 +23,7 @@ type lockClient struct {
 
 func dialClient(t *testing.T, sock string) *lockClient {
 	t.Helper()
-	c, err := net.Dial("unix", sock)
+	c, err := dial(sock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,38 +63,6 @@ func (l *lockClient) learn(forget string) {
 	l.call(ipc.Envelope{Op: ipc.OpHandle, Session: l.session, Req: &proto.Request{Type: proto.Forget, Word: forget}})
 }
 
-func startServer(t *testing.T, binary string, args ...string) (*exec.Cmd, *bytes.Buffer) {
-	t.Helper()
-	cmd := exec.Command(binary, args...)
-	var logs bytes.Buffer
-	cmd.Stderr = &logs
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if cmd.ProcessState == nil {
-			cmd.Process.Signal(os.Interrupt)
-			cmd.Wait()
-		}
-	})
-	return cmd, &logs
-}
-
-func waitExit(t *testing.T, cmd *exec.Cmd, within time.Duration) error {
-	t.Helper()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(within):
-		cmd.Process.Kill()
-		<-done
-		t.Fatalf("引擎 %v 內沒有結束", within)
-		return nil
-	}
-}
-
 func fileContains(path, s string) bool {
 	b, err := os.ReadFile(path)
 	return err == nil && bytes.Contains(b, []byte(s))
@@ -110,8 +75,8 @@ func TestSecondEngineWithoutLockNeverWritesUserStore(t *testing.T) {
 	dir := t.TempDir()
 	data, _ := filepath.Abs("../../testdata/toy")
 	user := filepath.Join(dir, "user.json")
-	first := filepath.Join(dir, "first.sock")
-	second := filepath.Join(dir, "second.sock")
+	first := testPipe("first")
+	second := testPipe("second")
 	startServer(t, binary, "-data", data, "-user", user, "-socket", first)
 	waitDial(t, first)
 	b, logs := startServer(t, binary, "-data", data, "-user", user, "-socket", second, "-lock-wait", "200ms")
@@ -130,8 +95,7 @@ func TestSecondEngineWithoutLockNeverWritesUserStore(t *testing.T) {
 		t.Fatal("拿不到鎖的引擎寫入了個人檔")
 	}
 	// 結束時也不寫。
-	b.Process.Signal(os.Interrupt)
-	waitExit(t, b, 10*time.Second)
+	stopServer(t, b)
 	if fileContains(user, "第二個引擎") {
 		t.Fatal("拿不到鎖的引擎結束時寫入了個人檔")
 	}
@@ -157,27 +121,14 @@ func TestWaitingEngineYieldsBeforeLoadingData(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer held.Release()
-	sock := filepath.Join(dir, "0c.sock")
+	sock := testPipe("yield")
 	cmd, logs := startServer(t, binary, "-data", filepath.Join(dir, "missing-data"), "-user", filepath.Join(dir, "user.json"),
 		"-socket", sock, "-lock-wait", "10s")
 	time.Sleep(300 * time.Millisecond)
 	if cmd.ProcessState != nil {
 		t.Fatalf("鎖被持有時應等待，不該已結束：%s", logs.String())
 	}
-	winner, err := net.Listen("unix", sock) // 另一個引擎載入完成、開始服務
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer winner.Close()
-	go func() {
-		for {
-			c, err := winner.Accept()
-			if err != nil {
-				return
-			}
-			c.Close()
-		}
-	}()
+	occupyPipe(t, sock) // 另一個引擎載入完成、開始服務
 	if err := waitExit(t, cmd, 5*time.Second); err != nil {
 		t.Fatalf("端點已有人服務時應正常讓位（結束碼 0）：%v\n%s", err, logs.String())
 	}
@@ -197,10 +148,10 @@ func TestEngineWaitsForLockBeforeServingAndThenWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sock := filepath.Join(dir, "0c.sock")
+	sock := testPipe("wait-lock")
 	startServer(t, binary, "-data", data, "-user", user, "-socket", sock, "-lock-wait", "10s")
 	for deadline := time.Now().Add(700 * time.Millisecond); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if c, err := net.Dial("unix", sock); err == nil {
+		if c, err := dial(sock); err == nil {
 			c.Close()
 			held.Release()
 			t.Fatal("鎖還在舊引擎手上時，新引擎不該開始服務")
@@ -226,45 +177,4 @@ func TestEngineWaitsForLockBeforeServingAndThenWrites(t *testing.T) {
 		b, _ := os.ReadFile(user)
 		t.Fatalf("新引擎應在舊引擎放鎖後才讀個人檔，保留舊引擎最後存的學習：%s", b)
 	}
-}
-
-// 端點被移除（例如登出時執行期目錄被清掉）或被別的引擎取代時，這個引擎已經沒有新外殼連得到：
-// 存檔後結束並放鎖，不留下占著鎖的孤兒；取代者的 socket 不能被它刪掉。
-func TestEngineExitsWhenItsSocketIsReplaced(t *testing.T) {
-	binary := buildServer(t)
-	dir := t.TempDir()
-	data, _ := filepath.Abs("../../testdata/toy")
-	user := filepath.Join(dir, "user.json")
-	sock := filepath.Join(dir, "0c.sock")
-	cmd, logs := startServer(t, binary, "-data", data, "-user", user, "-socket", sock)
-	waitDial(t, sock)
-	c := dialClient(t, sock)
-	c.session = c.call(ipc.Envelope{Op: ipc.OpOpen, Version: proto.Version}).Session
-	for _, k := range "a86qi6" {
-		c.call(ipc.Envelope{Op: ipc.OpHandle, Session: c.session, Req: &proto.Request{Type: proto.Key, Key: string(k)}})
-	}
-	c.call(ipc.Envelope{Op: ipc.OpHandle, Session: c.session, Req: &proto.Request{Type: proto.Key, Key: proto.KeyEnter}})
-	if err := os.Remove(sock); err != nil {
-		t.Fatal(err)
-	}
-	replacement, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer replacement.Close()
-	if err := waitExit(t, cmd, 5*time.Second); err != nil {
-		t.Fatalf("%v\n%s", err, logs.String())
-	}
-	if _, err := os.Stat(sock); err != nil {
-		t.Fatalf("取代者的 socket 被刪掉了：%v", err)
-	}
-	// 提交後 10 秒內不會排程存檔（#129），個人檔只可能是結束前的最後一次存檔寫出的。
-	if _, err := os.Stat(user); err != nil {
-		t.Fatalf("結束前應存檔：%v\n%s", err, logs.String())
-	}
-	l, err := userlock.TryLock(dir)
-	if err != nil {
-		t.Fatalf("結束後應已放鎖：%v", err)
-	}
-	l.Release()
 }

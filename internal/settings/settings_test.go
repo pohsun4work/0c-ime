@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 func TestDefaultsMissingFieldsAndRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := Path(filepath.Join(dir, "user.json"))
-	if s, err := Load(path); err != nil || s != freshSettings() || s.Selection != Neural || s.Punctuation || !s.DocumentContext {
+	if s, err := Load(path); err != nil || s != Default() || s.Selection != Neural || s.Punctuation || !s.DocumentContext {
 		t.Fatalf("缺檔應回預設值：%+v %v", s, err)
 	}
 	os.WriteFile(path, []byte(`{"selection":"statistical"}`), 0o600)
@@ -410,11 +409,7 @@ func TestCorruptFileIsReportedAndCanBeQuarantined(t *testing.T) {
 func TestItemsListEveryKeyWithCurrentValue(t *testing.T) {
 	s := Default()
 	items := s.Items()
-	want := 26 + len(fuzzy.Pairs()) + len(ruleSpecs()) // 含 simplified-hotkey（#192）、toneless（#150）、shift-symbol-halfwidth（#258）、cjk-latin-space（#273）、zhuyin-error-hint（#300）、shift-tap-ms（#319）、personal-learning（#297）
-	if CapsLockEnglishSetting(runtime.GOOS) {
-		want++ // caps-lock-english（#173）只有 Windows、Linux
-	}
-	if len(items) != want || items[0].Key != "selection" {
+	if len(items) != len(fields())+len(fuzzy.Pairs()) || items[0].Key != "selection" {
 		t.Fatalf("項目數量或順序不對：%+v", items)
 	}
 	for _, it := range items {
@@ -437,6 +432,47 @@ func TestItemsListEveryKeyWithCurrentValue(t *testing.T) {
 	}
 	if _, ok := s.Value("nope"); ok {
 		t.Fatal("未知的鍵不應有值")
+	}
+}
+
+// 拿掉的設定（官方的輸入習慣風格、中英混打等）：舊檔照常讀寫，其餘設定保留，下次存檔時那些欄位消失；
+// 拿掉的鍵不能再用命令列設定。
+func TestRetiredKeysAreIgnoredAndDroppedOnSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	body := `{"schema":2,"selection":"statistical","input_profile":{"active":"custom","custom":{"tab":"cycle"}},` +
+		`"mixed_input":false,"toneless":true,"left_shift":"cancel","keyboard_layout":"eten","caps_lock_english":"lower",` +
+		`"output_simplified":true,"emoji_shortcut":"off","toggle_key":"left","future":1}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Read(path)
+	if err != nil || r.State != StateOK || r.ReadOnly || len(r.Notes) != 1 || !strings.Contains(r.Notes[0], "future") {
+		t.Fatalf("舊檔應可讀可寫、只提到真正不認得的欄位：%+v %v", r, err)
+	}
+	s := r.Settings
+	if s.Selection != Statistical || s.ToggleKey != ToggleLeft || s.Tab != Default().Tab {
+		t.Fatalf("其餘設定照讀，舊風格的規則回到預設：%+v", s)
+	}
+	if err := s.Set("personal-learning", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, s); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	for _, key := range retiredKeys {
+		if strings.Contains(string(b), `"`+key+`"`) {
+			t.Errorf("存檔後不應留下 %s：%s", key, b)
+		}
+	}
+	if !strings.Contains(string(b), `"future": 1`) || !strings.Contains(string(b), `"personal_learning": false`) {
+		t.Fatalf("不認得的欄位保留、改的值寫入：%s", b)
+	}
+	for _, key := range []string{"mixed-input", "toneless", "input-profile", "left-shift", "keyboard-layout"} {
+		var se *SetError
+		if err := s.Set(key, "on"); !errors.As(err, &se) || se.Code != CodeUnknownKey {
+			t.Errorf("%s 已拿掉：%v", key, err)
+		}
 	}
 }
 

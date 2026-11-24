@@ -4,30 +4,19 @@ import argparse
 import json
 from pathlib import Path, PurePosixPath
 import sys
-import tarfile
 from urllib.parse import urlsplit
 import zipfile
 
-from install_package import digest
-from package_release import valid_version
+from package_release import digest, valid_version
 
 
 def metadata(archive):
-    if archive.suffix == ".zip":
-        with zipfile.ZipFile(archive) as package:
-            entries = [entry for entry in package.infolist() if entry.filename.endswith("/release.json")]
-            if len(entries) != 1 or entries[0].file_size > 1024 * 1024:
-                raise ValueError("壓縮包需要一份 release.json，大小上限 1 MiB")
-            name = entries[0].filename
-            payload = package.read(entries[0])
-    else:
-        with tarfile.open(archive, "r:gz") as package:
-            entries = [entry for entry in package if entry.name.endswith("/release.json")]
-            if len(entries) != 1 or not entries[0].isfile() or entries[0].size > 1024 * 1024:
-                raise ValueError("壓縮包需要一份 release.json，大小上限 1 MiB")
-            name = entries[0].name
-            with package.extractfile(entries[0]) as stream:
-                payload = stream.read()
+    with zipfile.ZipFile(archive) as package:
+        entries = [entry for entry in package.infolist() if entry.filename.endswith("/release.json")]
+        if len(entries) != 1 or entries[0].file_size > 1024 * 1024:
+            raise ValueError("壓縮包需要一份 release.json，大小上限 1 MiB")
+        name = entries[0].filename
+        payload = package.read(entries[0])
     if len(PurePosixPath(name).parts) != 2 or name.startswith("/") or ".." in PurePosixPath(name).parts:
         raise ValueError("release.json 必須位於套件根目錄")
     release = json.loads(payload)
@@ -35,7 +24,7 @@ def metadata(archive):
         raise ValueError("不支援的套件版本資訊")
     if release.get("channel") not in ("public-beta", "internal-preview"):
         raise ValueError("未知通道")
-    if (release.get("os"), release.get("arch")) not in (("linux", "amd64"), ("linux", "arm64"), ("windows", "amd64")):
+    if (release.get("os"), release.get("arch")) != ("windows", "amd64"):
         raise ValueError("不支援的平台或缺少 os/arch 欄位；請以新版工具重新建置")
     return release
 
@@ -78,7 +67,7 @@ def main():
         with args.out.open("x", encoding="utf-8") as stream:
             stream.write(json.dumps(feed, ensure_ascii=False, indent=2) + "\n")
         print(args.out)
-    except (OSError, ValueError, KeyError, tarfile.TarError, zipfile.BadZipFile) as error:
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         print(f"索引建立失敗：{error}", file=sys.stderr)
         sys.exit(1)
 

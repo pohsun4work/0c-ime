@@ -14,22 +14,20 @@ import (
 	"time"
 
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/internal/datadir"
-	"github.com/0c-biggo/0c-ime/internal/simplified"
 )
 
-const help = `直接輸入按鍵（預設標準注音排列，-keyboard-layout eten 為倚天 41 鍵、hsu 為許氏；空白鍵是一聲），按 Enter 送出這一行的按鍵。
+const help = `直接輸入按鍵（標準注音排列，空白鍵是一聲；中英混打、標點照微軟、符號鍵打半形），按 Enter 送出這一行的按鍵。
 空行＝提交。以 : 起始的是指令：
   :c [詞長]   開候選（不給詞長則優先目前分詞）    :n ID      選候選
   :p 頁碼     換頁          :x  關閉候選            :tab       接受補全／候選內切詞長
   :bs         退格          :esc 放棄組字           :to 位置   移動游標（音節位置）
   :k 鍵名     送具名鍵：Up Down Left Right Enter Escape Delete PageUp PageDown；Ctrl+, Ctrl+. 等 Ctrl＋標點
-              多排候選用方向鍵移動；表情選單啟用時 = 開啟、== 輸入等號、:tab 切顏文字
+              多排候選用方向鍵移動
   :forget 詞  撤銷與該詞有關的學習                  :pause on|off  暫停學習
-  :shift      單按 Shift 切換中英                   :caps on|off   回報 Caps Lock 狀態（-caps-lock-english 時暫時切英文）
+  :shift      單按 Shift 切換中英
   :learned    列出學到的個人片語                    :why       說明目前的自動近音修正（模糊音 auto）
   :q          離開
 例：fup y3ru/3  → ㄑㄧㄣ ㄗˇ ㄐㄧㄥˇ      a86qi6 → ㄇㄚˊ ㄆㄛˊ      up e9  → ㄧㄣ ㄍㄞ（注意結尾空白）`
@@ -40,72 +38,33 @@ func main() {
 	replay := flag.String("replay", "", "重播 JSONL 請求檔，把快照寫到標準輸出後結束")
 	record := flag.String("record", "", "把本次操作的請求錄成 JSONL")
 	fuzzyPairs := flag.String("fuzzy", "", "啟用的模糊音配對，逗號分隔：z-zh、c-ch、s-sh、en-eng；預設是「僅供選字」，寫成 z-zh=auto 則另啟用自動修正；空白為全部關閉。錄製的請求要用相同的設定重播")
-	mixedInput := flag.Bool("mixed-input", false, "中英混打試用；重播需使用相同開關，預設關閉")
-	toneless := flag.Bool("toneless", false, "不打聲調也能選字（#150）：沒打聲調的音節由解碼決定，開啟時停用混打。重播需使用相同開關")
 	candidateLayout := flag.String("candidate-layout", "vertical", "選字排列：vertical 或 grid")
-	emojiShortcut := flag.String("emoji-shortcut", "equals", "表情選單：off 或 equals；= 開選單，== 輸入等號，Tab 切顏文字")
-	emojiEqualsFirst := flag.Bool("emoji-equals-first", true, "將 = 放在 Emoji 第一項；關閉仍可按 == 輸入等號")
 	escClear := flag.Bool("esc-clear", true, "按 Esc 清除整段組字；關閉時只清未打完的注音")
-	capsLockEnglish := flag.Bool("caps-lock-english", false, "Caps Lock 開著時直接打英文（用 :caps on 送）；關閉時 caps_lock 不起作用。重播需使用相同開關")
-	ctrlPunct := flag.Bool("ctrl-punctuation", true, "注音模式的 Ctrl＋, . ' ; ? ! : ( ) 打全形標點（用 :k Ctrl+, 送）；關閉時交給應用程式")
-	cjkLatinSpace := flag.Bool("cjk-latin-space", false, "送出時在漢字與英文字母相連處補半形空格（#273）")
 	personalLearning := flag.Bool("personal-learning", true, "記住我選的字詞（#297）；關閉時照常選字（含神經選字與已學到的），只是送出不寫進個人資料。重播需使用相同開關")
-	zhuyinErrorHint := flag.Bool("zhuyin-error-hint", true, "打錯注音時提示（#300）：按了聲調但讀音沒有字時不收聲調、畫面標示 [提示]，緊接著再按同一個聲調照舊原樣留下。重播需使用相同開關")
-	shiftSymbolHalfwidth := flag.Bool("shift-symbol-halfwidth", false, "注音模式的 Shift＋符號鍵打半形（#258），全形改用 Ctrl＋符號或 ↓。重播需使用相同開關")
-	allSymbolsHalfwidth := flag.Bool("all-symbols-halfwidth", false, "注音模式所有符號鍵打按鍵上的半形字元（#282，同設定 shift-symbol-halfwidth all），Ctrl＋標點固定開、聲調選填暫停。重播需使用相同開關")
 	advanceAfterSelect := flag.Bool("advance-after-select", false, "選字後游標移到所選詞後面（前方模式往後移一個字）。重播需使用相同開關")
 	candidateCursor := flag.String("candidate-cursor", "after", "修改字詞的位置：after（游標後方）或 before（游標前方）。重播需使用相同設定")
-	outputSimplified := flag.Bool("output-simplified", false, "送出時轉成簡體字（組字與候選仍是繁體）")
-	spaceSelects := flag.Bool("space-selects", true, "注音打完按空白選字；關閉時空白輸入空格、↓ 選字。重播需使用相同開關")
 	selectionKeys := flag.String("selection-keys", "1234567890", "選字鍵：1234567890、1234qweras 或 asdfghjkl;（數字仍照位置選字）。重播需使用相同選字鍵")
-	keyboardLayout := flag.String("keyboard-layout", "standard", "鍵盤排列：standard、eten（倚天 41 鍵，停用混打與 = 開 Emoji）或 hsu（許氏，停用混打）。重播需使用相同排列")
 	flag.Parse()
 
 	eng, err := datadir.Open(*data)
 	check(err)
-	eng.MixedInput = *mixedInput
-	eng.Toneless = *toneless
 	if *candidateLayout != "vertical" && *candidateLayout != "grid" {
 		check(fmt.Errorf("未知選字排列 %q", *candidateLayout))
-	}
-	if *emojiShortcut != "off" && *emojiShortcut != "equals" {
-		check(fmt.Errorf("未知表情快捷鍵 %q", *emojiShortcut))
 	}
 	if *candidateLayout == "grid" {
 		eng.CandidateColumns = 5
 	}
-	eng.EmojiShortcut = *emojiShortcut
-	eng.EmojiEqualsFirst = *emojiEqualsFirst
 	eng.EscKeepComposition = !*escClear
-	eng.SpaceInsertsSpace = !*spaceSelects
 	eng.AdvanceAfterSelect = *advanceAfterSelect
 	if *candidateCursor != "after" && *candidateCursor != "before" {
 		check(fmt.Errorf("未知的修改字詞位置 %q（before、after）", *candidateCursor))
 	}
 	eng.CandidateBeforeCursor = *candidateCursor == "before"
-	eng.CtrlPunct = *ctrlPunct || *allSymbolsHalfwidth
-	eng.ShiftSymbolHalfwidth = *shiftSymbolHalfwidth || *allSymbolsHalfwidth
-	eng.AllSymbolsHalfwidth = *allSymbolsHalfwidth
-	if *allSymbolsHalfwidth {
-		eng.Toneless = false
-	}
-	eng.CJKLatinSpace = *cjkLatinSpace
-	eng.ZhuyinErrorHint = *zhuyinErrorHint
 	eng.NoLearning = !*personalLearning
-	eng.CapsLockEnglish = *capsLockEnglish
-	if *outputSimplified {
-		eng.Simplified, err = simplified.TW2S()
-		check(err)
-	}
 	if *selectionKeys != "1234567890" && *selectionKeys != "1234qweras" && *selectionKeys != "asdfghjkl;" {
 		check(fmt.Errorf("未知選字鍵 %q", *selectionKeys))
 	}
 	eng.SelectionKeys = *selectionKeys
-	kb, ok := layout.ByName(*keyboardLayout)
-	if !ok {
-		check(fmt.Errorf("未知鍵盤排列 %q（standard、eten、hsu）", *keyboardLayout))
-	}
-	eng.Layout = kb
 	for _, id := range strings.FieldsFunc(*fuzzyPairs, func(r rune) bool { return r == ',' }) {
 		id, mode, _ := strings.Cut(strings.TrimSpace(id), "=")
 		p, ok := fuzzy.ParsePair(id)
@@ -144,47 +103,17 @@ func main() {
 		rec, err = os.Create(*record)
 		check(err)
 		defer rec.Close()
-		if *mixedInput {
-			fmt.Fprintln(rec, "# 重播需要相同的混打設定：0c-cli -mixed-input")
-		}
-		if *capsLockEnglish {
-			fmt.Fprintln(rec, "# 重播需要相同的 Caps Lock 設定：0c-cli -caps-lock-english")
-		}
-		if *toneless {
-			fmt.Fprintln(rec, "# 重播需要相同的聲調選填設定：0c-cli -toneless")
-		}
-		if *shiftSymbolHalfwidth {
-			fmt.Fprintln(rec, "# 重播需要相同的 Shift＋符號設定：0c-cli -shift-symbol-halfwidth")
-		}
-		if *allSymbolsHalfwidth {
-			fmt.Fprintln(rec, "# 重播需要相同的標點寬度設定：0c-cli -all-symbols-halfwidth")
-		}
 		if *advanceAfterSelect {
 			fmt.Fprintln(rec, "# 重播需要相同的選字後游標設定：0c-cli -advance-after-select")
 		}
 		if eng.CandidateBeforeCursor {
 			fmt.Fprintln(rec, "# 重播需要相同的修改字詞位置：0c-cli -candidate-cursor before")
 		}
-		if *outputSimplified {
-			fmt.Fprintln(rec, "# 重播需要相同的簡體輸出設定：0c-cli -output-simplified")
-		}
-		if *cjkLatinSpace {
-			fmt.Fprintln(rec, "# 重播需要相同的中英文空格設定：0c-cli -cjk-latin-space")
-		}
-		if !*zhuyinErrorHint {
-			fmt.Fprintln(rec, "# 重播需要相同的打錯注音提示設定：0c-cli -zhuyin-error-hint=false")
-		}
 		if !*personalLearning {
 			fmt.Fprintln(rec, "# 重播需要相同的學習設定：0c-cli -personal-learning=false")
 		}
-		if !*spaceSelects {
-			fmt.Fprintln(rec, "# 重播需要相同的空白鍵設定：0c-cli -space-selects=false")
-		}
 		if *selectionKeys != "1234567890" {
 			fmt.Fprintf(rec, "# 重播需要相同的選字鍵：0c-cli -selection-keys '%s'\n", *selectionKeys)
-		}
-		if kb != layout.Standard {
-			fmt.Fprintf(rec, "# 重播需要相同的鍵盤排列：0c-cli -keyboard-layout %s\n", *keyboardLayout)
 		}
 		if key := eng.Fuzzy.Key(); key != "" {
 			fmt.Fprintf(rec, "# 重播需要相同的模糊音設定：0c-cli -fuzzy %s\n", *fuzzyPairs) // 重播時 # 行是註解
@@ -258,8 +187,6 @@ func main() {
 				do(proto.Request{Type: proto.Pause, On: arg() == "on"})
 			case "shift":
 				do(proto.Request{Type: proto.Toggle})
-			case "caps":
-				do(proto.Request{Type: proto.CapsLock, On: arg() == "on"})
 			case "why":
 				changes := eng.Session(id).AutoChanges()
 				if len(changes) == 0 {
@@ -314,9 +241,6 @@ func render(s proto.Snapshot) {
 	}
 	if pos == s.Cursor.Rune {
 		b.WriteString("｜")
-	}
-	if s.Bell { // #300：打錯注音時提示，外殼嗶一聲或標示注音
-		b.WriteString("  [提示]")
 	}
 	if h := s.ReadingHint; h != nil { // #162：空白出中文的讀音，Enter 留數字
 		b.WriteString("  [空白 " + h.Text + "]")

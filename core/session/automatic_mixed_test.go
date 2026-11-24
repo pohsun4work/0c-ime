@@ -11,7 +11,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
-func mixedSession() *Session { s := newSession(); s.MixedInput = true; return s }
 func mixedType(s *Session, keys string) proto.Snapshot {
 	var snap proto.Snapshot
 	for _, k := range keys {
@@ -28,7 +27,7 @@ func TestAutomaticMixedChineseEnglishChinese(t *testing.T) {
 		{"ji3Hello API ji3", "我Hello API 我"},
 		{"ji3", "我"}, {"t ", "吃"}, {"a86z06", "麻煩"},
 	} {
-		s := mixedSession()
+		s := newSession()
 		mixedType(s, tc.keys)
 		snap := key(s, proto.KeyEnter)
 		if snap.Commit != tc.want || snap.Text() != "" || !snap.Handled {
@@ -39,7 +38,7 @@ func TestAutomaticMixedChineseEnglishChinese(t *testing.T) {
 
 func TestMixedRawKeysSurviveTyposAndIdentifiers(t *testing.T) {
 	for _, raw := range []string{"recieve", "hellp", "helllo", "someNewName", "foo_bar123", "https://example.com/a?q=1", "C:\\Users\\kevin", "123456", "hello😀", "hello中文", strings.Repeat("x", 180)} {
-		s := mixedSession()
+		s := newSession()
 		mixedType(s, raw)
 		if snap := key(s, proto.KeyEnter); snap.Commit != raw {
 			t.Errorf("%s -> %s", raw, snap.Commit)
@@ -49,7 +48,7 @@ func TestMixedRawKeysSurviveTyposAndIdentifiers(t *testing.T) {
 
 func TestMixedCompletionCorrectionAndUndo(t *testing.T) {
 	for _, tc := range []struct{ raw, word string }{{"meet", "meeting"}, {"recieve", "receive"}, {"hellp", "hello"}} {
-		s := mixedSession()
+		s := newSession()
 		mixedType(s, "ji3"+tc.raw)
 		if snap := s.snapshot(); snap.SuggestedText() != "我"+tc.word {
 			t.Fatalf("%s: %+v", tc.raw, snap)
@@ -75,7 +74,7 @@ func TestMixedCompletionCorrectionAndUndo(t *testing.T) {
 }
 
 func TestMixedCandidatesRetainRawAndTabDoesNotAccept(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	mixedType(s, "recieve")
 	key(s, proto.KeyDown)
 	before := s.snapshot()
@@ -99,21 +98,21 @@ func TestMixedCandidatesRetainRawAndTabDoesNotAccept(t *testing.T) {
 
 func TestMixedExplicitPhoneticAndLiteralAmbiguity(t *testing.T) {
 	// One physical key can be kept literally or explicitly interpreted as ㄔ.
-	s := mixedSession()
+	s := newSession()
 	mixedType(s, "t")
 	key(s, proto.KeyDown)
 	pickText(t, s, "t")
 	if snap := key(s, " "); snap.Text() != "t " {
 		t.Fatalf("explicit raw: %+v", snap)
 	}
-	s = mixedSession()
+	s = newSession()
 	mixedType(s, "t")
 	key(s, proto.KeyDown)
 	pickText(t, s, "ㄔ")
 	if snap := key(s, " "); snap.Text() != "吃" {
 		t.Fatalf("explicit phonetic: %+v", snap)
 	}
-	s = mixedSession()
+	s = newSession()
 	s.model.Lex.(*lexicon.Mem).Add(lexicon.Entry{Surface: "誰", Reading: zhuyin.ParseReading("ㄕㄟ"), PRW: 1})
 	mixedType(s, "go")
 	key(s, proto.KeyDown)
@@ -137,7 +136,7 @@ func TestMixedFirstToneEnglishCollisions(t *testing.T) {
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			fresh := func() *Session {
-				s := mixedSession()
+				s := newSession()
 				s.English = english.New([]english.Word{{Text: tc.raw, Weight: 100}, {Text: tc.completion, Weight: 50}})
 				s.model.Lex.(*lexicon.Mem).Add(lexicon.Entry{Surface: tc.word, Reading: zhuyin.ParseReading(tc.reading), PRW: 1})
 				return s
@@ -197,7 +196,7 @@ func TestMixedFirstToneEnglishCollisions(t *testing.T) {
 // (helloji␣) or a whole first-tone reading (up␣) becomes Chinese.
 func TestMixedCompleteEnglishWordKeepsSpace(t *testing.T) {
 	fresh := func() *Session {
-		s := mixedSession()
+		s := newSession()
 		var words []english.Word
 		for _, w := range []string{"hello", "hell", "thank", "than", "you", "yo", "open", "ope", "the", "door", "see", "up"} {
 			words = append(words, english.Word{Text: w, Weight: 100})
@@ -231,7 +230,7 @@ func TestMixedCompleteEnglishWordKeepsSpace(t *testing.T) {
 }
 
 func TestMixedPendingEditsCancelAndManualMode(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	mixedType(s, "ji3hello")
 	for range 5 {
 		key(s, proto.KeyBackspace)
@@ -245,7 +244,7 @@ func TestMixedPendingEditsCancelAndManualMode(t *testing.T) {
 	if snap := key(s, proto.KeyEnter); snap.Commit != "我helo" {
 		t.Fatalf("edit literal: %+v", snap)
 	}
-	s = mixedSession()
+	s = newSession()
 	mixedType(s, "ji3t ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
 	mixedType(s, "hello")
@@ -255,7 +254,7 @@ func TestMixedPendingEditsCancelAndManualMode(t *testing.T) {
 	if snap := key(s, proto.KeyEnter); snap.Commit != "我hello吃" {
 		t.Fatal(snap.Commit)
 	}
-	s = mixedSession()
+	s = newSession()
 	mixedType(s, "hello")
 	s.Handle(proto.Request{Type: proto.Toggle})
 	mixedType(s, " 123")
@@ -274,26 +273,9 @@ func TestMixedPendingEditsCancelAndManualMode(t *testing.T) {
 	}
 }
 
-func TestMixedOffPreservesLegacyKeys(t *testing.T) {
-	s := newSession()
-	s.MixedInput = false
-	if key(s, "A").Handled {
-		t.Fatal("disabled must not intercept idle English")
-	}
-	if snap := mixedType(s, "ji3"); snap.Text() != "我" {
-		t.Fatalf("phonetic keys: %+v", snap)
-	}
-	s.Handle(proto.Request{Type: proto.Toggle})
-	mixedType(s, "hello")
-	if snap := key(s, proto.KeyEnter); snap.Commit != "我hello" {
-		t.Fatalf("manual mix: %+v", snap)
-	}
-}
-
 func TestMixedCommitWithNeuralDisplayCache(t *testing.T) {
 	calls := 0
 	s := neuralSession(&calls)
-	s.MixedInput = true
 	typeSyl(s, "ㄨㄛˇ")
 	typeSyl(s, "ㄐㄧㄥˇ")
 	mixedType(s, "hello")
@@ -308,7 +290,7 @@ func TestMixedCommitWithNeuralDisplayCache(t *testing.T) {
 }
 
 func TestMixedRestorePendingZhuyinAfterKeypadDigits(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	mixedType(s, "ji")
 	for _, k := range []string{"KP1", "KP2", "KP3"} {
 		key(s, k)
@@ -328,7 +310,7 @@ func TestMixedCompletedChineseCanRecoverPhysicalKeys(t *testing.T) {
 	}{
 		{"ji3", "我", 1}, {"a86z06", "麻煩", 2},
 	} {
-		s := mixedSession()
+		s := newSession()
 		if snap := mixedType(s, tc.keys); snap.Text() != tc.shown {
 			t.Fatalf("before recovery: %+v", snap)
 		}
@@ -357,7 +339,7 @@ func TestMixedCompletedChineseCanRecoverPhysicalKeys(t *testing.T) {
 }
 
 func TestMixedPhysicalKeysFollowCursorEditsAndCancel(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	mixedType(s, "ji3t ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
 	mixedType(s, "hello")
@@ -383,9 +365,8 @@ func TestMixedPhysicalKeysFollowCursorEditsAndCancel(t *testing.T) {
 // 時回頭改成英文。a 仍是保留空白的英文單字。詞庫沒有輕聲 ㄛ˙、ㄜ˙ 時取其他聲調的語氣詞
 // （喔、呃），沒有語氣詞的才退回一聲。
 func TestMixedLetterIAndNeutralToneParticle(t *testing.T) {
-	fresh := func(mixed bool) *Session {
+	fresh := func() *Session {
 		s := newSession()
-		s.MixedInput = mixed
 		var words []english.Word
 		for _, w := range []string{"a", "i", "am", "iphone", "think", "love", "you"} {
 			words = append(words, english.Word{Text: w, Weight: 100})
@@ -399,30 +380,26 @@ func TestMixedLetterIAndNeutralToneParticle(t *testing.T) {
 		s.model.LM.(*lm.Mem).SetUni("東", 6e-4) // 常用字：2j/␣ 接空白組成罕用字才照字面（#249）
 		return s
 	}
-	for _, tc := range []struct {
-		keys, want string
-		mixed      bool
-	}{
-		{"t i ", "吃喔", true}, {"t i7", "吃喔", true}, {"i ", "喔", true}, {"i7", "喔", true},
-		{"i7", "喔", false}, {"i ", "喔", false},
-		{"I am ", "I am ", true}, {"a ", "a ", true}, {"iphone ", "iphone ", true},
-		{"i am ", "i am ", true}, {"i think ", "i think ", true}, {"i love you ", "i love you ", true}, {"i'm ", "i'm ", true},
-		{"i ji3", "喔我", true}, {"t i ji3", "吃喔我", true}, {"t i7am ", "吃喔am ", true}, // 接中文或明確打輕聲時保留喔
-		{"k7", "呃", false}, {"k7", "呃", true}, {"07", "安", false}, // 語氣詞優先；沒有語氣詞才退回一聲
-		{"t k7", "吃呃", false}, {"97", "唉", false}, {"o7", "欸", false}, // 哦、欸只在主音節（ㄛ、ㄟ）補輕聲
-		{"x87", "啦", true}, {"x87", "啦", false}, // 有輕聲字時不改讀一聲
-		{"2j/ vu7", "東西", false}, {"2j/ vu7", "東西", true}, // 輕聲只在詞裡出現也算找得到
+	for _, tc := range []struct{ keys, want string }{
+		{"t i ", "吃喔"}, {"t i7", "吃喔"}, {"i ", "喔"}, {"i7", "喔"},
+		{"I am ", "I am "}, {"a ", "a "}, {"iphone ", "iphone "},
+		{"i am ", "i am "}, {"i think ", "i think "}, {"i love you ", "i love you "}, {"i'm ", "i'm "},
+		{"i ji3", "喔我"}, {"t i ji3", "吃喔我"}, {"t i7am ", "吃喔am "}, // 接中文或明確打輕聲時保留喔
+		{"k7", "呃"},                 // 語氣詞優先
+		{"t k7", "吃呃"}, {"o7", "欸"}, // 哦、欸只在主音節（ㄛ、ㄟ）補輕聲
+		{"x87", "啦"},      // 有輕聲字時不改讀一聲
+		{"2j/ vu7", "東西"}, // 輕聲只在詞裡出現也算找得到
 	} {
-		s := fresh(tc.mixed)
+		s := fresh()
 		if snap := mixedType(s, tc.keys); snap.Text() != tc.want {
-			t.Errorf("%q mixed=%v composition: %q want %q", tc.keys, tc.mixed, snap.Text(), tc.want)
+			t.Errorf("%q composition: %q want %q", tc.keys, snap.Text(), tc.want)
 		}
 		if snap := key(s, proto.KeyEnter); snap.Commit != tc.want {
-			t.Errorf("%q mixed=%v commit: %+v want %q", tc.keys, tc.mixed, snap, tc.want)
+			t.Errorf("%q commit: %+v want %q", tc.keys, snap, tc.want)
 		}
 	}
 	// 英文詞還沒結束時畫面是「喔am」，Enter 具體化英文時同樣改判。
-	s := fresh(true)
+	s := fresh()
 	if snap := mixedType(s, "i am"); snap.Text() != "喔am" {
 		t.Fatalf("pending English after i: %+v", snap)
 	}
@@ -430,7 +407,7 @@ func TestMixedLetterIAndNeutralToneParticle(t *testing.T) {
 		t.Fatalf("Enter should revise i before English: %+v", snap)
 	}
 	// 待定的 i 顯示注音；要英文 i 時按 ↓ 選原始按鍵。
-	s = fresh(true)
+	s = fresh()
 	if snap := key(s, "i"); snap.Text() != "ㄛ" {
 		t.Fatalf("pending i should show ㄛ: %+v", snap)
 	}

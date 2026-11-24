@@ -10,15 +10,9 @@ import (
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
-// hoshiSymbolSession 是 fork 的預設符號設定（標點操作＝微軟參考、標點寬度＝所有符號鍵打半形），
-// 加上使用者的混打與 Shift＋空白切全形（實測有全形的例子）。
-func hoshiSymbolSession() *Session {
-	s := styleSession("0c")
-	s.InputStyle.Punctuation, s.InputStyle.ShiftSpace = "microsoft", "fullwidth"
-	s.ShiftSymbolHalfwidth, s.AllSymbolsHalfwidth, s.CtrlPunct = true, true, true
-	s.MixedInput, s.EmojiShortcut = true, "off"
-	return s
-}
+// hoshiSymbolSession 是 fork 寫死的符號行為（標點照微軟、所有符號鍵打半形、混打），
+// 加上 Shift＋空白切全形（實測有全形的例子）。
+func hoshiSymbolSession() *Session { return fullWidthSession() }
 
 type microsoftCase struct {
 	n, block, prefix, keys string

@@ -23,7 +23,6 @@ func newProbe() *openerProbe {
 		locate: func() (settingsapp.Location, error) {
 			return settingsapp.Location{Path: "/core/0c-settings", Source: settingsapp.SourceCore}, nil
 		},
-		display: func() bool { return true },
 		missing: func(string) []string { return nil },
 		launch: func(path string, o settingsapp.LaunchOptions) error {
 			p.launched, p.options = append(p.launched, path), o
@@ -31,7 +30,6 @@ func newProbe() *openerProbe {
 		},
 		notify:  func(title, body string) { p.notices = append(p.notices, title+"："+body) },
 		entry:   func() { p.entries++ },
-		hint:    func(libs []string) string { return "請安裝 libwebkit2gtk-4.1-0。" },
 		updater: "/stable/0c-update",
 		log:     "/state/settings-last.log",
 		wait:    time.Second,
@@ -69,11 +67,9 @@ func TestOpenSettingsExplainsEveryWayItCannotOpenAndNeverLaunches(t *testing.T) 
 				return settingsapp.Location{}, errors.New("核心版本目錄的設定程式：雜湊與記錄不符")
 			}
 		}, []string{"無法通過核對", "雜湊與記錄不符", "重新安裝", "0c-update settings"}},
-		{"沒有圖形桌面", func(p *openerProbe) { p.opener.display = func() bool { return false } },
-			[]string{"找不到圖形桌面", "WAYLAND_DISPLAY", "0c-update settings"}},
-		{"缺 WebKitGTK", func(p *openerProbe) {
-			p.opener.missing = func(string) []string { return []string{"libwebkit2gtk-4.1.so.0", "libgtk-3.so.0"} }
-		}, []string{"libwebkit2gtk-4.1.so.0", "libgtk-3.so.0", "找不到", "請安裝 libwebkit2gtk-4.1-0", "0c-update set"}},
+		{"缺 WebView2", func(p *openerProbe) {
+			p.opener.missing = func(string) []string { return []string{settingsapp.WebView2Runtime} }
+		}, []string{settingsapp.WebView2Runtime, "找不到", settingsapp.WebView2Hint, "0c-update set"}},
 	} {
 		p := newProbe()
 		c.mutate(p)
@@ -112,7 +108,7 @@ func TestOpenSettingsReportsAProgramThatDiesRightAway(t *testing.T) {
 }
 
 func TestOpenSettingsRejectsExtraArguments(t *testing.T) {
-	if err := openSettings([]string{"update", "extra"}); err == nil || !strings.Contains(err.Error(), "overview|styles|mode|candidates|keyboard|output|update|troubleshoot|about") {
+	if err := openSettings([]string{"update", "extra"}); err == nil || !strings.Contains(err.Error(), "overview|mode|candidates|keyboard|update|troubleshoot|about") {
 		t.Fatalf("%v", err)
 	}
 }

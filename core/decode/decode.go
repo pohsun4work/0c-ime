@@ -48,7 +48,6 @@ type Seg struct {
 
 // Lock 是使用者鎖定的區間：從某位置起 Len 個音節必須是 Word。硬條件。
 type Lock struct {
-	Segmentation    bool // Explicit word boundary: the locked word cannot merge with neighbors.
 	Word            string
 	Len             int
 	Completion      bool // 鎖定來自 Tab 補全；session 用來區分學習來源
@@ -181,7 +180,7 @@ func MaxLen(lex lexicon.Source) int {
 }
 
 // continuationRow：音節格某位置的假設多於這個數時，改用 lexicon.Continuations 剪枝。這只是換一種查法：
-// Continuer 的結果與逐一問 HasPrefix 相同，答案不變，所以照列長決定（簡拼、沒打聲調加模糊音或鄰鍵、九宮格的
+// Continuer 的結果與逐一問 HasPrefix 相同，答案不變，所以照列長決定（簡拼、沒打聲調加模糊音或鄰鍵的
 // 寬列都適用）。弧數上限與裁切方式看的是簡拼的明確標記（abbreviatedSpan），不是這個數。
 const continuationRow = 16
 
@@ -260,7 +259,7 @@ func allowed(locks map[int]Lock, i, j int, w string) bool {
 		if s < i || s >= j || s == i && l.Word == w && l.Len == j-i {
 			continue
 		}
-		if !l.Segmentation && l.LiteralBoundary == 0 && s+l.Len <= j {
+		if l.LiteralBoundary == 0 && s+l.Len <= j {
 			if runes == nil {
 				runes = []rune(w)
 			}

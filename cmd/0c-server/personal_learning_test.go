@@ -1,13 +1,9 @@
-//go:build !windows
-
 package main
 
 import (
 	"bytes"
 	"encoding/json"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -29,14 +25,11 @@ func TestPersonalLearningSettingInServer(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, settings.FileName), b, 0600); err != nil {
 			t.Fatal(err)
 		}
-		sock := filepath.Join(dir, "learn.sock")
-		server := exec.Command(binary, "-data", data, "-user", user, "-socket", sock, "-legacy-socket", "")
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
-		defer func() { server.Process.Signal(os.Interrupt); server.Wait() }() // 結束時存檔
+		sock := testPipe("learn")
+		server, _ := startServer(t, binary, "-data", data, "-user", user, "-socket", sock, "-legacy-socket", "")
+		defer stopServer(t, server) // 結束時存檔
 		waitDial(t, sock)
-		conn, err := net.Dial("unix", sock)
+		conn, err := dial(sock)
 		if err != nil {
 			t.Fatal(err)
 		}

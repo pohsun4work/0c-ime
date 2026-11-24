@@ -4,7 +4,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
@@ -68,18 +67,15 @@ func TestBacktickIsLiteral(t *testing.T) {
 	}
 }
 
-// 明確打的符號沒在組字時也留在組字區，混打開關都一樣；不參與組字。
+// 明確打的符號沒在組字時也留在組字區；不參與組字。
 func TestExplicitSymbolsStayInComposition(t *testing.T) {
-	for _, mixed := range []bool{false, true} {
-		for _, k := range []string{"$", "@", "[", "<", "?", "`", "\\"} {
-			s := hoshiSymbolSession()
-			s.MixedInput = mixed
-			if snap := key(s, k); !snap.Handled || snap.Commit != "" || snap.Text() != k {
-				t.Errorf("mixed=%v %q：%+v", mixed, k, snap)
-			}
-			if snap := key(s, proto.KeyEnter); snap.Commit != k {
-				t.Errorf("mixed=%v %q Enter：%+v", mixed, k, snap)
-			}
+	for _, k := range []string{"$", "@", "[", "<", "?", "`", "\\"} {
+		s := hoshiSymbolSession()
+		if snap := key(s, k); !snap.Handled || snap.Commit != "" || snap.Text() != k {
+			t.Errorf("%q：%+v", k, snap)
+		}
+		if snap := key(s, proto.KeyEnter); snap.Commit != k {
+			t.Errorf("%q Enter：%+v", k, snap)
 		}
 	}
 	// 符號夾在注音中間不黏到注音上。（測試詞庫只有少數字；規格的 ji3 $ wu0␣、$su3 在真引擎 eval 驗）
@@ -125,14 +121,5 @@ func TestFullWidthMixedInput(t *testing.T) {
 		if snap := key(s, proto.KeyEnter); snap.Commit != tc.want {
 			t.Errorf("全形 %q：%+v", tc.keys, snap)
 		}
-	}
-}
-
-// 倚天 41 鍵的 ' 是 ㄘ：0c 風格的微軟參考標點讓給排列，照樣打注音。
-func TestETenQuoteStaysZhuyinUnderMicrosoftPunctuation(t *testing.T) {
-	s := hoshiSymbolSession()
-	s.SetLayout(layout.ETen)
-	if snap := key(s, "'"); !snap.Handled || snap.Text() != "ㄘ" {
-		t.Fatalf("倚天 '：%+v", snap)
 	}
 }

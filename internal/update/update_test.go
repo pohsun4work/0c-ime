@@ -1,10 +1,8 @@
 package update
 
 import (
-	"archive/tar"
 	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -63,7 +60,7 @@ func TestBundleRejectsTamperingExtrasLinksAndWrongPlatform(t *testing.T) {
 					t.Skip("symlink not available")
 				}
 			case "platform":
-				if _, err := Verify(dir, "linux", "amd64"); err == nil {
+				if _, err := Verify(dir, "windows", "arm64"); err == nil {
 					t.Fatal("accepted wrong platform")
 				}
 				return
@@ -85,41 +82,31 @@ func TestSafeArchiveNames(t *testing.T) {
 	}
 }
 func TestArchivesRejectTraversalLinksAndDuplicateNames(t *testing.T) {
-	for _, kind := range []string{"traversal", "link", "duplicate", "hardlink"} {
+	for _, kind := range []string{"traversal", "link", "duplicate"} {
 		t.Run(kind, func(t *testing.T) {
-			file := filepath.Join(t.TempDir(), "bad.tar.gz")
+			file := filepath.Join(t.TempDir(), "bad.zip")
 			out, err := os.Create(file)
 			if err != nil {
 				t.Fatal(err)
 			}
-			gz := gzip.NewWriter(out)
-			tw := tar.NewWriter(gz)
-			h := &tar.Header{Name: "bundle/file", Mode: 0600, Size: 1, Typeflag: tar.TypeReg}
+			z := zip.NewWriter(out)
+			h := &zip.FileHeader{Name: "bundle/file", Method: zip.Store}
 			switch kind {
 			case "traversal":
 				h.Name = "../escape"
 			case "link":
-				h.Typeflag = tar.TypeSymlink
-				h.Linkname = "../../escape"
-				h.Size = 0
-			case "hardlink":
-				h.Typeflag = tar.TypeLink
-				h.Linkname = "../../escape"
-				h.Size = 0
+				h.SetMode(os.ModeSymlink | 0o777)
 			}
-			if err = tw.WriteHeader(h); err != nil {
+			w, err := z.CreateHeader(h)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if h.Size == 1 {
-				tw.Write([]byte("x"))
-			}
+			w.Write([]byte("x"))
 			if kind == "duplicate" {
-				h.Name = "bundle/FILE"
-				tw.WriteHeader(h)
-				tw.Write([]byte("x"))
+				w, _ = z.CreateHeader(&zip.FileHeader{Name: "bundle/FILE", Method: zip.Store})
+				w.Write([]byte("x"))
 			}
-			tw.Close()
-			gz.Close()
+			z.Close()
 			out.Close()
 			if err = extract(file, t.TempDir()); err == nil {
 				t.Fatal("accepted unsafe archive")
@@ -472,34 +459,6 @@ func TestWindowsRollbackCanRestoreUserStoreAndUndoIt(t *testing.T) {
 		t.Fatal("rollback without -restore-user changed the dictionary")
 	}
 }
-func TestLinuxBundleNamesByGeneration(t *testing.T) {
-	for _, tc := range []struct {
-		names  []string
-		ok     bool
-		legacy bool
-	}{
-		{[]string{"bin/0c-server", "lib/lib0c.so"}, true, false},
-		{[]string{"bin/zuin-server", "lib/libzuin.so"}, true, true},
-		{[]string{"bin/0c-server", "lib/libzuin.so"}, false, false},
-	} {
-		root := t.TempDir()
-		r := Release{Schema: 1, Product: "0c", Version: "0.1.0", Channel: "internal-preview", OS: "linux", Arch: "amd64", Files: map[string]string{}}
-		for _, name := range append(tc.names, "install.py", "data/manifest.json", "data/lexicon.bin", "data/lm.bin", "data/NOTICE.txt", "data/report.txt") {
-			p := filepath.Join(root, filepath.FromSlash(name))
-			os.MkdirAll(filepath.Dir(p), 0700)
-			os.WriteFile(p, []byte(name), 0600)
-			r.Files[name], _ = Hash(p)
-		}
-		writeJSON(filepath.Join(root, "release.json"), r)
-		got, err := Verify(root, "linux", "amd64")
-		if (err == nil) != tc.ok {
-			t.Fatalf("%v: %v", tc.names, err)
-		}
-		if _, legacy := r.Files[LinuxLegacyServer]; err == nil && legacy != tc.legacy || got != nil && got.Version != "0.1.0" {
-			t.Fatal("wrong generation")
-		}
-	}
-}
 func TestWindowsLayoutRejectsMixedNames(t *testing.T) {
 	files := map[string]string{"0c_tsf.dll": "", "zuin-server.exe": "", "zuin-ui.exe": "", "0c-ui.exe": ""}
 	if _, err := WindowsLayoutOf(files); err == nil {
@@ -537,7 +496,7 @@ func TestFeedAndDownloadRejectBadMetadataAndContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.Select("linux", "amd64"); err == nil {
+	if _, err = f.Select("windows", "arm64"); err == nil {
 		t.Fatal("accepted missing platform")
 	}
 	path, err := Download(context.Background(), client, asset, t.TempDir())
@@ -647,7 +606,7 @@ func TestDownloadResumesAfterDroppedConnection(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "asset")
 	os.WriteFile(file, payload, 0600)
 	hash, _ := Hash(file)
-	asset := Asset{OS: "linux", Arch: "amd64", URL: "https://example.org/a.tar.gz", SHA256: hash, Size: int64(len(payload))}
+	asset := Asset{OS: "windows", Arch: "amd64", URL: "https://example.org/a.zip", SHA256: hash, Size: int64(len(payload))}
 	requests := 0
 	serve := func(ranges bool, cut int, drops *int, status int) *http.Client {
 		return &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
@@ -702,72 +661,6 @@ func TestDownloadResumesAfterDroppedConnection(t *testing.T) {
 		}
 		if c.name == "not found" && requests != 1 {
 			t.Fatal("retried 404")
-		}
-	}
-}
-
-// 解開的位置由呼叫端指定（Linux 為使用者資料目錄的暫存區），不放在壓縮包旁邊：使用者指定的壓縮包可能在隨身碟
-// 或任何資料夾。暫存目錄是私有的；指定位置建不起來時退回系統暫存目錄，更新不因此失敗。
-func TestStageInUsesTheGivenScratchNotTheArchiveFolder(t *testing.T) {
-	usb := t.TempDir()
-	file := zipFixture(t, filepath.Join(usb, "package.zip"))
-	hash, _ := Hash(file)
-	scratch := t.TempDir()
-	staged, cleanup, err := StageIn(scratch, file, hash, "windows", "amd64")
-	if err != nil {
-		t.Fatal(err)
-	}
-	temp := filepath.Dir(staged)
-	if filepath.Dir(temp) != scratch || !filepath.IsAbs(staged) {
-		t.Fatalf("staged %q is not under the scratch directory %q", staged, scratch)
-	}
-	if runtime.GOOS != "windows" {
-		if info, err := os.Stat(temp); err != nil || info.Mode().Perm() != 0o700 {
-			t.Fatalf("stage must be private: %v %v", info, err)
-		}
-	}
-	if entries, _ := os.ReadDir(usb); len(entries) != 1 {
-		t.Fatalf("nothing may be written next to the archive: %v", entries)
-	}
-	cleanup()
-	if _, err := os.Stat(temp); !os.IsNotExist(err) {
-		t.Fatal("cleanup must remove the stage")
-	}
-
-	staged, cleanup, err = StageIn(filepath.Join(scratch, "missing", "deeper"), file, hash, "windows", "amd64")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-	if filepath.Dir(filepath.Dir(staged)) != filepath.Clean(os.TempDir()) {
-		t.Fatalf("fallback %q is not under the system temp dir %q", staged, os.TempDir())
-	}
-}
-
-func TestRemoveStaleOnlyRemovesOldPrefixedDirectories(t *testing.T) {
-	dir := t.TempDir()
-	old := time.Now().Add(-48 * time.Hour)
-	paths := map[string]bool{ // 路徑 → 應保留
-		"0c-download-old": false, "0c-install-old": false, "0c-download-new": true, "keep-me": true,
-	}
-	for name := range paths {
-		if err := os.Mkdir(filepath.Join(dir, name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dir, "0c-install-file"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	paths["0c-install-file"] = true
-	for _, name := range []string{"0c-download-old", "0c-install-old", "keep-me", "0c-install-file"} {
-		if err := os.Chtimes(filepath.Join(dir, name), old, old); err != nil {
-			t.Fatal(err)
-		}
-	}
-	RemoveStale(dir, 24*time.Hour, "0c-download-", "0c-install-")
-	for name, keep := range paths {
-		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != keep {
-			t.Fatalf("%s kept=%v, want %v", name, err == nil, keep)
 		}
 	}
 }

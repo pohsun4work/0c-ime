@@ -23,13 +23,12 @@ import (
 // 有打聲調的音節照舊硬限制，而且固定那個音節的開頭和結尾。
 //
 // 目前的注音還不是完整音節時照原本的規則（同類的後者取代前者：ㄋ＋ㄏ 是 ㄏ），所以打錯聲母仍可直接改。
-// 組字中按 ' 只切音節（untonedSeparator）。只在標準排列生效（toneless）。
+// 組字中按 ' 只切音節（untonedSeparator）。
 // Enter、↓、方向鍵、Tab、標點與切換英文之前，未打完但已是完整音節的注音也先不打聲調就完成；
 // 空白照舊是一聲。關閉時沒有任何音節會帶 zhuyin.UntonedMark，行為與沒有此功能時相同。
 
-// toneless 回報聲調選填是否生效：只在標準排列。倚天 41 鍵的 ' 是 ㄘ（沒有分隔鍵），許氏一個鍵兼聲母、韻母與聲調，
-// 「接不上就開新音節」的規則在那裡不成立；設定保留，切回標準排列就照舊（同混打，#83、#183）。
-func (s *Session) toneless() bool { return s.Toneless && s.layout == layout.Standard }
+// toneless 回報聲調選填是否生效。
+func (s *Session) toneless() bool { return s.Toneless }
 
 // abbreviation 回報簡拼是否生效：只在聲調選填生效時。
 func (s *Session) abbreviation() bool { return s.Abbreviation && s.toneless() }
@@ -57,7 +56,7 @@ func (s *Session) abbreviatedTone(before zhuyin.Composer, done zhuyin.Syllable) 
 }
 
 // editsPending 回報實體按鍵 k 是不是作用在未打完的注音上的編輯鍵（Backspace 刪一個注音、Esc 清掉未打完的注音）。
-// 這兩個鍵之前不完成注音鍵或九宮格打到一半的音節（finishSymbolPending），否則會先收成音節、再整個刪掉。
+// 這兩個鍵之前不完成注音鍵打到一半的音節（finishSymbolPending），否則會先收成音節、再整個刪掉。
 // 其他非字元鍵（Enter、方向鍵、Tab、Delete）本來就會用到整段組字，照舊先完成（聲調選填的 untonedKey 也會做）。
 func editsPending(k string) bool { return k == proto.KeyBackspace || k == proto.KeyEscape }
 
@@ -74,8 +73,7 @@ func (s *Session) finishSymbolPending() {
 // 一直更新，選字時才真的完成音節（這時由 Candidates 請求開啟的是同一份候選，ID 相同）。沒有未打完的注音、
 // 或注音還不能完成時回傳 nil。
 func (s *Session) PreviewPending() *proto.CandidateList {
-	nine := s.ninePending() && len(s.nineReadings(s.nineKeys, nineToneKey)) > 0 // 九宮格的鍵同未打完的注音
-	if !nine && (!s.toneless() || s.comp.Empty() || s.untonedSyllable(zhuyin.Syllable(s.comp.String())) == "") {
+	if !s.toneless() || s.comp.Empty() || s.untonedSyllable(zhuyin.Syllable(s.comp.String())) == "" {
 		return nil
 	}
 	saved := *s
@@ -132,9 +130,6 @@ func lastClass(c zhuyin.Composer) zhuyin.Class {
 // finishUntoned 把未打完、但已是完整音節（或能簡拼）的注音當成沒打聲調的音節收進組字。
 // 沒開聲調選填、沒有未打完的注音，或注音還不是完整音節也不能簡拼時不動作，回傳 false。
 func (s *Session) finishUntoned() bool {
-	if s.ninePending() {
-		return s.finishNine(nineToneKey) // 九宮格的鍵：不打聲調就完成（不看聲調選填的設定，九宮格本來就靠解碼定讀音）
-	}
 	if !s.toneless() || s.comp.Empty() {
 		return false
 	}
@@ -211,8 +206,8 @@ func (s *Session) untonedEnglish(run *untonedRun, k string) bool {
 		return false
 	}
 	rs := []rune(k)
-	_, phonetic := s.layout.Symbol(rs[0])
-	_, punct := s.layout.Punct(rs[0])
+	_, phonetic := layout.Standard.Symbol(rs[0])
+	_, punct := layout.Standard.Punct(rs[0])
 	if k != " " && k != proto.KeyEnter && !(len(rs) == 1 && punct && !phonetic) {
 		return false
 	}

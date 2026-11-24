@@ -37,7 +37,7 @@ func shiwuSession() *Session {
 func typeRuguoShiwu(t *testing.T, s *Session) {
 	t.Helper()
 	for _, y := range []string{"ㄖㄨˊ", "ㄍㄨㄛˇ", "ㄕˋ", "ㄨˋ"} {
-		typeSyl(s, y)
+		symbolSyl(s, y)
 	}
 	if got := s.snapshot().Text(); got != "如果事物" {
 		t.Fatalf("fixture decodes %q", got)
@@ -237,8 +237,8 @@ func TestMixedListUndoKeyActsOnHighlightedSingle(t *testing.T) {
 // 已經是單字詞長時維持原樣：游標在單字分詞上開窗，清單只有單字。
 func TestMixedListSingleLengthUnchanged(t *testing.T) {
 	s := cursorSession()
-	typeSyl(s, "ㄊㄚ")
-	typeSyl(s, "ㄏㄠˇ")
+	symbolSyl(s, "ㄊㄚ")
+	symbolSyl(s, "ㄏㄠˇ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	snap := key(s, proto.KeyDown)
 	cursorRange(t, snap, 0, 1)

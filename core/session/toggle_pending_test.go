@@ -143,12 +143,12 @@ func TestToggleWithCandidatesOpen(t *testing.T) {
 	// 未打完的注音開著候選（選取會用掉這些注音）：關閉候選，未打完的注音照常清掉，立即切回時放回（不重開候選）。
 	s = newSession()
 	typeSyl(s, "ㄨㄛˇ")
-	key(s, "t") // ㄔ
-	if snap := key(s, proto.KeyDown); snap.Candidates == nil || s.cand == nil || !s.cand.pending {
+	key(s, "t") // ㄔ（混打的暫存按鍵）
+	if snap := key(s, proto.KeyDown); snap.Candidates == nil {
 		t.Fatalf("前置：未打完注音的候選應開啟：%+v", snap)
 	}
 	snap = s.Handle(toEnglish)
-	if snap.Candidates != nil || snap.Text() != "我" || !s.comp.Empty() {
+	if snap.Candidates != nil || snap.Text() != "我" || !s.comp.Empty() || s.mixed.raw != "" {
 		t.Fatalf("關閉候選並清掉未打完的注音：%+v", snap)
 	}
 	if snap := s.Handle(restore); snap.Candidates != nil || snap.Text() != "我ㄔ" {
@@ -157,7 +157,7 @@ func TestToggleWithCandidatesOpen(t *testing.T) {
 }
 
 func TestMixedPendingKeysClearedAndRestored(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	if snap := mixedType(s, "xu"); snap.Text() != "我ㄌㄧ" {
 		t.Fatalf("前置：暫存按鍵顯示成注音：%+v", snap)
@@ -174,7 +174,7 @@ func TestMixedPendingKeysClearedAndRestored(t *testing.T) {
 }
 
 func TestMixedEnglishPendingKeysStayLiteral(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
 	if snap := mixedType(s, "hel"); snap.Text() != "我hel" {
 		t.Fatalf("前置：暫存按鍵顯示成英文：%+v", snap)
@@ -190,6 +190,7 @@ func TestMixedEnglishPendingKeysStayLiteral(t *testing.T) {
 
 func TestToggleClosesEmojiPalette(t *testing.T) {
 	s := newSession()
+	s.equalsPalette = true
 	if snap := key(s, "="); snap.Candidates == nil {
 		t.Fatalf("前置：表情選單應開啟：%+v", snap)
 	}

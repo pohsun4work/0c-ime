@@ -1,16 +1,10 @@
-#!/usr/bin/env python3
-"""產生出貨字典的 pairing.lock.json（#180）。
+"""出貨字典的 pairing.lock.json 內容（#180）：models/models.lock.json 記的上游模型配對到某份字典的結果。
 
-Linux 沒有內建模型的安裝（Debian 套件）由 0c-update 從 Hugging Face 下載 models/models.lock.json 記的上游模型，
-在本機配對到安裝的字典，結果要等於這份清單記的雜湊；字典 manifest 的雜湊不在清單上時不啟用下載的模型。
-配對規則與 0c-ime 的 scripts/pair_models.py 的 metadata() 相同：只改 vocab.json、manifest.json 的
-dictionary_sha256 與 manifest 記的 vocab 雜湊，權重不動。上游的 manifest.json、vocab.json 在 models/upstream。
-
-發版時由 package_release.py 依出貨字典產生，放在 neural/pairing.lock.json；系統安裝（make install）
-裝 PAIRING_LOCK 指定的清單（0c-ime 原始碼 tarball 的 models/pairing.lock.json）。
+scripts/hf_models.py 依它產生與核對官網套件內建的模型。配對規則與 0c-ime 的 scripts/pair_models.py 的 metadata()
+相同：只改 vocab.json、manifest.json 的 dictionary_sha256 與 manifest 記的 vocab 雜湊，權重不動。上游的
+manifest.json、vocab.json 在 models/upstream。
 """
 
-import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -63,27 +57,3 @@ def pairing_lock(dictionary, lock_path=LOCK, upstream=UPSTREAM):
         packages[role] = {name: {"sha256": digest_bytes(content), "size": len(content)} for name, content in derived.items()}
     doc = {"schema": 1, "dictionary_manifest_sha256": dictionary, "models_lock_sha256": digest_bytes(lock_bytes), "packages": packages}
     return (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
-
-
-def write_pairing_lock(data, out):
-    """依 data/manifest.json 寫 out（套件的 neural/pairing.lock.json）。"""
-    dictionary = digest_bytes((Path(data) / "manifest.json").read_bytes())
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    Path(out).write_bytes(pairing_lock(dictionary))
-    return dictionary
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--data", type=Path, required=True, help="出貨的字典目錄（含 manifest.json）")
-    parser.add_argument("--out", type=Path, required=True, help="輸出的 pairing.lock.json")
-    args = parser.parse_args()
-    try:
-        dictionary = write_pairing_lock(args.data, args.out)
-    except (ValueError, OSError, KeyError) as error:
-        parser.exit(1, f"pairing lock: {error}\n")
-    print(f"pairing.lock.json：字典 {dictionary}")
-
-
-if __name__ == "__main__":
-    main()

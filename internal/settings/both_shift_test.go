@@ -103,15 +103,9 @@ func TestAdoptBothShift(t *testing.T) {
 					t.Fatalf("欄位數變了：%s", b)
 				}
 				for key, raw := range before {
-					if key == "toggle_key" || key == "left_shift" {
-						continue
-					}
-					if compact(t, raw) != compact(t, members[key]) {
+					if key != "toggle_key" && compact(t, raw) != compact(t, members[key]) {
 						t.Fatalf("%s 被改了：%s → %s", key, raw, members[key])
 					}
-				}
-				if raw, ok := members["left_shift"]; ok && string(raw) != "true" {
-					t.Fatalf("給舊版讀的 left_shift 也要跟著：%s", b)
 				}
 				s, err := Load(path)
 				if err != nil || s.ToggleKey != ToggleBoth || !s.TogglesLeft() || !s.TogglesRight() {
@@ -132,7 +126,7 @@ func TestAdoptBothShiftKeepsLayout(t *testing.T) {
 	}
 	b, _ := os.ReadFile(path)
 	want := savedBy024
-	for _, r := range [][2]string{{`"left_shift": false`, `"left_shift": true`}, {`"toggle_key": "right"`, `"toggle_key": "both"`},
+	for _, r := range [][2]string{{`"toggle_key": "right"`, `"toggle_key": "both"`},
 		{`"fuzzy": {"zh-z": "on", "future": 3}`, "\"fuzzy\": {\n    \"zh-z\": \"on\",\n    \"future\": 3\n  }"}, {`"future_key": [1, 2]`, "\"future_key\": [\n    1,\n    2\n  ]"}} {
 		want = replaceOnce(t, want, r[0], r[1])
 	}
@@ -194,6 +188,8 @@ func TestAdoptBothShiftLeavesCorruptFile(t *testing.T) {
 		}
 	}
 }
+
+func ptr(s string) *string { return &s }
 
 func compact(t *testing.T, raw json.RawMessage) string {
 	t.Helper()

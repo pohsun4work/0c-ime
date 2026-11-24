@@ -1,7 +1,7 @@
 // Package filelock 是 base/update 下的命名鎖：以 O_EXCL 建立檔案、寫入持有者的 pid，結束時刪除。
 // 前一次執行被中止留下的鎖，記錄的行程已不存在（或鎖超過一小時）時接手。
 //
-// 0c-update（更新協調器、設定寫入）與 0c-server（從輸入法選單切換「輸出簡體字」時寫設定，#169）共用這套規則，
+// 0c-update（更新協調器、設定寫入）與 0c-server（啟動時換中英切換鍵的預設，settings.AdoptBothShift）共用這套規則，
 // 同一個名稱的鎖在兩個程式之間互斥。
 package filelock
 

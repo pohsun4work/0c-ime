@@ -198,8 +198,8 @@ func (s *Session) segRerankDigest(start, end int, shown, before string) string {
 		end == len(s.syls), s.Opt.Beam, s.Opt.Continue, s.Opt.DocumentContextWeight,
 		s.Rerank.Weight, s.Rerank.Margin, s.Rerank.HintGap, s.Rerank.TextWeight, s.Rerank.TextMargin,
 		s.Fuzzy.Key(), s.Rerank.AllowPartial, start, end)
-	// 手機：沒前文的權重、未知聲調與九宮格讀音（固定讀音會改音節格，音節本身可能不變）。
-	fmt.Fprintf(&b, "|%g|%v|%s", s.Rerank.ContextlessWeight, s.Rerank.UnknownTones, s.nineSignature())
+	// 手機：沒前文的權重、未知聲調。
+	fmt.Fprintf(&b, "|%g|%v", s.Rerank.ContextlessWeight, s.Rerank.UnknownTones)
 	return b.String()
 }
 
@@ -237,7 +237,7 @@ func (s *Session) rerankSegmentBody(lat input.Lattice, start, end int, shown, be
 	if !opt.Supports(req) {
 		return nil, true
 	}
-	// 排除哪些候選（vetoed）只取決於候選、個人資料與簡拼／九宮格位置的讀音（abbrevVetoKey），個人資料沒變時沿用
+	// 排除哪些候選（vetoed）只取決於候選、個人資料與簡拼位置的讀音（abbrevVetoKey），個人資料沒變時沿用
 	// 快取，不必每鍵重算（#101）。簡拼位置的檢查要在詞庫裡找每個候選的讀音，快取命中時不再算。
 	key := rerankKey(req) + rerank.ToneKnownKey(req) + vetoInputs(rows) + s.abbrevVetoKey(start, end, rows)
 	entry, cached := s.rerankCache[key]

@@ -45,5 +45,3 @@ func MissingLibraries(string) []string {
 	}
 	return []string{WebView2Runtime}
 }
-
-func DisplayAvailable() bool { return true }

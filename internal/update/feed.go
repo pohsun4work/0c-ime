@@ -155,11 +155,7 @@ func DownloadWithOptions(ctx context.Context, client *http.Client, asset Asset, 
 	if err := secureURL(asset.URL); err != nil {
 		return "", err
 	}
-	suffix := ".tar.gz"
-	if asset.OS == "windows" {
-		suffix = ".zip"
-	}
-	output := filepath.Join(directory, "0c-"+asset.SHA256+suffix)
+	output := filepath.Join(directory, "0c-"+asset.SHA256+".zip")
 	if options.BytesPerSecond < 0 {
 		return "", fmt.Errorf("invalid download rate")
 	}

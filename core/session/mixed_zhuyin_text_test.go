@@ -24,7 +24,6 @@ func zhuyinTextSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	return s
 }
 
@@ -167,15 +166,5 @@ func TestMixedLiteralPhoneticKeyDownOffersSymbol(t *testing.T) {
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	if items := downItems(key(s, proto.KeyDown)); len(items) != 1 || items[0] != "2" {
 		t.Fatalf("2026 的 2 不加注音：%q", items)
-	}
-
-	// 沒開混打不加（組字中的字面數字來自數字鍵盤）。
-	s = zhuyinTextSession()
-	s.MixedInput = false
-	typeSyl(s, "ㄨㄛˇ")
-	key(s, "KP2")
-	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
-	if items := downItems(key(s, proto.KeyDown)); len(items) != 1 || items[0] != "2" {
-		t.Fatalf("一般模式數字鍵盤的 2 不加注音：%q", items)
 	}
 }

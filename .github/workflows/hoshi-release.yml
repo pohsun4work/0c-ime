@@ -42,7 +42,7 @@ jobs:
           printf 'base=%s\nversion=%s\nprevious=%s\n' "$base" "$version" "$previous" >> "$GITHUB_OUTPUT"
           echo "官方 $base；上一版 ${previous:-（沒有）}；本次 $version" >> "$GITHUB_STEP_SUMMARY"
 
-  # Checks 只在 Linux 跑；Windows 才編得到的 Go 程式與外殼的測試在這裡跑，跟 neural 並行。
+  # 發布前再跑一次 Checks 的 Go 測試與外殼測試（同一個 commit 不一定跑過 Checks），跟 neural 並行。
   test:
     needs: plan
     runs-on: windows-2025

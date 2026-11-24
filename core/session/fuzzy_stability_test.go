@@ -30,14 +30,12 @@ func exactVideoSession() *Session {
 func TestFuzzyAutoKeepsCompletedExactWordWhileTypingSuffix(t *testing.T) {
 	s := exactVideoSession()
 	var snap proto.Snapshot
-	for _, k := range "u/3qu04" {
-		snap = key(s, string(k))
-	}
+	snap = fzType(s, "ㄧㄥˇ ㄆㄧㄢˋ")
 	if snap.Text() != "影片" || s.autoFuzzed() {
 		t.Fatalf("前提：正確影／片須顯示原音影片：%+v", snap)
 	}
-	for _, k := range "2j " {
-		snap = key(s, string(k))
+	for _, k := range "ㄉㄨˉ" {
+		snap = s.Handle(proto.Request{Type: proto.Symbol, Symbol: string(k)})
 		if !strings.HasPrefix(snap.Text(), "影片") {
 			t.Fatalf("續打 %q 不得把先前影片換成異音：%+v；%v", k, snap, s.AutoChanges())
 		}
@@ -53,7 +51,7 @@ func TestFuzzyAutoKeepsAnExactWordDisplayedAsSeparateCharacters(t *testing.T) {
 	if snap := fzType(s, "ㄧㄥˇ ㄆㄧㄢˋ"); snap.Text() != "影片" || len(s.shownPath) != 2 {
 		t.Fatalf("前提：影片以兩個單字解出：%+v；%v", snap, s.shownPath)
 	}
-	if snap := typeSyl(s, "ㄉㄨ"); snap.Text() != "影片都" {
+	if snap := symbolSyl(s, "ㄉㄨ"); snap.Text() != "影片都" {
 		t.Fatalf("詞的保護不應取決於斷詞：%+v", snap)
 	}
 }
@@ -66,7 +64,7 @@ func TestFuzzyAutoKeepsAnExactWordAlsoShownAsALongerPrefix(t *testing.T) {
 	if snap := fzType(s, "ㄧㄥˇ ㄆㄧㄢˋ"); snap.Text() != "影片" || len(s.shownPath) != 1 || !s.shownPath[0].Partial {
 		t.Fatalf("前提：長詞前綴顯示影片，影片也有完整原音詞條：%+v；%v", snap, s.shownPath)
 	}
-	if snap := typeSyl(s, "ㄉㄨ"); snap.Text() != "影片都" {
+	if snap := symbolSyl(s, "ㄉㄨ"); snap.Text() != "影片都" {
 		t.Fatalf("已有完整原音詞條的顯示仍須保護：%+v", snap)
 	}
 }
@@ -83,7 +81,7 @@ func TestFuzzyAutoStillCorrectsAnIncompletePrefixWithoutExactWord(t *testing.T) 
 	if snap := fzType(s, "ㄧㄥˇ ㄆㄧㄢˋ"); snap.Text() != "影片" || !s.shownPath[0].Partial {
 		t.Fatalf("前提：只有長詞前綴，沒有完整影片詞條：%+v；%v", snap, s.shownPath)
 	}
-	if snap := typeSyl(s, "ㄉㄨ"); snap.Text() != "飲片都" || !s.autoFuzzed() {
+	if snap := symbolSyl(s, "ㄉㄨ"); snap.Text() != "飲片都" || !s.autoFuzzed() {
 		t.Fatalf("尚未成詞的前綴仍依原有門檻修正：%+v；%v", snap, s.AutoChanges())
 	}
 }
@@ -108,7 +106,7 @@ func TestFuzzyAutoExactWordDoesNotLockItsCharacters(t *testing.T) {
 	if snap := typeXiaolong(s); snap.Text() != "小龍" {
 		t.Fatal(snap)
 	}
-	if snap := typeSyl(s, "ㄅㄠ"); snap.Text() != "小籠包" {
+	if snap := symbolSyl(s, "ㄅㄠ"); snap.Text() != "小籠包" {
 		t.Fatalf("同音仍應組成更長的詞：%+v", snap)
 	}
 }
@@ -137,11 +135,9 @@ func TestFuzzyAutoExactWordDoesNotBlockRetypingItsReading(t *testing.T) {
 	fzType(s, "ㄧㄥˇ ㄆㄧㄢˋ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	key(s, proto.KeyDelete)
-	for _, k := range "up3" {
-		key(s, string(k))
-	}
+	symbolSyl(s, "ㄧㄣˇ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 2})
-	if snap := typeSyl(s, "ㄉㄨ"); snap.Text() != "飲片都" {
+	if snap := symbolSyl(s, "ㄉㄨ"); snap.Text() != "飲片都" {
 		t.Fatalf("真的改打讀音後應沿新讀音解碼：%+v", snap)
 	}
 }

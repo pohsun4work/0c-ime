@@ -115,8 +115,7 @@ func TestReleaseForkFeed(t *testing.T) {
 }
 
 func TestClaimForkUpdatesReplacesForeignPrevious(t *testing.T) {
-	defer func(keep bool, foreign func(string) bool) { keepsPreviousUpdater, foreignUpdater = keep, foreign }(keepsPreviousUpdater, foreignUpdater)
-	keepsPreviousUpdater = true
+	defer func(foreign func(string) bool) { foreignUpdater = foreign }(foreignUpdater)
 	foreignUpdater = func(path string) bool {
 		b, err := os.ReadFile(path)
 		return err == nil && string(b) == "official"

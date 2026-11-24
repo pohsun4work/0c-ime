@@ -4,31 +4,20 @@
 // 應該在執行的版本與 0c-update 算 update.installed 的方式相同：做過相容核心更新時是引擎指標
 // （status.engine，只換引擎、外殼不變），沒有指標時是完整安裝的收據（status.installed）。
 // 只拿收據比，核心更新後執行中的新引擎會被當成「舊版」，總覽一直誤報仍未切換。
-window.ZcEngineState = function (status, platform) {
+window.ZcEngineState = function (status) {
   const runtime = (status && status.runtime) || {};
   const update = (status && status.update) || {};
   const expected = (status && (status.engine || status.installed)) || '';
   const shellPending = update.stage === 'pending' && !!update.target && update.target.kind === 'shell';
-  const blocked = update.blocked || (status && status.blocked);
   const runningOld = runtime.state === 'running' && !!runtime.version && !!expected && runtime.version !== expected;
-  // 核心更新只換引擎：舊引擎在組字結束、安全時機交接，任何平台都不用登出。
-  // 完整安裝（外殼）後還在跑舊引擎時，macOS 要重新登入才會全部換成新版。Windows 不等重新登入（#253）：舊引擎閒置時
-  // 由排程換新，已經開著的應用程式留在舊 DLL 照常打字。
-  const windows = /^windows\//.test(platform || '');
+  // 核心更新只換引擎：舊引擎在組字結束、安全時機交接，不用登出。
+  // 完整安裝（外殼）也不等重新登入（#253）：舊引擎閒置時由排程換新，已經開著的應用程式留在舊 DLL 照常打字。
   const coreSwitch = !!(status && status.engine);
-  // macOS 不必登出（#170）：舊的輸入法程式還在跑時，背景安裝等使用者離開電腦（螢幕鎖定或關閉）才換新（#178）。
-  // 與 internal/autoupdate 的 ShellRetiringDetail 相同；0.2.1／0.2.2 寫進狀態檔的舊說明也認得。
-  const retiring = shellPending && !!blocked && ['已安裝，離開電腦（螢幕鎖定或關閉）時自動換成新版，不必登出', '已安裝，停止打字後自動換成新版，不必登出'].includes(blocked.detail);
-  const relogin = !retiring && !windows && (shellPending || (runningOld && !coreSwitch && /^macos\//.test(platform || '')));
   return {
     expected,
     running: runtime.version || '',
-    shellPending,
-    pendingDetail: shellPending && blocked ? blocked.detail || '' : '',
     runningOld,
-    retiring,
-    relogin,
     // 總覽要不要說明「閒置時換新，不必登出」。
-    engineWaiting: windows && (shellPending || (runningOld && !coreSwitch)),
+    engineWaiting: shellPending || (runningOld && !coreSwitch),
   };
 };

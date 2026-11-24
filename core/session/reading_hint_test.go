@@ -102,12 +102,6 @@ func TestMixedReadingHintOnlyWhenSpaceDecides(t *testing.T) {
 		t.Fatalf("Enter 提交 %q", got)
 	}
 
-	s = deferredNumberSession()
-	s.MixedInput = false
-	if snap := mixedType(s, "20"); snap.ReadingHint != nil || snap.Text() != "ㄉㄢ" {
-		t.Fatalf("沒開混打：%q %+v", snap.Text(), snap.ReadingHint)
-	}
-
 	// Enter 照字面送出數字，提示隨組字一起消失。
 	s = deferredNumberSession()
 	mixedType(s, "20")

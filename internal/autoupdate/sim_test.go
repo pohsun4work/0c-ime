@@ -19,9 +19,9 @@ import (
 )
 
 var (
-	simSeeds = flag.Int("sim.seeds", 10, "模擬情境數（make test-sim 跑 300）")
+	simSeeds = flag.Int("sim.seeds", 10, "模擬情境數（完整模擬跑 300）")
 	simSeed  = flag.Int64("sim.seed", 0, "只跑這個種子（重現用）")
-	simDays  = flag.Int("sim.days", 10, "每個情境的混亂期（虛擬天數；make test-sim 跑 21）")
+	simDays  = flag.Int("sim.days", 10, "每個情境的混亂期（虛擬天數；完整模擬跑 21）")
 )
 
 // crash 模擬行程在平台操作中途被殺：協調器不會存檔，下一次喚起從磁碟上的狀態繼續。
@@ -134,7 +134,7 @@ func (p simPlatform) Fetch(_ context.Context, last uint64) (*update.SignedFeed, 
 		return nil, fmt.Errorf("serial %d older than %d", w.serial, last)
 	}
 	f := &update.SignedFeed{Serial: w.serial, Version: ver(w.latest), Rollout: w.rollout,
-		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "linux", Arch: "amd64", URL: "https://x/" + ver(w.latest),
+		Assets: []update.SignedAsset{{Asset: update.Asset{OS: "windows", Arch: "amd64", URL: "https://x/" + ver(w.latest),
 			SHA256: strings.Repeat("a", 64), Size: 1}, Kind: "core"}}}
 	w.seenWithdrawn = map[int]bool{}
 	for v := range w.withdrawn {
@@ -261,7 +261,7 @@ func (p simPlatform) Notify(n Notice) error {
 	w.logf("notify: %s", n.Body)
 	return nil
 }
-func (p simPlatform) Target() (string, string) { return "linux", "amd64" }
+func (p simPlatform) Target() (string, string) { return "windows", "amd64" }
 
 func (w *world) wake(base string, force bool) *State {
 	co := &Coordinator{Base: base, Platform: simPlatform{w}, Now: func() time.Time { return w.now },

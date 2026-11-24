@@ -88,8 +88,6 @@ type State struct {
 	Mode        string    `json:"mode"`
 	PausedUntil time.Time `json:"paused_until,omitempty"`
 	Feed        string    `json:"feed,omitempty"` // 非預設的已簽章索引（測試用）；空值為正式索引
-	// ProfileAtLogin：首次安裝時 Fcitx5 正在執行，下次登入、桌面啟動前再把輸入法加入清單（Linux）。
-	ProfileAtLogin bool `json:"profile_at_login,omitempty"`
 	// ScheduleRemoved：使用者以 schedule remove 關閉排程；此時不自動修復排程。
 	ScheduleRemoved bool `json:"schedule_removed,omitempty"`
 	// UpdaterRepairs：自動重建排程與穩定更新器的時間（防毒軟體移除後）；UpdaterBroken：重建後又被移除，

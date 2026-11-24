@@ -1,5 +1,3 @@
-//go:build windows
-
 package main
 
 import (
@@ -25,8 +23,6 @@ func defaultPaths() (data, user, sock string) {
 	return filepath.Join(base, "Zuin", "data"), filepath.Join(base, "Zuin", "user.json"), defaultPipe()
 }
 
-const transportName = "named pipe 名稱"
-
 // defaultPipe 以使用者 SID 命名，每位使用者一條；名稱不含使用者可控的字串。
 func defaultPipe() string { return userPipe("0c") }
 
@@ -49,23 +45,7 @@ func serving(sock string) bool {
 	return false
 }
 
-// alreadyRunning：管道沒有殘留檔案要清，與 serving 相同。
-func alreadyRunning(sock string) bool { return serving(sock) }
-
-// endpoint 是本引擎建立的管道。named pipe 不會被別人移除或取代（第一個實例旗標），lost 恆為 false。
-type endpoint struct{ net.Listener }
-
-func (*endpoint) lost() bool { return false }
-
-func listen(sock string) (*endpoint, error) {
-	l, err := listenPipe(sock)
-	if err != nil {
-		return nil, err
-	}
-	return &endpoint{l}, nil
-}
-
-func listenPipe(sock string) (net.Listener, error) {
+func listen(sock string) (net.Listener, error) {
 	u, err := user.Current()
 	if err != nil {
 		return nil, fmt.Errorf("取得使用者 SID：%w", err)

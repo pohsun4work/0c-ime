@@ -29,7 +29,6 @@ func englishVocabSession(t *testing.T, preview bool, words ...string) *Session {
 	}
 	m := personal.NewModel(lex, sys)
 	s := New(m)
-	s.MixedInput = true
 	s.Preview02 = preview
 	var dict []english.Word
 	for _, w := range []string{"lsd", "rmb", "hello", "git"} {
@@ -126,7 +125,7 @@ func TestMixedVocabEnglishNoSuggestion(t *testing.T) {
 	}
 }
 
-// 英文模式與非混打模式不受影響。
+// 英文模式不受影響。
 func TestMixedVocabEnglishOtherModes(t *testing.T) {
 	for _, words := range [][]string{nil, {"ls"}} {
 		s := englishVocabSession(t, true, words...)
@@ -135,12 +134,6 @@ func TestMixedVocabEnglishOtherModes(t *testing.T) {
 			if snap := key(s, string(k)); snap.Handled {
 				t.Errorf("%v 英文模式：%q 要直接交給應用程式：%+v", words, k, snap)
 			}
-		}
-		s = englishVocabSession(t, true, words...)
-		s.MixedInput = false
-		snap := mixedType(s, "ls ")
-		if snap.Text() != "孬" {
-			t.Errorf("%v 非混打：%q", words, snap.Text())
 		}
 	}
 }

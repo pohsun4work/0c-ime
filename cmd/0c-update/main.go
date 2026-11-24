@@ -13,19 +13,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
-	"github.com/0c-biggo/0c-ime/core/fuzzy"
 	"github.com/0c-biggo/0c-ime/internal/autoupdate"
 	"github.com/0c-biggo/0c-ime/internal/settings"
 	"github.com/0c-biggo/0c-ime/internal/update"
 )
 
 func installedVersion() (string, error) {
-	if packageManaged() { // 系統套件（#181）：版本記在 distribution.json，沒有收據
-		return distributionVersion(), nil
-	}
 	b, err := os.ReadFile(receiptPath())
 	if os.IsNotExist(err) {
 		return "", nil
@@ -54,66 +49,29 @@ func installedVersion() (string, error) {
 
 // printSettings 以文字顯示目前的設定與模型狀態。機器可讀的版本是 settings -json。
 func printSettings() error {
-	path := settings.Path(filepath.Join(basePath(), "user.json"))
-	r, err := settings.Read(path)
+	r, err := settings.Read(settings.Path(filepath.Join(basePath(), "user.json")))
 	if err != nil {
 		return err
 	}
-	listSettings(os.Stdout, r, path)
+	listSettings(os.Stdout, r)
 	printModelStatus(os.Stdout, modelStatus(dialEngine))
 	return nil
 }
 
-// listSettings 寫出每一項設定的值與簡短說明；path 是下次修改儲存的位置。
-func listSettings(w io.Writer, r settings.Report, path string) {
-	s := r.Settings
-	fmt.Fprintf(w, "設定檔：%s\nselection=%s（neural：神經選字；statistical：只用統計引擎）\npunctuation=%s（提交時補標點，Beta）\ndocument-context=%s（依自己剛提交的文字選字）\n",
-		r.Path, s.Selection, onOff(s.Punctuation), onOff(s.DocumentContext))
-	if r.Path != path {
-		fmt.Fprintf(w, "下次修改儲存至：%s\n", path)
-	}
-	fmt.Fprintf(w, "english-autocomplete=%s（英文自動補字；Tab 接受、Esc 關閉）\n", onOff(s.EnglishAutocomplete))
-	fmt.Fprintf(w, "toggle-key=%s（中英切換鍵：right 右 Shift；both 左右 Shift；left 左 Shift；none 不用 Shift）\n", s.ToggleKey)
-	fmt.Fprintf(w, "shift-tap-ms=%d（單按 Shift 的時限，毫秒：200、300、400、500 或 600；按下到放開在這個時間內才算單按切換中英）\n", s.ShiftTapMillis())
-	locked := ""
-	if s.StartMode == settings.StartEnglish && !s.StartsEnglish() {
-		locked = "；目前不用 Shift 切換，固定從注音開始" // #184
-	}
-	fmt.Fprintf(w, "start-mode=%s（開始時的中英模式：zhuyin 注音；english 英文%s）\n", s.StartMode, locked)
-	fmt.Fprintf(w, "mode-memory=%s（切換視窗後的中英模式：native 照平台原本的做法；shared 全部共用同一個模式）\n", s.ModeMemory)
-	fmt.Fprintf(w, "esc-clear=%s（按 Esc 清除整段組字；off 只清未打完的注音）\n", onOff(s.EscClear))
-	fmt.Fprintf(w, "space-selects=%s（注音打完按空白選字；off 空白輸入空格、↓ 選字）\n", onOff(s.SpaceSelects))
-	fmt.Fprintf(w, "mixed-input=%s（中英混打，試用；off 使用手動中英切換）\n", onOff(s.MixedInput))
-	fmt.Fprintf(w, "candidate-cursor=%s（修改游標前方／後方字詞）\n", s.CandidateCursor)
-	fmt.Fprintf(w, "advance-after-select=%s（選字後游標移到下一個字）\n", onOff(s.AdvanceAfterSelect))
-	fmt.Fprintf(w, "candidate-layout=%s（選字排列）\nemoji-shortcut=%s（表情自選快捷鍵）\n", s.CandidateLayout, s.EmojiShortcut)
-	fmt.Fprintf(w, "emoji-equals-first=%s（將 = 放在 Emoji 第一項）\n", onOff(s.EmojiEqualsFirst))
-	fmt.Fprintf(w, "output-simplified=%s（輸出簡體字：組字和候選仍是繁體，送出時轉成簡體）\n", onOff(s.OutputSimplified))
-	fmt.Fprintf(w, "simplified-hotkey=%s（按 %s 切換輸出簡體字；關閉時這個鍵交給應用程式）\n", onOff(s.SimplifiedHotkey), settings.SimplifiedHotkeyLabel(runtime.GOOS))
-	fmt.Fprintf(w, "selection-keys=%s（選字鍵：1234567890、1234qweras 或 asdfghjkl;；換成字母時數字仍照位置選字）\n", s.SelectionKeys)
-	fmt.Fprintf(w, "ctrl-punctuation=%s（注音模式按 Ctrl＋, . ' ; 與 Ctrl＋Shift＋/ 1 ; 9 0 打全形標點；關閉時交給應用程式）\n", onOff(s.CtrlPunctuation))
-	symbolWidth, _ := s.Value("shift-symbol-halfwidth")
-	fmt.Fprintf(w, "shift-symbol-halfwidth=%s（標點寬度：off 全形標點；on Shift＋符號打半形，例如 Shift＋, 打 ,、Shift＋9 打 (，[ ] 照舊打「」；all 所有符號鍵打按鍵上的字，例如 Shift＋- 打 _、[ 打 [，這時 Ctrl＋標點固定開、聲調選填暫停。全形改按 Ctrl＋符號或 ↓）\n", symbolWidth)
-	fmt.Fprintf(w, "cjk-latin-space=%s（送出時在中文字和英文字母相連處補半形空格，例如「用Python寫」送出「用 Python 寫」；已有空格、標點與數字旁不補，也不跟前面已送出的字補）\n", onOff(s.CJKLatinSpace))
-	fmt.Fprintf(w, "zhuyin-error-hint=%s（打錯注音時提示：按了聲調但讀音沒有字時不收聲調、注音留著修改並提示；緊接著再按同一個聲調照舊留下注音；中英混打與不打聲調時不作用）\n", onOff(s.ZhuyinErrorHint))
-	fmt.Fprintf(w, "personal-learning=%s（記住我選的字詞：關閉時照常選字、神經選字與已學到的照常使用，只是不再記下新的選擇、英文單字和最近用過的符號；我的詞彙不受影響）\n", onOff(s.PersonalLearning))
-	if settings.CapsLockEnglishSetting(runtime.GOOS) {
-		fmt.Fprintf(w, "caps-lock-english=%s（Caps Lock 開著時直接打英文：字母大寫、數字與符號半形，關掉回到注音；關閉時注音模式不理 Caps Lock）\n", onOff(s.CapsLockEnglish))
-	}
-	fmt.Fprintf(w, "toneless=%s（不打聲調也能選字：沒打聲調的字依前後文決定，有打的照聲調，組字中的 ' 切字；只在標準排列有效；開啟時中英混打停用）\n", onOff(s.Toneless))
-	fmt.Fprintf(w, "keyboard-layout=%s（鍵盤排列：standard 標準；eten 倚天 41 鍵，這時不提供 Emoji 選單與中英混打；hsu 許氏，這時不提供中英混打）\n", s.KeyboardLayout)
-	for _, it := range s.Items() {
-		if strings.HasPrefix(it.Key, "style-") {
-			fmt.Fprintf(w, "%s=%s（%s）\n", it.Key, it.Value, it.Label)
-		}
-	}
-	fuzzyConfig := s.FuzzyConfig()
-	for _, p := range fuzzy.Pairs() {
-		fmt.Fprintf(w, "fuzzy-%s=%s（%s 模糊音：off 關閉；select 開候選時合併近音；auto 另在語境明顯支持近音時自動改字，實驗）\n", p.ID(), fuzzyConfig.Mode(p), p.Symbols())
+// listSettings 寫出每一項設定的值與名稱。
+func listSettings(w io.Writer, r settings.Report) {
+	fmt.Fprintf(w, "設定檔：%s\n", r.Path)
+	for _, it := range r.Settings.Items() {
+		fmt.Fprintf(w, "%s=%s（%s）\n", it.Key, it.Value, it.Label)
 	}
 }
 
 func isJSONFlag(arg string) bool { return arg == "-json" || arg == "--json" }
+
+func regularFile(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
+}
 
 func settingsCommand(args []string) error {
 	switch {
@@ -144,11 +102,6 @@ func setCommand(args []string) error {
 		}
 	}
 	res, err := runSet(basePath(), dialEngine, o, notice)
-	for _, p := range o.pairs {
-		if err == nil && p[0] == settings.PreviewRetiredKey { // 舊腳本照常能跑，但說明它已不需要（stdout 的格式不變）
-			fmt.Fprintln(os.Stderr, "0c-update:", settings.PreviewRetiredNote)
-		}
-	}
 	if err != nil {
 		if o.json {
 			return failJSON(os.Stdout, err)
@@ -194,30 +147,15 @@ func onOff(v bool) string {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法：0c-update status|settings|profile|set|models|vocab|api|personal|open-settings|engine|auto|finish|mode|pause|resume|snooze|schedule|verify|check|download|download-now|apply|install|rollback|uninstall [選項]")
+		return fmt.Errorf("用法：0c-update status|settings|set|models|vocab|api|personal|open-settings|engine|auto|finish|mode|pause|resume|snooze|schedule|verify|check|download|download-now|apply|install|rollback|uninstall [選項]")
 	}
 	action := args[0]
-	// macOS 以 root 執行時（sudo installer、MDM）改以登入的使用者身分重新執行，成功時不會返回（#198）
-	if err := dropRoot(args); err != nil {
-		return err
-	}
-	delegateToPersonal(args) // 系統安裝的 0c-update、而官網安裝也在時，交給官網那一份（成功時不會返回）
-	if err := refusePackageManaged(action, args[1:]); err != nil {
-		return err
-	}
-	switch action {
-	case "status", "check", "auto", "finish":
-		// macOS：背景項目的登記留在已安裝的 App（#205）；舊輸入法程式的選單、設定程式與排程都經過這幾個命令。
-		adoptSchedule(action != "status")
-	}
 	switch action {
 	case "settings":
 		return settingsCommand(args[1:])
-	case "profile":
-		return profileCommand(args[1:])
 	case "set":
 		return setCommand(args[1:])
-	case "models": // 個人目錄的神經模型（#180）
+	case "models": // 安裝包內建的神經模型資訊（#180）
 		return modelsCommand(args[1:])
 	case "vocab": // 自訂詞彙（#122）
 		return vocabCommand(args[1:])
@@ -267,14 +205,13 @@ func run(args []string) error {
 	flags := flag.NewFlagSet(action, flag.ContinueOnError)
 	feedURL := flags.String("feed", "", "HTTPS 更新索引 URL")
 	channel := flags.String("channel", "public-beta", "public-beta 或 internal-preview")
-	archive := flags.String("archive", "", "已下載的 tar.gz 或 zip")
+	archive := flags.String("archive", "", "已下載的 zip")
 	checksum := flags.String("sha256", "", "來自可信任來源的壓縮包 SHA-256")
 	bundle := flags.String("bundle", ".", "已解壓且完整的套件目錄")
 	out := flags.String("out", "", "下載保存目錄")
-	backup := flags.String("backup", "", "Linux 回復用備份目錄；Windows 依安裝收據回復上一版")
 	allowDowngrade := flags.Bool("allow-downgrade", false, "明確允許安裝較舊版本")
 	asJSON := flags.Bool("json", false, "status、check：以 JSON 輸出（輸入法選單與設定程式讀取）")
-	diagnostics := flags.Bool("diagnostics", false, "status -json：另附平台診斷（macOS 版本、正在執行的輸入法 App；Windows 的註冊位置、最近用過輸入法的程式與判定），供匯出狀態摘要；輸入法選單的輪詢不帶")
+	diagnostics := flags.Bool("diagnostics", false, "status -json：另附平台診斷（輸入法的註冊位置、最近用過輸入法的程式與判定），供匯出狀態摘要；輸入法選單的輪詢不帶")
 	online := flags.Bool("online", false, "install：從已簽章索引下載並安裝（一行安裝）")
 	restoreUser := flags.Bool("restore-user", false, "rollback 時一併還原升級前保存的個人詞庫（目前的詞庫另存於新備份）")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -298,12 +235,6 @@ func run(args []string) error {
 			return err
 		}
 	}
-	// 之前以 root 安裝留下的檔案，這個帳號改不動；先說明修復指令，不要做到一半才 permission denied（#198）
-	if action == "install" || action == "apply" || action == "rollback" || action == "uninstall" {
-		if err := refuseForeignOwned(args); err != nil {
-			return err
-		}
-	}
 	switch action {
 	case "status":
 		version, err := installedVersion()
@@ -313,25 +244,10 @@ func run(args []string) error {
 		if *asJSON {
 			return statusJSON(version, *diagnostics)
 		}
-		if packageManaged() {
-			if version == "" {
-				version = "（版本未知）"
-			}
-			fmt.Printf("靈犀注音（0c）：%s\n平台：%s/%s\n更新：由系統套件管理員更新\n", version, runtime.GOOS, runtime.GOARCH)
-			printInstalls(os.Stdout, installList())
-			printModelStatus(os.Stdout, modelStatus(dialEngine))
-			return nil
-		}
 		if version == "" {
 			version = "尚未有版本收據"
 		}
 		fmt.Printf("靈犀注音（0c）：%s\n平台：%s/%s\n收據：%s\n", version, runtime.GOOS, runtime.GOARCH, receiptPath())
-		if line := installIntegrity(); line != "" {
-			fmt.Println(line)
-		}
-		if line := ownershipLine(); line != "" {
-			fmt.Println(line)
-		}
 		if engine := autoupdate.PointerVersion(basePath()); engine != "" {
 			fmt.Printf("引擎（核心更新）：%s\n", engine)
 		}
@@ -339,11 +255,10 @@ func run(args []string) error {
 			printState(s)
 		}
 		fmt.Println(scheduleStatus())
-		printInstalls(os.Stdout, installList())
 		printModelStatus(os.Stdout, modelStatus(dialEngine))
 		return nil
 	case "rollback":
-		return rollback(*backup, *restoreUser)
+		return rollback(*restoreUser)
 	case "uninstall":
 		if err := uninstall(); err != nil {
 			return err
@@ -375,7 +290,7 @@ func run(args []string) error {
 				return fmt.Errorf("安裝壓縮包請使用 apply -archive 與 -sha256")
 			}
 			var cleanup func()
-			root, cleanup, err = update.StageIn(scratchRoot(), *archive, *checksum, runtime.GOOS, runtime.GOARCH)
+			root, cleanup, err = update.Stage(*archive, *checksum, runtime.GOOS, runtime.GOARCH)
 			if err != nil {
 				return err
 			}
@@ -429,7 +344,7 @@ func run(args []string) error {
 			if action == "download" {
 				return fmt.Errorf("download 需要 -out 保存目錄")
 			}
-			directory, err = os.MkdirTemp(scratchRoot(), "0c-download-")
+			directory, err = os.MkdirTemp("", "0c-download-")
 			if err != nil {
 				return err
 			}
@@ -447,7 +362,7 @@ func run(args []string) error {
 	} else if action != "apply" || *archive == "" {
 		return fmt.Errorf("check/download 需要 -feed；apply 需要 -feed 或 -archive 與 -sha256")
 	}
-	root, cleanup, err := update.StageIn(scratchRoot(), *archive, *checksum, runtime.GOOS, runtime.GOARCH)
+	root, cleanup, err := update.Stage(*archive, *checksum, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
 	}

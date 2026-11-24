@@ -8,35 +8,32 @@ import (
 )
 
 // fork 的符號規則（規格「符號」）：原則照微軟新注音，以下兩點優先於它。
-//   - ` 打 `（全形時 ‵），不是微軟參考的前導鍵，也不開官方的符號選單（選單只留「游標在符號上按 ↑」）。
+//   - ` 打 `（全形時 ‵），不是微軟參考的前導鍵，也不開官方的符號選單（fork 拿掉了）。
 //   - 明確打的符號（不是注音鍵的符號鍵）沒在組字時也留在組字區、不交給應用程式，但不參與組字：
 //     中英混打時不併進後面的按鍵（`ji3 $ wu0␣` 是 我$天）。緊接在符號後面的數字照數字留（`$20␣` 是 $20␣）。打到一半的英數照舊收下識別字、網址裡的符號（c++、user@x）。
 
-// explicitSymbolKey：排列 l 的這一鍵是明確打的符號：鍵帽上不是字母、數字、空白，排列也不把它當注音鍵；
-// = 開 Emoji 選單時除外（emojiEquals）。
-func explicitSymbolKey(l layout.Layout, r rune, emojiEquals bool) bool {
-	if r < '!' || r > '~' || unicode.IsLetter(r) || unicode.IsDigit(r) || r == '=' && emojiEquals {
+// explicitSymbolKey：這一鍵是明確打的符號：鍵帽上不是字母、數字、空白，也不是注音鍵。
+func explicitSymbolKey(r rune) bool {
+	if r < '!' || r > '~' || unicode.IsLetter(r) || unicode.IsDigit(r) {
 		return false
 	}
-	_, phonetic := l.Symbol(r)
+	_, phonetic := layout.Standard.Symbol(r)
 	return !phonetic
 }
 
 func (s *Session) explicitSymbol(k string) bool {
-	return !s.english && len(k) == 1 && explicitSymbolKey(s.layout, rune(k[0]), s.emojiEquals())
+	return !s.english && len(k) == 1 && !(k == "=" && s.equalsPalette) && explicitSymbolKey(rune(k[0]))
 }
 
 // hoshiSymbolKey 排在官方的符號處理（allSymbolsKey、styleKey）之前：` 與全形時的符號。
-// 微軟參考的標點全形時照微軟：符號鍵都打全形（' ^ ` 是 ’ ︿ ‵，fullWidthText），留在組字區；其他風格照官方。
+// 全形時照微軟：符號鍵都打全形（' ^ ` 是 ’ ︿ ‵，fullWidthText），留在組字區。
 func (s *Session) hoshiSymbolKey(k string) bool {
 	if s.cand != nil || !s.explicitSymbol(k) || s.fullWidthMixedKey(rune(k[0])) {
 		return false
 	}
 	switch {
-	case s.fullWidth && s.InputStyle.Punctuation == "microsoft":
+	case s.fullWidth:
 		s.insertStyleLiteral(s.fullWidthText(k))
-	case s.fullWidth && k == "`":
-		s.insertStyleLiteral("‵")
 	case k == "`":
 		s.insertStyleLiteral(k)
 	default:

@@ -54,13 +54,6 @@ func typeBare(s *Session, zhuyinText string) proto.Snapshot {
 	return snap
 }
 
-func TestTonelessOffKeepsReplacingInitials(t *testing.T) {
-	s := newTonelessSession(false)
-	if snap := typeBare(s, "ㄋㄧㄏ"); snap.Text() != "ㄏㄧ" {
-		t.Fatalf("關閉時新聲母照舊取代舊聲母：%q", snap.Text())
-	}
-}
-
 func TestTonelessSplitsAtNextInitial(t *testing.T) {
 	s := newTonelessSession(true)
 	if snap := typeBare(s, "ㄋㄧㄏㄠ"); snap.Text() != "你ㄏㄠ" {
@@ -146,15 +139,14 @@ func TestTonelessCandidatesMixTones(t *testing.T) {
 func TestTonelessPunctuationFinishesSyllable(t *testing.T) {
 	s := newTonelessSession(true)
 	typeBare(s, "ㄋㄧㄏㄠ")
-	key(s, "<") // Shift＋, 是「，」
-	if snap := key(s, proto.KeyEnter); snap.Commit != "你好，" {
+	key(s, "<")
+	if snap := key(s, proto.KeyEnter); snap.Commit != "你好<" {
 		t.Fatalf("標點之前 ㄏㄠ 完成，不留成注音：%q", snap.Commit)
 	}
 }
 
 func TestTonelessDisablesMixedInput(t *testing.T) {
 	s := newTonelessSession(true)
-	s.MixedInput = true
 	typeBare(s, "ㄋㄧㄏㄠ")
 	if snap := key(s, proto.KeyEnter); snap.Commit != "你好" {
 		t.Fatalf("開著混打的設定也照注音：%q", snap.Commit)
@@ -387,115 +379,14 @@ func TestTonelessNeuralSkipsUntonedSegmentsAndKeepsTonedOnes(t *testing.T) {
 	if snap := s.View(); snap.Text() != "會意" {
 		t.Fatalf("打了聲調的段落照樣評分：%q %v", snap.Text(), readings)
 	}
-	key(s, "<") // ，
+	key(s, "<")
 	typeBare(s, "ㄋㄧㄏㄠ")
-	if snap := key(s, proto.KeyEnter); snap.Commit != "會意，你好" {
+	if snap := key(s, proto.KeyEnter); snap.Commit != "會意<你好" {
 		t.Fatalf("Enter 完成最後一個音節後，前面神經選的字留著：%q %v", snap.Commit, readings)
 	}
 	for _, r := range readings {
 		if strings.ContainsRune(r, zhuyin.UntonedMark) {
 			t.Fatalf("沒打聲調的讀音不送評分器：%v", readings)
-		}
-	}
-}
-
-// 聲調選填停用混打，只保留「我的詞彙」裡的英文詞（負責人決定）：一串注音鍵恰好是使用者加的英文詞時，
-// 接空白、Enter 或標點照字面送出。沒加的英文、打到一半、退格改過的都照注音。
-func TestTonelessKeepsVocabEnglish(t *testing.T) {
-	for _, tc := range []struct{ keys, commit string }{
-		{"ls ", "ls "},
-		{"ls", "ls"},
-		{"kubectl ", "kubectl "},
-		{"git-lfs ", "git-lfs "},
-		{"ipv6 ", "ipv6 "}, // 英文詞裡的聲調鍵
-		{"ls<", "ls，"},
-		{"ji3ls ", "我ls "},
-	} {
-		s := englishVocabSession(t, true, "ls", "kubectl", "git-lfs", "ipv6")
-		s.Toneless = true
-		mixedType(s, tc.keys)
-		if got := key(s, proto.KeyEnter).Commit; got != tc.commit {
-			t.Errorf("%q 送出 %q，要 %q", tc.keys, got, tc.commit)
-		}
-	}
-	for _, tc := range []struct{ keys string }{{"hello "}, {"lsx\b "}, {"l s "}} {
-		s := englishVocabSession(t, true, "ls")
-		s.Toneless = true
-		for _, k := range tc.keys {
-			if k == '\b' {
-				key(s, proto.KeyBackspace)
-				continue
-			}
-			key(s, string(k))
-		}
-		if got := key(s, proto.KeyEnter).Commit; got == "ls " || got == "hello " {
-			t.Errorf("%q 不是加過的英文詞，照注音：%q", tc.keys, got)
-		}
-	}
-	s := englishVocabSession(t, true)
-	s.Toneless = true
-	mixedType(s, "ls ")
-	if got := key(s, proto.KeyEnter).Commit; got == "ls " {
-		t.Errorf("沒加英文詞時照注音：%q", got)
-	}
-}
-
-// 負責人 2026-10-22：聲調選填時組字中的 ' 只切音節、不出頓號；沒有組字時照舊是頓號；關閉時照舊。
-func TestTonelessQuoteSeparatesSyllables(t *testing.T) {
-	s := newTonelessSession(true)
-	typeBare(s, "ㄒㄧ")
-	if snap := key(s, "'"); !snap.Handled || snap.Text() != "西" {
-		t.Fatalf("' 把 ㄒㄧ 不打聲調完成：%q", snap.Text())
-	}
-	typeBare(s, "ㄢ")
-	if snap := key(s, proto.KeyEnter); snap.Commit != "西安" {
-		t.Fatalf("ㄒㄧ'ㄢ：%q", snap.Commit)
-	}
-	// 剛打完聲調、沒有未打完的注音：已經是音節邊界，' 什麼都不做，不多出頓號。
-	typeBare(s, "ㄋㄧˇ")
-	if snap := key(s, "'"); !snap.Handled || snap.Text() != "你" {
-		t.Fatalf("聲調之後的 '：%q", snap.Text())
-	}
-	// 注音還不是完整音節（ㄅ）：不完成、不出頓號，接著打的注音照常。
-	typeBare(s, "ㄏ")
-	if snap := key(s, "'"); snap.Text() != "你ㄏ" {
-		t.Fatalf("不完整音節的 '：%q", snap.Text())
-	}
-	typeBare(s, "ㄠ")
-	if snap := key(s, proto.KeyEnter); snap.Commit != "你好" {
-		t.Fatalf("送出：%q", snap.Commit)
-	}
-	// 沒有組字時照舊是頓號。
-	if snap := key(s, "'"); !snap.Handled || snap.Text() != "、" {
-		t.Fatalf("沒有組字時 ' 是頓號：%q", snap.Text())
-	}
-	key(s, proto.KeyEnter)
-	// 候選開著時 ' 照舊被候選窗吃掉，不切音節。
-	typeBare(s, "ㄏㄨㄟㄧ")
-	key(s, proto.KeyDown)
-	if snap := key(s, "'"); snap.Candidates == nil {
-		t.Fatal("候選開著時 ' 不關候選")
-	}
-	// 關閉聲調選填：組字中的 ' 照舊是頓號。
-	off := newTonelessSession(false)
-	typeBare(off, "ㄋㄧˇ")
-	key(off, "'")
-	if snap := key(off, proto.KeyEnter); snap.Commit != "你、" {
-		t.Fatalf("關閉時 ' 是頓號：%q", snap.Commit)
-	}
-}
-
-// 聲調選填只在標準排列生效：倚天 41 鍵的 ' 是 ㄘ，許氏一鍵多用；設定開著也照原本的打法。
-func TestTonelessOnlyOnStandardLayout(t *testing.T) {
-	for _, l := range []layout.Layout{layout.ETen, layout.Hsu} {
-		s := newTonelessSession(true)
-		s.SetLayout(l)
-		var snap proto.Snapshot
-		for _, r := range "ㄋㄧㄏ" {
-			snap = key(s, string([]rune(l.Keys(zhuyin.Syllable(string(r))))[0]))
-		}
-		if strings.Contains(snap.Text(), "你") {
-			t.Errorf("%s：不打聲調不生效：%q", l.Name(), snap.Text())
 		}
 	}
 }
@@ -513,7 +404,7 @@ func TestTonelessDisplaysWithoutMark(t *testing.T) {
 	}
 }
 
-// syllablePrior（簡拼保留哪些讀音、九宮格讀音的排序）只看系統詞庫：記在 session 裡的值不能取決於 session 開始時
+// syllablePrior（簡拼保留哪些讀音）只看系統詞庫：記在 session 裡的值不能取決於 session 開始時
 // 學過什麼，否則同一個人、同樣的按鍵在不同時間開的 session 結果不同。
 func TestSyllablePriorIgnoresLearning(t *testing.T) {
 	s := newTonelessSession(true)

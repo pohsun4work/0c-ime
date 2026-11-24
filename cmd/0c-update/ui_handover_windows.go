@@ -232,7 +232,3 @@ func waitProcessExit(p uiProcess, wait time.Duration) bool {
 	ev, err := windows.WaitForSingleObject(h, uint32(wait/time.Millisecond))
 	return err == nil && ev == windows.WAIT_OBJECT_0
 }
-
-// shellPendingAfterInstall：外殼裝好不等重新登入（#253）。TSF DLL 留在已經開著的應用程式裡照常打字，重新開啟才換成
-// 新版；協調器接著核對收據與新引擎（ShellActiveWithoutRelogin）。
-func shellPendingAfterInstall() bool { return false }

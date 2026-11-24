@@ -19,11 +19,11 @@ func choseShemma(s *Session) {
 func TestRerankCacheFollowsPersonalDataChanges(t *testing.T) {
 	s := newShemeSession(t)
 	typeReadingLocal(s, "ㄕㄜˊ ㄇㄜ˙")
-	if got := key(s, "<").Text(); got != "甚麼，" {
+	if got := key(s, "<").Text(); got != "甚麼<" {
 		t.Fatalf("測試前提：評分器應把首選換成「甚麼」，實得 %q", got)
 	}
 	choseShemma(s)
-	if got := typeSyl(s, "ㄕˋ").Text(); got != "什麼，是" {
+	if got := typeSyl(s, "ㄕˋ").Text(); got != "什麼<是" {
 		t.Fatalf("個人資料改變後前一段應改回使用者選過的「什麼」，實得 %q", got)
 	}
 }

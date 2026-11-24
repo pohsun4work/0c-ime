@@ -2,8 +2,7 @@
 //! WM_IME_COMPOSITION 的結果字串，排在程式自己的按鍵訊息之後：TestKeyDown 先送出英文單字再把空白交給程式，
 //! 程式先打出空白（TranslateMessage 的 WM_CHAR）、之後才收到單字（.14 的訊息紀錄）；方向鍵先移動插入點，單字插到別處。
 //! 以 edit.rs 的假文件當系統相容層的文字儲存，App 照這個順序模擬程式看到的文字：交給程式的鍵先作用，
-//! 這一鍵期間送出的結果字串之後才插入。需要英文自動補字開著的測試引擎：ZUIN_TEST_ENGLISH_PIPE 或
-//! ZUIN_TEST_CAPS_LOWER_PIPE（#112，同樣開著英文自動補字）；都沒設就略過。
+//! 這一鍵期間送出的結果字串之後才插入。需要英文自動補字開著的測試引擎 ZUIN_TEST_ENGLISH_PIPE；沒設就略過。
 //!
 //! #262：同一個順序讓組字中的 Ctrl 組合鍵（Ctrl+A、Ctrl+S、Ctrl+Home）比組字先作用：外殼在 A 的 TestKeyDown 才送出
 //! 組字，程式先全選／存檔、之後才收到組字。注音組字的測試用一般的 ZUIN_TEST_PIPE。
@@ -22,9 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_core::w;
 
 fn engine() -> Option<String> {
-    std::env::var("ZUIN_TEST_ENGLISH_PIPE")
-        .or_else(|_| std::env::var("ZUIN_TEST_CAPS_LOWER_PIPE"))
-        .ok()
+    std::env::var("ZUIN_TEST_ENGLISH_PIPE").ok()
 }
 
 /// 沒有 Shift、沒有 Caps Lock（只改本執行緒的鍵盤狀態）。
@@ -472,12 +469,7 @@ fn open(pipe: &str, static_flags: u32) -> Host {
 
 /// 注音模式（預設）、文件原本是「前」的宿主（#262），用一般的 ZUIN_TEST_PIPE。
 fn open_zhuyin(static_flags: u32) -> Option<Host> {
-    open_zhuyin_on("ZUIN_TEST_PIPE", static_flags)
-}
-
-/// 同上，引擎的管道名稱取自指定的環境變數（#192 的 ZUIN_TEST_HOTKEY_PIPE 是設定開著簡體字快捷鍵的獨立引擎）。
-fn open_zhuyin_on(env: &str, static_flags: u32) -> Option<Host> {
-    let pipe = std::env::var(env).ok()?;
+    let pipe = std::env::var("ZUIN_TEST_PIPE").ok()?;
     let (doc, ctx) = host(Sync::Run);
     doc.static_flags.set(static_flags);
     let service = ComObject::new(TextService::new());
@@ -726,8 +718,8 @@ fn assert_ctrl_shortcut_follows_text(h: &mut Host, vk: u32, composed: &str, tag:
 #[test]
 fn imm32_mixed_english_composition_follows_the_shortcut_rules() {
     // #66：中英混打（中文模式）的組字含英文字母，仍是一般組字：單按 Ctrl 不送出，Ctrl+S 經相容層送出整段，
-    // 重排在字之後。需要 ZUIN_TEST_MIXED_PIPE（設定開著 mixed_input 的獨立引擎）；沒設就略過。
-    let Some(mut h) = open_zhuyin_on("ZUIN_TEST_MIXED_PIPE", TS_SS_TRANSITORY) else { return };
+    // 重排在字之後。
+    let Some(mut h) = open_zhuyin(TS_SS_TRANSITORY) else { return };
     plain_keyboard();
     h.view_is_app();
     h.cuas.kind.set(HostKind::DefWindowProc);
@@ -1042,41 +1034,6 @@ fn imm32_system_and_ime_keys_are_not_reposted() {
         h.cuas.hotkey.set(false);
         h.cuas.completions.borrow_mut().clear();
     }
-}
-
-#[test]
-fn imm32_simplified_hotkey_still_toggles() {
-    // #192：設定開著時 Ctrl+Shift+F11 吃下切換簡體字、不送出組字，也不重排（#66 在這之後才判斷）。
-    // 需要 ZUIN_TEST_HOTKEY_PIPE（設定開著簡體字快捷鍵的獨立引擎）；沒設就略過。
-    let Ok(pipe) = std::env::var("ZUIN_TEST_HOTKEY_PIPE") else { return };
-    // 這個測試真的切換引擎全域的「輸出簡體字」：與同一引擎的其他測試互斥，失敗時也把設定切回繁體。
-    let _engine = crate::hotkey_engine_lock();
-    struct RestoreTraditional(String);
-    impl Drop for RestoreTraditional {
-        fn drop(&mut self) {
-            let mut s = Session::with_client(crate::ipc::Client::with_pipe(&self.0));
-            if s.simplified() == Some(true) {
-                s.output_simplified(false);
-            }
-        }
-    }
-    let _restore = RestoreTraditional(pipe);
-    let Some(mut h) = open_zhuyin_on("ZUIN_TEST_HOTKEY_PIPE", TS_SS_TRANSITORY) else { return };
-    let word = composing_in_default_host(&mut h);
-    for round in 0..2 {
-        // 按兩次：切換之後再切回來，不改引擎的設定。
-        set_mods(true, false, false, true);
-        let eaten = h.press(0x7a, scan_of(0x7a), Act::Shortcut);
-        set_mods(false, false, false, false);
-        assert!(eaten, "吃下切換");
-        let now = h.service.state.borrow().session.simplified();
-        assert_eq!(now, Some(round == 0), "第 {} 次按下真的切換了簡體字設定", round + 1);
-        assert!(h.composing(), "組字不送出");
-        assert_eq!(h.doc.composing_text(), word);
-    }
-    assert!(h.cuas.completions.borrow().is_empty(), "沒有經相容層送出");
-    assert!(h.cuas.history.borrow().is_empty(), "也沒有重排");
-    assert!(h.app.fired.is_empty());
 }
 
 #[test]

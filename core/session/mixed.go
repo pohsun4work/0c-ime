@@ -10,6 +10,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/input"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
@@ -31,7 +32,7 @@ func (s *Session) mixedComposer(raw string) (zhuyin.Composer, bool) {
 	var c zhuyin.Composer
 	seen := map[zhuyin.Class]bool{}
 	for _, k := range raw {
-		sym, ok := s.layout.Symbol(k)
+		sym, ok := layout.Standard.Symbol(k)
 		cl := zhuyin.ClassOf(sym)
 		if !ok || cl == zhuyin.None || cl == zhuyin.Tone || seen[cl] {
 			return zhuyin.Composer{}, false
@@ -303,7 +304,7 @@ func (s *Session) openMixedCandidates() {
 	// 結尾是聲調鍵、但組不成中文而照字面顯示的按鍵（co6）：混打照舊顯示原按鍵，↓ 另給帶聲調的
 	// 原樣注音（ㄏㄟˊ），與一般模式原樣留下的音節相同（#109）。
 	if raw := s.mixed.raw; len(raw) > 1 {
-		if sym, ok := s.layout.Symbol(rune(raw[len(raw)-1])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
+		if sym, ok := layout.Standard.Symbol(rune(raw[len(raw)-1])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
 			if comp, ok := s.mixedComposer(raw[:len(raw)-1]); ok {
 				if done, ok := comp.Add(sym); ok {
 					add(string(done))
@@ -364,7 +365,7 @@ func (s *Session) mixedToneChars() (int, zhuyin.Syllable, []string) {
 	if len(raw) < 2 || s.mixed.accepted != "" {
 		return 0, "", nil
 	}
-	sym, ok := s.layout.Symbol(rune(raw[len(raw)-1]))
+	sym, ok := layout.Standard.Symbol(rune(raw[len(raw)-1]))
 	if !ok || zhuyin.ClassOf(sym) != zhuyin.Tone {
 		return 0, "", nil
 	}
@@ -455,7 +456,7 @@ func (s *Session) neutralFallback(done zhuyin.Syllable) zhuyin.Syllable {
 }
 
 func (s *Session) finishMixedTone(key string) bool {
-	sym, ok := s.layout.Symbol([]rune(key)[0])
+	sym, ok := layout.Standard.Symbol([]rune(key)[0])
 	if !ok || zhuyin.ClassOf(sym) != zhuyin.Tone || s.mixed.choice == 1 || s.mixed.accepted != "" {
 		return false
 	}
@@ -698,13 +699,13 @@ func (s *Session) mixedBoundary(raw, key string, tone rune) (int, zhuyin.Syllabl
 // 句首機率會隨個人用字大幅變動（整串照字面送出的句子讓個人模型學到「句首接天」，們的句首機率掉到 5e-5）。
 func (s *Session) mixedAfterTypo(raw string, tone rune) (int, zhuyin.Syllable, bool) {
 	at := strings.LastIndexFunc(raw, func(r rune) bool {
-		sym, ok := s.layout.Symbol(r)
+		sym, ok := layout.Standard.Symbol(r)
 		return ok && r != ' ' && zhuyin.ClassOf(sym) == zhuyin.Tone
 	}) + 1
 	if at < 2 || at >= len(raw) || unicode.IsDigit(rune(raw[at-2])) && !s.reversedTone(raw[:at]) || !s.keysInSyllableOrder(raw[at:]) {
 		return 0, "", false
 	}
-	if strings.ContainsFunc(raw[:at], func(r rune) bool { _, ok := s.layout.Symbol(r); return !ok }) {
+	if strings.ContainsFunc(raw[:at], func(r rune) bool { _, ok := layout.Standard.Symbol(r); return !ok }) {
 		return 0, "", false // 大寫、底線等不是注音鍵的字元：識別字或英文，不是打錯的注音
 	}
 	if !strings.ContainsFunc(raw[:at], unicode.IsLetter) {
@@ -947,7 +948,7 @@ func (s *Session) reversedAlnum(raw string) bool {
 func (s *Session) swappedVowels(raw string) bool {
 	var cls []zhuyin.Class
 	for _, k := range raw {
-		sym, ok := s.layout.Symbol(k)
+		sym, ok := layout.Standard.Symbol(k)
 		if !ok {
 			return false
 		}
@@ -1038,7 +1039,7 @@ func capsThenDigits(raw string) bool {
 
 // keyIsInitial：這個鍵在目前的鍵盤排列是聲母。
 func (s *Session) keyIsInitial(r rune) bool {
-	sym, ok := s.layout.Symbol(r)
+	sym, ok := layout.Standard.Symbol(r)
 	return ok && zhuyin.ClassOf(sym) == zhuyin.Initial
 }
 
@@ -1108,7 +1109,7 @@ func (s *Session) mixedSyllableScore(syl zhuyin.Syllable) float64 {
 func (s *Session) keysInSyllableOrder(keys string) bool {
 	last := zhuyin.None
 	for _, k := range keys {
-		sym, _ := s.layout.Symbol(k)
+		sym, _ := layout.Standard.Symbol(k)
 		c := zhuyin.ClassOf(sym)
 		if c <= last {
 			return false
@@ -1126,7 +1127,7 @@ func (s *Session) positionalKeysIn(pos, length int) bool {
 		if keys == "" {
 			continue
 		}
-		if sym, ok := s.layout.Symbol(rune(keys[len(keys)-1])); keys[len(keys)-1] == ' ' || ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
+		if sym, ok := layout.Standard.Symbol(rune(keys[len(keys)-1])); keys[len(keys)-1] == ' ' || ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
 			keys = keys[:len(keys)-1]
 		}
 		if keys != "" && !s.keysInSyllableOrder(keys) {
@@ -1325,7 +1326,7 @@ func (s *Session) reviseDigitWord(k string) {
 	case len(raw) != 1 || !strings.Contains(".,/-", raw):
 		return
 	default:
-		if sym, ok := s.layout.Symbol(rune(k[0])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
+		if sym, ok := layout.Standard.Symbol(rune(k[0])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
 			if c, ok := s.mixedComposer(raw); ok {
 				if done, ok := c.Add(sym); ok && s.readingReachable(done) && !s.rareDigitReading(raw, sym) {
 					return
@@ -1560,7 +1561,7 @@ func (s *Session) mixedKey(k string) bool {
 	// #208：↓ 選了注音解釋（2 → ㄉ、1 → ㄅ）之後接著打的鍵和它組不成同一個音節時（ㄉ 後面的 ㄊ），選好的注音先原樣留下，
 	// 這一鍵開始新的待定按鍵；以前併成同一串、整串照字面顯示（我2wu0）。組得成的（ㄉ＋ㄜ）照舊接著組字，空白與聲調鍵由 finishMixedTone 完成。
 	if s.mixed.choice == 2 && k != " " {
-		if sym, ok := s.layout.Symbol(rs[0]); !ok || zhuyin.ClassOf(sym) != zhuyin.Tone {
+		if sym, ok := layout.Standard.Symbol(rs[0]); !ok || zhuyin.ClassOf(sym) != zhuyin.Tone {
 			if _, ok := s.mixedComposer(s.mixed.raw + k); !ok {
 				s.keepMixedSyllable(zhuyin.Tone1, s.mixed.raw)
 			}
@@ -1577,12 +1578,12 @@ func (s *Session) mixedKey(k string) bool {
 		s.insertMixedLiteral(" ", false, false)
 		return true
 	}
-	if sym, ok := s.layout.Symbol(rs[0]); ok && zhuyin.ClassOf(sym) == zhuyin.Tone && s.mixed.raw == "" {
+	if sym, ok := layout.Standard.Symbol(rs[0]); ok && zhuyin.ClassOf(sym) == zhuyin.Tone && s.mixed.raw == "" {
 		s.insertMixedLiteral(k, false, false)
 		return true
 	}
 	// 打到一半的英文裡 _ ^ 是識別字、算式的一部分（user_name、x^2），不當破折號／刪節號（#118）。
-	if _, ok := s.layout.Punct(rs[0]); ok && !(s.mixed.raw != "" && strings.ContainsAny(k, "_^")) {
+	if _, ok := layout.Standard.Punct(rs[0]); ok && !(s.mixed.raw != "" && strings.ContainsAny(k, "_^")) {
 		if s.mixed.raw == "" {
 			// 緊接在字面數字後面的 :（3:00、7:33，#176）跟 10:30 一樣是半形、併進待定按鍵；3 4 6 7 是聲調鍵，
 			// 沒在組字時先照字面送出，: 來的時候待定按鍵是空的。
@@ -1607,7 +1608,7 @@ func (s *Session) mixedKey(k string) bool {
 		if literal && k != "<" && k != ">" {
 			s.insertMixedLiteral(k, false, false)
 		} else {
-			p, _ := s.layout.Punct(rs[0])
+			p, _ := layout.Standard.Punct(rs[0])
 			s.insertPunctKey(k, p)
 		}
 		return true

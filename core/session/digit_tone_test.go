@@ -12,7 +12,7 @@ import (
 )
 
 // #175（方案 b）用的小詞庫：ㄓ˙、ㄅㄢ˙ 沒有字，要靠 #69 的輕聲退回一聲才組得成。
-func digitToneSession(mixed bool) *Session {
+func digitToneSession() *Session {
 	lex, sys := lexicon.NewMem(), lm.NewMem()
 	for _, e := range []struct {
 		w, r string
@@ -27,7 +27,6 @@ func digitToneSession(mixed bool) *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = mixed
 	return s
 }
 
@@ -52,24 +51,13 @@ func TestMixedDigitToneStaysNumber(t *testing.T) {
 		{"183", "把"},         //
 		{"ji353g4", "我只是"},   //
 	} {
-		s := digitToneSession(true)
+		s := digitToneSession()
 		if snap := mixedType(s, tc.keys); snap.Text() != tc.want {
 			t.Errorf("%q 顯示 %q，要 %q", tc.keys, snap.Text(), tc.want)
 		}
 		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
 			t.Errorf("%q 提交 %q，要 %q", tc.keys, got, tc.want)
 		}
-	}
-}
-
-// 沒開混打時 #69 照舊：ㄓ˙ 退回一聲出「之」。
-func TestDigitToneNeutralFallbackWithoutMixed(t *testing.T) {
-	s := digitToneSession(false)
-	for _, k := range []string{"5", "7"} {
-		key(s, k)
-	}
-	if got := key(s, proto.KeyEnter).Commit; got != "之" {
-		t.Fatalf("混打關閉時 5 7 提交 %q，要「之」", got)
 	}
 }
 
@@ -80,7 +68,7 @@ func TestMixedDigitToneDownOffersNumberSecond(t *testing.T) {
 		{"53", "只", "53"},
 		{"ji3824", "大", "824"}, // #190：中文後面反序出的字也一樣
 	} {
-		s := digitToneSession(true)
+		s := digitToneSession()
 		mixedType(s, tc.keys)
 		items := downItems(key(s, proto.KeyDown))
 		if len(items) < 2 || items[0] != tc.first || items[1] != tc.number {

@@ -184,7 +184,7 @@ func startEngine(server, data, profile string, threads int, statistical bool) (*
 	}
 	sock := socketPath(dir)
 	// -idle-exit：hoshi-eval 被強制結束時，引擎沒有連線一分鐘後自己收掉。
-	args := []string{"-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-install-watch", "off", "-idle-exit", "1m"}
+	args := []string{"-data", data, "-user", filepath.Join(dir, "user.json"), "-socket", sock, "-idle-exit", "1m"}
 	if threads > 0 {
 		args = append(args, "-neural-threads", strconv.Itoa(threads))
 	}
@@ -366,8 +366,6 @@ const shellCtrlKeys = ",.';?!:()[]"
 type shell struct {
 	handle      func(proto.Request) (proto.Snapshot, int64, error)
 	idle        string
-	idleFull    string
-	ctrlOn      bool
 	ctrlKeys    string
 	shiftSpace  string
 	snap        proto.Snapshot
@@ -378,9 +376,8 @@ type shell struct {
 }
 
 func newShell(info map[string]string, handle func(proto.Request) (proto.Snapshot, int64, error)) *shell {
-	return &shell{handle: handle, idle: info["idle_keys"], idleFull: info["idle_keys_full_width"],
-		ctrlOn: info["ctrl_punctuation"] == "true", ctrlKeys: info["ctrl_punctuation_keys"],
-		shiftSpace: info["input_style_shift_space"], snap: proto.Snapshot{Mode: proto.ModeZhuyin}}
+	return &shell{handle: handle, idle: info["idle_keys"],
+		ctrlKeys: info["ctrl_punctuation_keys"], shiftSpace: info["shift_space"], snap: proto.Snapshot{Mode: proto.ModeZhuyin}}
 }
 
 // send 送一個請求進引擎，收下快照與送出的字。
@@ -403,7 +400,7 @@ func (s *shell) wants(key string) bool {
 	english := s.snap.Mode == proto.ModeEnglish
 	if c, ok := ctrlChar(key); ok {
 		// 最早的六個鍵不看 ctrl_punctuation_keys（keys.rs 的 ctrl_punct_known）
-		return !english && s.ctrlOn && strings.IndexByte(shellCtrlKeys, c) >= 0 && strings.IndexByte(",.';?!"+s.ctrlKeys, c) >= 0
+		return !english && strings.IndexByte(shellCtrlKeys, c) >= 0 && strings.IndexByte(",.';?!"+s.ctrlKeys, c) >= 0
 	}
 	if key == proto.KeyShiftSpace || s.snap.FullWidth && fullWidthExtra(key) {
 		return true
@@ -419,9 +416,6 @@ func (s *shell) wants(key string) bool {
 	}
 	if key == " " || namedKeys[key] {
 		return false
-	}
-	if s.snap.FullWidth {
-		return strings.Contains(s.idleFull, key)
 	}
 	return strings.Contains(s.idle, key)
 }

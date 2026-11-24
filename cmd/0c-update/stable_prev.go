@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -12,22 +11,14 @@ import (
 	"github.com/0c-biggo/0c-ime/internal/updatew"
 )
 
-// keepsPreviousUpdater：換穩定副本時保留上一版（bin\0c-update.prev.exe）。只有 Windows 的啟動器 0c-updatew 會在
-// 新版連續異常時改執行它（internal/updatew）；Linux 的 systemd timer、macOS 的 launchd 直接執行 0c-update，留著用不到。
-var keepsPreviousUpdater = runtime.GOOS == "windows"
-
 // previousUpdater 是上一版更新器的位置，跟穩定副本同一個目錄。
 func previousUpdater(base string) string { return filepath.Join(base, "bin", updatew.PreviousName) }
 
-// replaceStableCopy 把排程用的穩定副本換成 src。Windows 上換下來的那一份改名為 0c-update.prev.exe（只留一份），
-// 讓啟動器在新版有問題時有東西可以退回；換下來的是啟動器已判定異常的那一份時不保留，留著原本可用的上一版。
+// replaceStableCopy 把排程用的穩定副本換成 src。換下來的那一份改名為 0c-update.prev.exe（只留一份），
+// 讓啟動器 0c-updatew 在新版連續異常時有東西可以退回（internal/updatew）；換下來的是啟動器已判定異常的那一份時不保留，留著原本可用的上一版。
 // fork 由 replaceStableUpdater（fork_updates.go）包一層。
 func replaceStableCopy(src, base string) error {
-	dst := stableUpdater(base)
-	if !keepsPreviousUpdater {
-		return replaceUpdater(src, dst)
-	}
-	return replaceKeepingPrevious(src, dst, previousUpdater(base), func(hash string) bool { return !updatew.Failing(base, hash) })
+	return replaceKeepingPrevious(src, stableUpdater(base), previousUpdater(base), func(hash string) bool { return !updatew.Failing(base, hash) })
 }
 
 // replaceKeepingPrevious 以 src 換掉 dst，dst 原本的內容改名成 prev（keep 回報 false 時不保留）。

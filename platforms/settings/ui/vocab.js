@@ -186,7 +186,6 @@ window.ZcVocab = function (ctx) {
     });
     el.phraseList = h('div', {});
     el.panels.phrases.append(
-      h('p', { class: 'muted vlead' }, '在注音模式按 = 開選單，就能從「我的片語」選取。'),
       h('div', { class: 'card vtop' }, h('div', { class: 'vaddrow' }, el.phraseInput, h('button', { type: 'button', class: 'primary', onclick: addPhrase }, '加入'))),
       el.phraseList);
     el.batches = h('div', {});
@@ -848,7 +847,6 @@ window.ZcVocab = function (ctx) {
   // ---- 靈犀學到的（#182：保留／移除／不再學、勾選多個一起處理、復原，以及「不再學的詞」） ----
   // 學到的詞存在學習資料（user.json），不是 vocab.json 的批次：移除、不再學、恢復學習的復原編號由引擎發（learned-undo），
   // 只留在引擎記憶體裡，所以只在底部提示給「復原」，不進「最近變更」。
-  const undoKey = () => (/^macos\//.test(ctx.platform ? ctx.platform() : '') ? 'Shift＋⌫' : 'Shift＋Delete');
   async function loadLearned() {
     const forgotten = v.learnedView === 'forgotten';
     let r, f;
@@ -955,7 +953,7 @@ window.ZcVocab = function (ctx) {
     el.learned.append(h('div', { class: 'vhead' },
       h('button', { type: 'button', class: 'link vback', 'data-k': 'back-learned', onclick: () => setLearnedView('learned') }, '‹ 靈犀學到的'),
       h('strong', { class: 'vsubtitle' }, '不再學的詞')));
-    el.learned.append(h('p', { class: 'muted vlead' }, '你按過「不再學」或「忘記」、在候選窗用 ' + undoKey() + ' 忘記的詞，以及舊版刪掉的自訂詞，打字時都不會自動學它們。按「恢復學習」之後，照常打字、選字就會再學回來；已經清掉的紀錄不會回來。'));
+    el.learned.append(h('p', { class: 'muted vlead' }, '你按過「不再學」或「忘記」、在候選窗用 Shift＋Delete 忘記的詞，以及舊版刪掉的自訂詞，打字時都不會自動學它們。按「恢復學習」之後，照常打字、選字就會再學回來；已經清掉的紀錄不會回來。'));
     if (v.learnedError) {
       el.learned.append(h('div', { class: 'card vempty' }, h('p', { class: 'muted' },
         v.learnedError === 'engine' ? '輸入法引擎執行時才看得到不再學的詞。' : '無法讀取：' + v.learnedError)));
@@ -1265,7 +1263,6 @@ window.ZcVocab = function (ctx) {
   function snippet(tool, view, token) {
     const base = 'http://' + view.addr;
     const mcp = view.mcp_url || base + '/mcp';
-    const windows = /^windows\//.test(ctx.platform());
     const auth = 'Authorization: Bearer ' + token;
     switch (tool) {
       case 'chat': return [
@@ -1276,24 +1273,15 @@ window.ZcVocab = function (ctx) {
         '用 suggest_readings 查注音；破音字或查不到的先列出來問我，',
         '確認後再用 add_words 一次加入，最後告訴我加了哪些。',
       ].join('\n');
-      case 'claude-code': return windows
-        ? 'claude mcp add --transport http 0c ' + mcp + ' --header "' + auth + '"'
-        : 'claude mcp add --transport http 0c ' + mcp + ' \\\n  --header "' + auth + '"';
+      case 'claude-code': return 'claude mcp add --transport http 0c ' + mcp + ' --header "' + auth + '"';
       case 'cursor': return JSON.stringify({ mcpServers: { '0c': { url: mcp, headers: { Authorization: 'Bearer ' + token } } } }, null, 2);
       case 'vscode': return JSON.stringify({ servers: { '0c': { type: 'http', url: mcp, headers: { Authorization: 'Bearer ' + token } } } }, null, 2);
       case 'stdio': return JSON.stringify({ mcpServers: { '0c': { command: ctx.mcpPath() || '0c-mcp' } } }, null, 2);
-      case 'script': return windows ? [
+      case 'script': return [
         '$h = @{ Authorization = "Bearer ' + token + '" }',
         'Invoke-RestMethod -Headers $h "' + base + '/v1/words?q=陳"',
         'Invoke-RestMethod -Method Post -Headers $h -ContentType "application/json; charset=utf-8" `',
         '  -Body ([Text.Encoding]::UTF8.GetBytes(\'{"words":[{"word":"陳怡君","readings":["ㄔㄣˊ ㄧˊ ㄐㄩㄣ"]}]}\')) `',
-        '  ' + base + '/v1/words',
-      ].join('\n') : [
-        'curl -H "' + auth + '" \\',
-        '  --get --data-urlencode "q=陳" ' + base + '/v1/words',
-        'curl -X POST -H "' + auth + '" \\',
-        '  -H "Content-Type: application/json" \\',
-        '  -d \'{"words":[{"word":"陳怡君","readings":["ㄔㄣˊ ㄧˊ ㄐㄩㄣ"]}]}\' \\',
         '  ' + base + '/v1/words',
       ].join('\n');
       default: return '';

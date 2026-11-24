@@ -37,7 +37,6 @@ func positionalKeysSession() *Session {
 		}
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	var words []english.Word
 	for _, w := range []string{"a", "hello"} {
 		words = append(words, english.Word{Text: w, Weight: 65})

@@ -6,6 +6,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
 	"github.com/0c-biggo/0c-ime/core/input"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
@@ -109,8 +110,6 @@ func (s *Session) insertSyllableLiteral(comp zhuyin.Composer, syl zhuyin.Syllabl
 // 該音節已有的同類介音或韻母、而且改完的讀音在某個聲調有字，就把音節收回注音暫存（不帶聲調），
 // 等使用者重新按聲調，同按聲調之前直接改注音。聲母不取代、原本沒有的介音／韻母不補：刻意留下的
 // 原樣注音（ㄏㄟˊ、ㄅ）後面最常接的是新的字（ㄏㄟˊ你、ㄏㄟˊ我、ㄉ一），不能被吃掉。
-//
-// 按鍵依該音節按聲調前的注音解讀（#183）：許氏打 ㄍㄨㄜˊ 之後的 h 是 ㄛ，不是新音節的 ㄏ。
 func (s *Session) retypeSyllableLiteral(key rune) bool {
 	if !s.comp.Empty() || s.cursor == 0 {
 		return false
@@ -119,7 +118,7 @@ func (s *Session) retypeSyllableLiteral(key rune) bool {
 	if !ok || p.prefix || p.end()+p.mark() != s.cursor {
 		return false
 	}
-	comp, sym, ok := s.layout.Press(p.composer, key)
+	comp, sym, ok := layout.Standard.Press(p.composer, key)
 	cl := zhuyin.ClassOf(sym)
 	if !ok || cl != zhuyin.Medial && cl != zhuyin.Final {
 		return false
@@ -161,19 +160,18 @@ type syllableState struct {
 	displayed       map[int]string
 	rejected        []personal.RejectedSeg
 	spatial         map[int][]input.Hyp
-	nine            map[int][]zhuyin.Syllable
 }
 
 // 插入、刪除都會換成新的切片與對照表，淺複製就足以還原。
 func (s *Session) saveSyllables() syllableState {
 	return syllableState{s.syls, s.cursor, s.locks, s.literals, s.pendingLiterals, s.mixedKeys, s.literalKeys, s.mixedOrigins, s.displayed,
-		append([]personal.RejectedSeg(nil), s.rejected...), s.spatial, s.nine}
+		append([]personal.RejectedSeg(nil), s.rejected...), s.spatial}
 }
 
 func (s *Session) restoreSyllables(st syllableState) {
 	s.syls, s.cursor, s.locks, s.literals, s.pendingLiterals = st.syls, st.cursor, st.locks, st.literals, st.pendingLiterals
 	s.mixedKeys, s.literalKeys, s.mixedOrigins, s.displayed, s.rejected = st.mixedKeys, st.literalKeys, st.mixedOrigins, st.displayed, st.rejected
-	s.spatial, s.nine = st.spatial, st.nine
+	s.spatial = st.spatial
 }
 
 // completeDecodable 回報游標前剛收進的音節所在的一段（字面文字之間）能否解成完整的詞，
@@ -247,7 +245,7 @@ func (s *Session) syllableLiteralAt(pos int) (pendingLiteral, bool) {
 }
 
 // openSyllableLiteral 讓 ↓ 把原樣音節當成一個整體：第一項是畫面上帶聲調的原樣注音，
-// 其後是同一讀音的其他聲調，同符號選單「同組可重選」的規則；選了照樣是原樣文字。
+// 其後是同一讀音的其他聲調，同符號按 ↓「同組可重選」的規則；選了照樣是原樣文字。
 func (s *Session) openSyllableLiteral(p pendingLiteral) {
 	syl := p.syllable()
 	items := []string{syl.Text()}

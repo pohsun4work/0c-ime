@@ -90,7 +90,7 @@ func TestDocumentContextDoesNotCrossPunctuationOrPersist(t *testing.T) {
 	s.Handle(proto.Request{Type: proto.Context, On: true, ContextID: id})
 	typeSyl(s, "ㄐㄧㄥˇ")
 	key(s, "<")
-	if got := typeSyl(s, "ㄐㄧㄥˇ").Text(); got != "景，井" {
+	if got := typeSyl(s, "ㄐㄧㄥˇ").Text(); got != "景<井" {
 		t.Fatal(got)
 	}
 	key(s, proto.KeyEnter)

@@ -49,8 +49,8 @@ func TestCandidateCursorSingleCharacterDirectionAndEdges(t *testing.T) {
 		for _, at := range []int{0, 1, 2} {
 			s := cursorSession()
 			s.CandidateBeforeCursor = before
-			typeSyl(s, "ㄊㄚ")
-			typeSyl(s, "ㄏㄠˇ")
+			symbolSyl(s, "ㄊㄚ")
+			symbolSyl(s, "ㄏㄠˇ")
 			key(s, proto.KeyLeft)
 			key(s, proto.KeyLeft)
 			for range at {
@@ -80,7 +80,7 @@ func TestCandidateCursorSingleCharacterDirectionAndEdges(t *testing.T) {
 func TestCandidateBeforeCursorWholeWordAndLengthAnchor(t *testing.T) {
 	s := cursorSession()
 	for _, syl := range []string{"ㄨㄛˇ", "ㄈㄥ", "ㄐㄧㄥˇ", "ㄏㄠˇ"} {
-		typeSyl(s, syl)
+		symbolSyl(s, syl)
 	}
 	// Lock the fixture's segmentation explicitly, without depending on scores.
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
@@ -101,7 +101,7 @@ func TestCandidateBeforeCursorWholeWordAndLengthAnchor(t *testing.T) {
 		t.Fatalf("%+v", snap)
 	}
 	// Continue at the unchanged caret: the new character belongs before 好.
-	snap = typeSyl(s, "ㄨㄛˇ")
+	snap = symbolSyl(s, "ㄨㄛˇ")
 	if snap.Text() != "我風井我好" || snap.Cursor.Rune != 4 {
 		t.Fatalf("%+v", snap)
 	}
@@ -109,14 +109,14 @@ func TestCandidateBeforeCursorWholeWordAndLengthAnchor(t *testing.T) {
 
 func TestCandidateBeforeCursorInsideWordAndCancel(t *testing.T) {
 	s := cursorSession()
-	typeSyl(s, "ㄈㄥ")
-	typeSyl(s, "ㄐㄧㄥˇ")
+	symbolSyl(s, "ㄈㄥ")
+	symbolSyl(s, "ㄐㄧㄥˇ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	cursorChoose(t, s, s.Handle(proto.Request{Type: proto.Candidates, Length: 2}), "風景")
 	s.CandidateBeforeCursor = true
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
 	before := s.snapshot()
-	snap := key(s, " ")
+	snap := key(s, proto.KeyDown)
 	cursorRange(t, snap, 0, 1)
 	snap = key(s, proto.KeyEscape)
 	if snap.Candidates != nil || snap.Text() != before.Text() || snap.Cursor != before.Cursor {
@@ -128,9 +128,9 @@ func TestCandidateBeforeCursorLiteralAndMixedBoundaries(t *testing.T) {
 	for _, literal := range []string{"，", "hello", "👨‍👩‍👧‍👦"} {
 		s := cursorSession()
 		s.CandidateBeforeCursor = true
-		typeSyl(s, "ㄊㄚ")
+		symbolSyl(s, "ㄊㄚ")
 		s.insertLiteral(literal)
-		typeSyl(s, "ㄏㄠˇ")
+		symbolSyl(s, "ㄏㄠˇ")
 		snap := key(s, proto.KeyDown)
 		cursorRange(t, snap, len(s.syls)-1, 1)
 		for range 5 {
@@ -153,7 +153,7 @@ func TestCandidateBeforeCursorLiteralAndMixedBoundaries(t *testing.T) {
 	}
 	// Pending mixed keys still open their own spelling candidates, even when
 	// the Chinese reselection direction is before the cursor.
-	s := mixedSession()
+	s := newSession()
 	s.CandidateBeforeCursor = true
 	for _, k := range "hello" {
 		key(s, string(k))
@@ -169,7 +169,7 @@ func TestCandidateBeforeCursorLiteralAndMixedBoundaries(t *testing.T) {
 func TestCandidateAfterCursorAtTailSelectsWordEndingAtCaret(t *testing.T) {
 	s := cursorSession()
 	for _, syl := range []string{"ㄨㄛˇ", "ㄈㄥ", "ㄐㄧㄥˇ"} {
-		typeSyl(s, syl)
+		symbolSyl(s, syl)
 	}
 	if s.CandidateBeforeCursor {
 		t.Fatal("fixture must use the after-cursor default")
@@ -203,7 +203,7 @@ func TestCandidateAfterCursorAtTailSelectsWordEndingAtCaret(t *testing.T) {
 		t.Fatalf("%+v", snap)
 	}
 	// 游標留在句尾，接著打字接在選好的詞後面。
-	snap = typeSyl(s, "ㄏㄠˇ")
+	snap = symbolSyl(s, "ㄏㄠˇ")
 	if snap.Text() != "我風井好" || snap.Cursor.Rune != 4 {
 		t.Fatalf("%+v", snap)
 	}
@@ -215,8 +215,8 @@ func TestCandidateAfterCursorAtTailSelectsWordEndingAtCaret(t *testing.T) {
 		t.Fatalf("whole-word pick not learned: %v", s.model.Store.Readings)
 	}
 	s = New(s.model)
-	typeSyl(s, "ㄈㄥ")
-	if got := typeSyl(s, "ㄐㄧㄥˇ").Text(); got != "風井" {
+	symbolSyl(s, "ㄈㄥ")
+	if got := symbolSyl(s, "ㄐㄧㄥˇ").Text(); got != "風井" {
 		t.Fatalf("learned pick not reused: %q", got)
 	}
 }
@@ -226,7 +226,7 @@ func TestCandidateAfterCursorAwayFromTailUnchanged(t *testing.T) {
 	for _, tc := range []struct{ at, start, length int }{{0, 0, 1}, {1, 1, 2}, {2, 2, 1}} {
 		s := cursorSession()
 		for _, syl := range []string{"ㄨㄛˇ", "ㄈㄥ", "ㄐㄧㄥˇ"} {
-			typeSyl(s, syl)
+			symbolSyl(s, syl)
 		}
 		s.Handle(proto.Request{Type: proto.Cursor, To: tc.at})
 		cursorRange(t, key(s, proto.KeyDown), tc.start, tc.length)
@@ -240,7 +240,7 @@ func TestCandidateAfterCursorAwayFromTailUnchanged(t *testing.T) {
 func TestCandidateAfterCursorAtTailLiteralBoundaries(t *testing.T) {
 	// 句尾符號仍開符號替換清單。
 	s := cursorSession()
-	typeSyl(s, "ㄊㄚ")
+	symbolSyl(s, "ㄊㄚ")
 	s.insertLiteral("，")
 	snap := key(s, proto.KeyDown)
 	cursorRange(t, snap, 1, 1)
@@ -255,10 +255,10 @@ func TestCandidateAfterCursorAtTailLiteralBoundaries(t *testing.T) {
 
 	// 標點後的整詞：只往左延伸到標點為止。
 	s = cursorSession()
-	typeSyl(s, "ㄊㄚ")
+	symbolSyl(s, "ㄊㄚ")
 	s.insertLiteral("，")
-	typeSyl(s, "ㄈㄥ")
-	typeSyl(s, "ㄐㄧㄥˇ")
+	symbolSyl(s, "ㄈㄥ")
+	symbolSyl(s, "ㄐㄧㄥˇ")
 	cursorRange(t, key(s, proto.KeyDown), 2, 2)
 	for range 4 {
 		c := key(s, proto.KeyTab).Candidates
@@ -268,12 +268,12 @@ func TestCandidateAfterCursorAtTailLiteralBoundaries(t *testing.T) {
 	}
 
 	// 中英混打：未完成的英文仍開拼字候選；英文後的中文在句尾選自己的詞，不碰英文。
-	m := mixedSession()
+	m := newSession()
 	mixedType(m, "hello")
 	if key(m, proto.KeyDown); m.cand == nil || !m.cand.mixed {
 		t.Fatalf("pending English: %+v", m.cand)
 	}
-	m = mixedSession()
+	m = newSession()
 	if got := mixedType(m, "ji3hellot ").Text(); got != "我hello吃" {
 		t.Fatalf("fixture: %q", got)
 	}

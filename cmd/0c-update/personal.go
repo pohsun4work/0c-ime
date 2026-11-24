@@ -189,12 +189,8 @@ func removeUserStore(base string) error {
 }
 
 // removePersonalBackups 刪掉升級前保存的個人詞庫（rollback -restore-user 用的），回傳刪了幾份。
-//   - Linux：backups/<目錄>/personal/user.json（安裝的 0c-install-*、還原前另存的 0c-user-*、make upgrade 的 upgrade-*）
-//   - Windows：backups\windows-*\user.json（每次安裝、升級、回復與移除）
-//   - macOS：回復不另存個人詞庫，沒有這種備份。
-//
-// 備份裡的 vocab.json 與其他檔案保留。只進真的目錄，不跟著符號連結走到備份以外的地方。
-// Windows 回復時中斷留下的 .user-restore-* 暫存檔（內容是備份的個人詞庫）也刪掉。
+// 備份在 backups\windows-*\user.json（每次安裝、升級、回復與移除）；裡面的 vocab.json 與其他檔案保留。只進真的目錄，
+// 不跟著符號連結走到備份以外的地方。回復時中斷留下的 .user-restore-* 暫存檔（內容是備份的個人詞庫）也刪掉。
 func removePersonalBackups(base string) (int, error) {
 	var errs []error
 	removed := 0
@@ -224,11 +220,7 @@ func removePersonalBackups(base string) (int, error) {
 		if !e.IsDir() { // ReadDir 不跟著符號連結：連結不算目錄
 			continue
 		}
-		dir := filepath.Join(backups, e.Name())
-		remove(filepath.Join(dir, userStoreName))
-		if fi, err := os.Lstat(filepath.Join(dir, "personal")); err == nil && fi.IsDir() {
-			remove(filepath.Join(dir, "personal", userStoreName))
-		}
+		remove(filepath.Join(backups, e.Name(), userStoreName))
 	}
 	stages, _ := filepath.Glob(filepath.Join(base, ".user-restore-*"))
 	for _, p := range stages {

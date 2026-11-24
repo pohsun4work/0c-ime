@@ -84,17 +84,7 @@ func Key(syls []Syllable) string {
 type Composer struct {
 	slot  [Tone]rune // 以 Class 為索引；Initial..Final
 	order []Class    // 輸入順序（Empty 用；退格照畫面順序，#309）
-	// keys 是依狀態解讀按鍵的排列（許氏，#183）打出目前符號的按鍵：從空的組音狀態依序重播這些按鍵，
-	// 會得到現在的符號。退格時去掉最後一鍵重播，才能把那一鍵順便改掉的符號（ㄓ→ㄐ）一起還原。
-	// 空字串表示沒有記錄（一鍵一符號的排列，或符號不是由按鍵組成）；任何直接修改符號的操作都清掉它。
-	keys string
 }
-
-// Keys 回傳打出目前符號的按鍵（見 keys 欄位）；沒有記錄時為空字串。
-func (c *Composer) Keys() string { return c.keys }
-
-// SetKeys 記下打出目前符號的按鍵；呼叫端保證從空的狀態重播這些按鍵會得到目前的符號。
-func (c *Composer) SetKeys(keys string) { c.keys = keys }
 
 // Clone 回傳不與 c 共用輸入順序的複本：之後對任何一方 Add、Backspace 都不影響另一方。
 func (c Composer) Clone() Composer {
@@ -108,7 +98,6 @@ func (c *Composer) Replace(cl Class, r rune) {
 		return
 	}
 	c.slot[cl] = r
-	c.keys = ""
 }
 
 // Remove 移除某類別的符號。
@@ -124,7 +113,6 @@ func (c *Composer) Remove(cl Class) {
 		}
 	}
 	c.order = order
-	c.keys = ""
 }
 
 // Empty 回報目前是否沒有任何符號。
@@ -170,7 +158,6 @@ func (c *Composer) Add(r rune) (done Syllable, ok bool) {
 		c.order = append(c.order, cl)
 	}
 	c.slot[cl] = r
-	c.keys = ""
 	return "", false
 }
 

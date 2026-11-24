@@ -425,7 +425,7 @@ func InstallWindows(bundle, base, arch string, reg Registrar) (string, []string,
 	}
 	directory := "versions/" + release.Version + "-" + manifestHash[:12]
 	// 被換下的版本只是回復用（#254）：檔案被改動或缺少（防毒軟體隔離或修改、使用者自己改過 0c-server.exe）時照常安裝，
-	// 否則自動更新、立即安裝、重新執行安裝精靈都會永遠卡在這裡（macOS 同理，#83）。回復到它時 RollbackWindows 仍會核對並拒絕。
+	// 否則自動更新、立即安裝、重新執行安裝精靈都會永遠卡在這裡（#83）。回復到它時 RollbackWindows 仍會核對並拒絕。
 	// 同一版重新安裝時版本目錄就是新版的目錄，由下面的 Verify 發現不符並移開重放。新版本身一律逐檔核對。
 	if previous != nil && previous.Active && previous.Directory != directory {
 		if bad := verifyReceipt(base, previous); bad != nil {

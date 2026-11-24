@@ -3,22 +3,16 @@ package settings
 import (
 	"encoding/json"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
-func TestCandidateCursorPlatformDefaultsAndExplicitChoice(t *testing.T) {
-	for _, tc := range []struct{ platform, want string }{{"darwin", "before"}, {"linux", "after"}, {"windows", "after"}} {
-		if got := defaultCandidateCursor(tc.platform); got != tc.want {
-			t.Fatalf("%s: %s", tc.platform, got)
-		}
-	}
+func TestCandidateCursorDefaultAndExplicitChoice(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	s, err := Load(path)
-	if err != nil || s.CandidateCursor != defaultCandidateCursor(runtime.GOOS) {
+	if err != nil || s.CandidateCursor != "after" {
 		t.Fatalf("%+v %v", s, err)
 	}
-	// Pre-existing settings without the new field also use the platform default.
+	// Pre-existing settings without the field also use the default.
 	if err := json.Unmarshal([]byte(`{"schema":1,"selection":"statistical","future":7}`), &s); err != nil {
 		t.Fatal(err)
 	}

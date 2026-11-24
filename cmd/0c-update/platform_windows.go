@@ -287,7 +287,7 @@ func reportLeftovers(left []string) {
 }
 
 // bundleUpdater 是剛安裝的版本目錄裡的 0c-update；建立排程時用它覆寫穩定副本。完整外殼更新由舊的穩定副本自己執行，
-// 沒有這個，installSchedule 只會把「自己」複製到自己身上，穩定副本就停在舊版（macOS 同樣用 bundleUpdater）。
+// 沒有這個，installSchedule 只會把「自己」複製到自己身上，穩定副本就停在舊版。
 var bundleUpdater string
 
 func install(bundle string, release *update.Release) error {
@@ -339,7 +339,7 @@ func engineRunning() ([]string, error) {
 	}
 	return found, nil
 }
-func rollback(_ string, restoreUser bool) error {
+func rollback(restoreUser bool) error {
 	if err := preflight(); err != nil {
 		return err
 	}
@@ -398,6 +398,3 @@ func uninstall() error {
 }
 
 const restartHint = "完成組字後登出再登入，或在工作管理員結束 0c-server.exe，下一個按鍵會以新設定啟動引擎。"
-
-// installIntegrity：Windows 的檔案核對在更新與解除安裝時提示（#82），status 不另外顯示。
-func installIntegrity() string { return "" }

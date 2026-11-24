@@ -10,7 +10,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
 	"github.com/0c-biggo/0c-ime/core/inputstyle"
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -18,7 +17,6 @@ import (
 	"github.com/0c-biggo/0c-ime/core/punct"
 	"github.com/0c-biggo/0c-ime/core/rerank"
 	"github.com/0c-biggo/0c-ime/core/session"
-	"github.com/0c-biggo/0c-ime/core/zhconv"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -29,41 +27,23 @@ type Engine struct {
 	// 由宿主在建立 session 前設定；nil 使用核心預設值。
 	// 資料包可攜帶其開發集校準的前文權重，不寫入個人詞庫。
 	DocumentContextWeight *float64
-	Rerank                rerank.Options    // 宿主在建立 session 前設定；可選、同步、有界評分器。
-	Punct                 punct.Punctuator  // 宿主在建立 session 前設定；提交時補標點，nil 停用。
-	DocumentContextOff    bool              // 使用者關閉前文時由宿主設定；外殼的前文確認一律忽略。
-	EscKeepComposition    bool              // 使用者關閉「按 Esc 清除整段組字」時由宿主設定。
-	SpaceInsertsSpace     bool              // 使用者關閉「空白鍵選字」時由宿主設定。
-	AdvanceAfterSelect    bool              // 使用者開啟「選字後游標移到下一個字」時由宿主設定（#133）。
-	Simplified            *zhconv.Converter // 使用者開啟「輸出簡體字」時由宿主設定（#118）；nil 送出繁體。
-	SelectionKeys         string            // 使用者選的選字鍵（#112）；空字串為 1234567890。
-	CtrlPunct             bool              // 「Ctrl＋標點打全形」開著時由宿主設定（#168）；零值時 Ctrl＋標點交給應用程式。
-	ShiftSymbolHalfwidth  bool              // 「Shift＋符號打半形」開著時由宿主設定（#258）；零值時 Shift＋符號照舊打全形標點。
-	AllSymbolsHalfwidth   bool              // 「所有符號鍵打半形」時由宿主設定（#282）；零值時照舊。
-	CJKLatinSpace         bool              // 「中英文之間自動加空格」開著時由宿主設定（#273）；零值時送出的文字不補空格。
-	NoLearning            bool              // 「記住我選的字詞」關閉時由宿主設定（#297）；選字、神經選字照常，只是不寫進個人資料。
-	CapsLockEnglish       bool              // 「Caps Lock 開著時直接打英文」開著時由宿主設定（#173）；零值時 caps_lock 請求不起作用。
-	Fuzzy                 fuzzy.Config      // 使用者逐對啟用的模糊音；零值全部關閉。
-	Toneless              bool              // 「不打聲調也能選字」開著時由宿主設定（#150）；開啟時停用中英混打的自動判斷。
-	ZhuyinErrorHint       bool              // 「打錯注音時提示」開著時由宿主設定（#300，預設開）；零值時沒有字的音節照舊原樣留下。
-	Abbreviation          bool              // 聲調選填時只打聲母或介音也能選字；只在 Toneless 時作用。
-	MixedWithToneless     bool              // 聲調選填與混打共存（手機）：注音鍵走聲調選填，實體按鍵走混打。
+	Rerank                rerank.Options   // 宿主在建立 session 前設定；可選、同步、有界評分器。
+	Punct                 punct.Punctuator // 宿主在建立 session 前設定；提交時補標點，nil 停用。
+	DocumentContextOff    bool             // 使用者關閉前文時由宿主設定；外殼的前文確認一律忽略。
+	EscKeepComposition    bool             // 使用者關閉「按 Esc 清除整段組字」時由宿主設定。
+	AdvanceAfterSelect    bool             // 使用者開啟「選字後游標移到下一個字」時由宿主設定（#133）。
+	SelectionKeys         string           // 使用者選的選字鍵（#112）；空字串為 1234567890。
+	NoLearning            bool             // 「記住我選的字詞」關閉時由宿主設定（#297）；選字、神經選字照常，只是不寫進個人資料。
+	Fuzzy                 fuzzy.Config     // 使用者逐對啟用的模糊音；零值全部關閉。
 	EnglishAutocomplete   bool
-	MixedInput            bool                // opt-in bilingual keys; disabled preserves legacy behavior.
 	English               *english.Dictionary // nil uses the authored prototype vocabulary.
 	EnglishPack           string              // host-supplied pack version for diagnostics; empty means prototype.
-	EmojiShortcut         string
-	EmojiEqualsFirst      bool
-	Layout                layout.Layout // 使用者選的鍵盤排列；nil 為標準排列。倚天、許氏排列下 session 停用混打，倚天另停用 = 開 Emoji（#83、#183）。
 	CandidateBeforeCursor bool
 	CandidateColumns      int
 	Preview02             bool // 0.2.0 的功能（#128）；0.2.0 起宿主一律打開，零值時行為與沒有這些功能時相同（測試用）
 	// SharedMode：所有輸入框共用同一個中英模式（#115，settings 的 mode_memory=shared）。一個輸入框切換後，
 	// 其他輸入框在下一個請求時跟上；零值照外殼原本的做法（每個 session 各自的模式）。
 	SharedMode bool
-	// SimplifiedSwitch：宿主支援從輸入法選單即時切換「輸出簡體字」時設定（#169，見 simplified.go）；零值時
-	// output_simplified 請求回 handled=false。
-	SimplifiedSwitch SimplifiedSwitch
 
 	// PrefixCacheKeys：每個 session 的解碼器尾端前綴快取最多幾個讀音（#307），宿主在建立 session 前設定。
 	// 0 為預設 4096（桌面）；手機設較小的值壓住記憶體。只影響速度與記憶體，不影響選字結果。
@@ -78,9 +58,7 @@ type Engine struct {
 	sharedEnglish bool              // SharedMode 時大家共用的模式
 	modeGen       uint64            // sharedEnglish 每次改變時加一
 	modeSeen      map[uint64]uint64 // session → 它跟上的 modeGen
-	modeLocal     map[uint64]bool   // 「設成英文」帶來、只屬於這個輸入框的英文（macOS 的 Caps Lock）；設成中文或切換時結束
-
-	switchMu sync.Mutex // 「輸出簡體字」的即時切換一次一個（simplified.go）
+	modeLocal     map[uint64]bool   // 「設成英文」帶來、只屬於這個輸入框的英文；設成中文或切換時結束
 
 	learnedUndo []learnedUndo // 「靈犀學到的」頁最近幾次移除、不再學、恢復學習的復原複本（learned.go），只在記憶體
 	undoSerial  uint64
@@ -90,36 +68,12 @@ type Engine struct {
 }
 
 func New(lex lexicon.Source, sys lm.System) *Engine {
-	return &Engine{Model: personal.NewModel(lex, sys), EmojiShortcut: "equals", EmojiEqualsFirst: true, sessions: map[uint64]*session.Session{}}
+	return &Engine{Model: personal.NewModel(lex, sys), sessions: map[uint64]*session.Session{}}
 }
 
-// mixedKeys 回報按鍵是否照中英混打規則判斷。
-func (e *Engine) mixedKeys() bool { return e.MixedInput && (!e.Toneless || e.MixedWithToneless) }
-
-// ToneMarkKeys 回報沒在組字時的聲調鍵是否由輸入法處理（單按＋空白是聲調符號，#135）；
-// 中英混打（只在標準排列）時照混打規則。給自己過濾閒置按鍵的外殼（Windows）查詢。
-func (e *Engine) ToneMarkKeys() bool {
-	return session.ToneMarkKeys(e.mixedKeys(), e.Layout == nil || e.Layout == layout.Standard)
-}
-
-// IdleKeys 回報沒在組字、注音模式時輸入法會處理的可見 ASCII 按鍵（session.IdleKeys），依鍵盤排列與設定而不同（#183）。
-// 給自己過濾閒置按鍵的外殼（Windows）查詢，外殼不必各自維護每種排列的按鍵表。
-func (e *Engine) IdleKeys() string {
-	// fork：微軟參考的半形原字元（#272）、Shift＋符號打半形（#258）與所有符號鍵打半形（#282）的符號沒在組字時也留在
-	// 組字區（session/hoshi_symbols.go），不像官方交還應用程式，所以不從清單拿掉。
-	keys := session.IdleKeys(e.Layout, e.mixedKeys(), e.EmojiShortcut)
-	if e.InputStyle.ShiftLetter == "commit" || e.InputStyle.ShiftLetter == "lower" {
-		keys += "ABCDEFGHIJKLMNOPQRSTUVWXYZ" // 送出組字或改打小寫（#210）：沒在組字時也要吃，不能交給應用程式打大寫
-	}
-	return keys // 聲調選填時混打停用（#150）
-}
-
-// IdleKeysFullWidth 回報全形（Shift＋空白，#278）時沒在組字、注音模式會處理的可見 ASCII 按鍵（session.FullWidthIdleKeys）。
-// 全形時「Shift＋符號打半形」與微軟參考風格的半形原字元都打全形，不像 IdleKeys 拿掉那些鍵；Shift＋字母一律由核心處理。
-// Windows 外殼的 TestKeyDown 在快照的 full_width 為 true 時照這份決定。
-func (e *Engine) IdleKeysFullWidth() string {
-	return session.FullWidthIdleKeys(e.Layout, e.MixedInput && !e.Toneless, e.EmojiShortcut)
-}
+// IdleKeys 回報沒在組字、注音模式時輸入法會處理的可見 ASCII 按鍵（session.IdleKeys）。
+// 給自己過濾閒置按鍵的外殼（Windows 的 TestKeyDown）查詢。
+func (e *Engine) IdleKeys() string { return session.IdleKeys() }
 
 func (e *Engine) OpenSession() uint64 {
 	e.mu.Lock()
@@ -130,27 +84,12 @@ func (e *Engine) OpenSession() uint64 {
 	e.sessions[e.next].Punct = e.Punct
 	e.sessions[e.next].DocumentContextOff = e.DocumentContextOff
 	e.sessions[e.next].EscKeepComposition = e.EscKeepComposition
-	e.sessions[e.next].SpaceInsertsSpace = e.SpaceInsertsSpace
 	e.sessions[e.next].AdvanceAfterSelect = e.AdvanceAfterSelect
-	e.sessions[e.next].Simplified = e.Simplified
 	e.sessions[e.next].SelectionKeys = e.SelectionKeys
-	e.sessions[e.next].CtrlPunct = e.CtrlPunct
-	e.sessions[e.next].ShiftSymbolHalfwidth = e.ShiftSymbolHalfwidth
-	e.sessions[e.next].AllSymbolsHalfwidth = e.AllSymbolsHalfwidth
-	e.sessions[e.next].CJKLatinSpace = e.CJKLatinSpace
 	e.sessions[e.next].NoLearning = e.NoLearning
-	e.sessions[e.next].CapsLockEnglish = e.CapsLockEnglish
 	e.sessions[e.next].InputStyle = e.InputStyle
 	e.sessions[e.next].Fuzzy = e.Fuzzy
-	e.sessions[e.next].Toneless = e.Toneless
-	e.sessions[e.next].ZhuyinErrorHint = e.ZhuyinErrorHint
-	e.sessions[e.next].Abbreviation = e.Abbreviation
-	e.sessions[e.next].MixedWithToneless = e.MixedWithToneless
 	e.sessions[e.next].EnglishAutocomplete = e.EnglishAutocomplete
-	e.sessions[e.next].MixedInput = e.MixedInput
-	e.sessions[e.next].EmojiShortcut = e.EmojiShortcut
-	e.sessions[e.next].EmojiEqualsFirst = e.EmojiEqualsFirst
-	e.sessions[e.next].SetLayout(e.Layout)
 	e.sessions[e.next].CandidateColumns = e.CandidateColumns
 	e.sessions[e.next].CandidateBeforeCursor = e.CandidateBeforeCursor
 	e.sessions[e.next].Preview02 = e.Preview02
@@ -254,9 +193,6 @@ func (e *Engine) CloseSession(id uint64) {
 
 // Do 處理一個已解碼的請求。
 func (e *Engine) Do(id uint64, req proto.Request) (proto.Snapshot, error) {
-	if req.Type == proto.OutputSimplified {
-		return e.outputSimplified(id, req) // 全域設定：自己管鎖（simplified.go）
-	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, ok := e.sessions[id]
@@ -266,15 +202,11 @@ func (e *Engine) Do(id uint64, req proto.Request) (proto.Snapshot, error) {
 	if !e.SharedMode {
 		return s.Handle(req), nil
 	}
-	// 全部共用（#115）：只有使用者的切換（Toggle）改變共用的模式。外殼的「設成中文」（Fcitx5／IBus 換輸入框時的
-	// 重設、macOS 關掉 Caps Lock）改成回到共用的模式；「設成英文」（macOS 開 Caps Lock）只影響這個輸入框。
-	// Windows／Linux 的 caps_lock（#173）同理：開啟只影響這個輸入框，關閉回到共用的模式。
-	// 舊外殼不必改。
+	// 全部共用（#115）：只有使用者的切換（Toggle）改變共用的模式。外殼的「設成中文」改成回到共用的模式，
+	// 「設成英文」只影響這個輸入框，期間不跟上別的輸入框切回的注音。
 	e.initShared()
-	// 暫時的英文（Caps Lock 開著：#173 的 caps_lock、macOS 的「設成英文」）期間不跟上別的輸入框切回的注音，
-	// 不然 Caps Lock 還開著，下一個字母就打成注音；關掉 Caps Lock 時才回到共用的模式（下面與「設成中文」）。
 	// 共用的模式已經是英文時的「設成英文」（Windows 重開 session 還原共用的英文）不算暫時的，照常跟上。
-	temporary := !e.sharedEnglish && (s.CapsLockOn() || e.modeLocal[id])
+	temporary := !e.sharedEnglish && e.modeLocal[id]
 	switch {
 	case req.Type == proto.Mode && !req.On:
 		req.On = e.sharedEnglish
@@ -292,10 +224,6 @@ func (e *Engine) Do(id uint64, req proto.Request) (proto.Snapshot, error) {
 		s.Handle(proto.Request{Type: proto.Mode, On: e.sharedEnglish}) // 跟上別的輸入框切換後的模式
 	}
 	snap := s.Handle(req)
-	// 關掉 Caps Lock（#173）回到共用的模式：暫時英文期間別的輸入框可能切換過。
-	if req.Type == proto.CapsLock && !req.On && snap.Handled && s.EnglishMode() != e.sharedEnglish {
-		snap = s.Handle(proto.Request{Type: proto.Mode, On: e.sharedEnglish})
-	}
 	if req.Type == proto.Toggle && s.EnglishMode() != e.sharedEnglish {
 		e.sharedEnglish = s.EnglishMode()
 		e.modeGen++

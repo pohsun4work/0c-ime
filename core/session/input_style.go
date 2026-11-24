@@ -6,7 +6,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/inputstyle"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
@@ -19,7 +20,7 @@ func (s *Session) insertStyleLiteral(text string) {
 	s.insertLiteral(text)
 }
 
-// fullWidthText 逐字轉全形（混打的英數整段轉：don't 的 ' 也照風格）。
+// fullWidthText 逐字轉全形（混打的英數整段轉：don't 的 ' 也轉）。
 func (s *Session) fullWidthText(text string) string {
 	if utf8.RuneCountInString(text) == 1 {
 		return s.fullWidthKey(text)
@@ -32,27 +33,13 @@ func (s *Session) fullWidthText(text string) string {
 }
 
 func (s *Session) fullWidthKey(k string) string {
-	if s.InputStyle.Punctuation == "microsoft" {
-		switch k { // 微軟新注音全形的 ' ^ ` 不是 Unicode 的全形字
-		case "'":
-			return "’"
-		case "^":
-			return "︿"
-		case "`":
-			return "‵"
-		}
-	}
-	if s.InputStyle.Punctuation == "chewing" {
-		switch k {
-		case "\"":
-			return "”"
-		case "'":
-			return "’"
-		case "[":
-			return "〔"
-		case "]":
-			return "〕"
-		}
+	switch k { // 微軟新注音全形的 ' ^ ` 不是 Unicode 的全形字
+	case "'":
+		return "’"
+	case "^":
+		return "︿"
+	case "`":
+		return "‵"
 	}
 	return fullWidthASCII(k)
 }
@@ -76,12 +63,8 @@ func fullWidthASCII(k string) string {
 	return string(r)
 }
 
-// styleKey handles only explicit profile differences. The zero rules object
-// never changes legacy key routing. Width is session state, not a saved option.
+// styleKey 處理按鍵規則（inputstyle.Rules）與照微軟的標點、全形。字寬是 session 的狀態，不是設定。
 func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
-	if s.InputStyle.Version == 0 {
-		return false, "", false
-	}
 	if k == proto.KeyShiftSpace {
 		switch s.InputStyle.ShiftSpace {
 		case "fullwidth":
@@ -143,10 +126,9 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		}
 		return false, "", false
 	}
-	// Apple calls the backward-delete key Delete; accept both physical variants.
 	if (k == proto.KeyShiftDelete || k == proto.KeyShiftBackspace) && !s.english && s.InputStyle.ShiftDelete == "tone" {
 		if !s.comp.Empty() {
-			s.comp = s.layout.Backspace(s.comp)
+			s.comp = layout.Standard.Backspace(s.comp)
 			return true, "", true
 		}
 		if s.cursor > 0 && !s.literals[s.cursor-1] {
@@ -161,25 +143,17 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		}
 		return s.composing(), "", true
 	}
-	if !s.english && ((k == proto.KeyTab || k == proto.KeyBackTab) && s.InputStyle.Tab == "cycle" || k == proto.KeyUp && s.InputStyle.Up == "cycle") {
+	if !s.english && ((k == proto.KeyTab || k == proto.KeyBackTab) && s.InputStyle.Tab == inputstyle.TabCycle || k == proto.KeyUp) {
 		if !s.composing() {
 			return false, "", true
 		}
+		s.mark = nil // 跟其他按鍵一樣取消加詞標示（vocabKey 輪不到這一鍵）
 		if s.comp.Empty() {
 			d := 1
 			if k == proto.KeyBackTab {
 				d = -1
 			}
 			s.cycleStyleCandidate(d)
-		}
-		return true, "", true
-	}
-	if !s.english && k == proto.KeyTab && s.InputStyle.Tab == "segment" {
-		if !s.composing() {
-			return false, "", true
-		}
-		if s.comp.Empty() {
-			s.changeSegmentation()
 		}
 		return true, "", true
 	}
@@ -194,8 +168,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	if len(r) != 1 || !unicode.IsPrint(r[0]) {
 		return false, "", false
 	}
-	// 設定「Shift＋符號打半形」開著時照樣打鍵帽字元（#272，見 halfwidthShift）。
-	if s.microsoftRaw(k) {
+	if microsoftRawPunctuation(k) {
 		if s.mixedKeepsPunctuation(k) {
 			return true, "", true
 		}
@@ -209,8 +182,7 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 			return true, "", true
 		}
 		if s.englishWord {
-			// A pending autocomplete word treats raw punctuation like the 0c
-			// style does: deliver the word, then the key (#233).
+			// A pending autocomplete word delivers the word, then the key (#233).
 			return false, "", false
 		}
 		if !s.english && !s.comp.Empty() {
@@ -237,54 +209,15 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		return true, "", true
 	}
 	if s.english {
-		// The shell normalizes Caps to lowercase and Caps+Shift to uppercase.
-		// Consume both: passing uppercase through would replay the host's
-		// original Caps+Shift lowercase event on Windows and Linux.
-		if s.InputStyle.CapsLetter == "lower" && s.capsLock && ((r[0] >= 'a' && r[0] <= 'z') || (r[0] >= 'A' && r[0] <= 'Z')) {
-			// Autocomplete still sees Caps Lock English (#233). A letter it
-			// would pass to the host is delivered here instead, for the same
-			// replay reason.
-			if s.EnglishAutocomplete {
-				if handled, commit, active := s.englishKey(k); active {
-					if !handled {
-						commit += k
-					}
-					return true, commit, true
-				}
-			}
-			if !s.composing() {
-				return true, k, true
-			}
-			s.insertStyleLiteral(k)
-			return true, "", true
-		}
 		return false, "", false
 	}
 
-	if r[0] >= 'A' && r[0] <= 'Z' && s.InputStyle.ShiftLetter == "commit" {
-		return true, s.commit() + k, true
-	}
-	if r[0] >= 'A' && r[0] <= 'Z' && s.InputStyle.ShiftLetter == "lower" {
-		// #210: Shift＋letter types the lowercase letter in Zhuyin mode, kept
-		// in the composition like the 0c uppercase. Every shell reports Shift＋
-		// letter as uppercase in Zhuyin mode regardless of Caps Lock (#168), so
-		// it is consumed rather than passed to the host.
-		text := string(unicode.ToLower(r[0]))
-		if s.fullWidth {
-			text = s.fullWidthText(text)
-		}
-		if !s.composing() {
-			return true, text, true
-		}
-		s.insertStyleLiteral(text)
-		return true, "", true
-	}
 	if s.fullWidthMixedKey(r[0]) {
 		return false, "", false
 	}
 	if s.fullWidth && !s.english {
-		_, phonetic := s.layout.Symbol(r[0])
-		_, punct := s.layout.Punct(r[0])
+		_, phonetic := layout.Standard.Symbol(r[0])
+		_, punct := layout.Standard.Punct(r[0])
 		if !phonetic && !punct && r[0] >= '!' && r[0] <= '~' {
 			if !s.composing() {
 				return true, s.fullWidthText(k), true
@@ -298,13 +231,6 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 			return true, s.fullWidthText(k), true
 		}
 		s.insertStyleLiteral(s.fullWidthText(k))
-		return true, "", true
-	}
-	if (s.InputStyle.Punctuation == "standard" || s.InputStyle.Punctuation == "chewing") && k == "\\" {
-		if s.mixedKeepsPunctuation(k) {
-			return true, "", true
-		}
-		s.insertStyleLiteral("＼")
 		return true, "", true
 	}
 	return false, "", false
@@ -325,6 +251,10 @@ func (s *Session) mixedKeepsPunctuation(k string) bool {
 	return true
 }
 
+// cycleStyleCandidate 是 ↑（與設定成輪換的 Tab）：照微軟，游標處的字詞直接換成下一個候選、不開候選窗，連按接著換。
+// 先換整個詞；詞沒有別的候選時換游標旁那個字（混合清單後段的單字）。原始按鍵與原樣注音不在輪換裡
+// （「我們很好」↑ 不會變回 cp3cl3）。全形符號照 ↓ 清單的順序換下一個全形；半形符號、英數、
+// 還沒定案的混打按鍵與原樣音節不動。
 func (s *Session) cycleStyleCandidate(delta int) {
 	s.refresh()
 	continuing := s.styleCycle != nil
@@ -333,134 +263,74 @@ func (s *Session) cycleStyleCandidate(delta int) {
 	} else {
 		s.openCandidates(0)
 	}
-	if s.cand == nil {
-		return
-	}
 	c := s.cand
-	limit := len(c.items)
-	if c.split > 0 {
-		limit = c.split
-	}
-	if c.raw && c.split == 0 {
-		limit--
-	}
-	if limit <= 0 {
-		s.cand = nil
+	s.cand = nil
+	if c == nil || c.mixed || c.english || c.syllable != nil {
 		return
 	}
-	start, length := c.start, c.length
-	var current string
-	for _, g := range s.path {
-		if g.Start <= start && g.End >= start+length {
-			current = string([]rune(g.Word)[start-g.Start : start-g.Start+length])
-			break
-		}
+	words := len(c.items)
+	if c.split > 0 {
+		words = c.split
 	}
-	i := -1
+	ids, at := s.cycleChoices(c, 0, words)
+	if len(ids) < 2 && c.split > 0 {
+		ids, at = s.cycleChoices(c, c.split, len(c.items))
+	}
 	if continuing {
-		i = c.cursor
+		at = slices.Index(ids, c.cursor)
 	}
-	for n := 0; !continuing && n < limit; n++ {
-		if c.items[n].Entry.Surface == current {
-			i = n
-			break
-		}
+	if len(ids) == 0 || len(ids) == 1 && at == 0 {
+		return
 	}
-	if i < 0 {
-		i = 0
-	}
-	id := (i + delta + limit) % limit
+	id := ids[(max(at, 0)+delta+len(ids))%len(ids)]
 	c.cursor = id
-	s.styleCycle = c
-	cursor, advance := s.cursor, s.AdvanceAfterSelect
+	s.cand, s.styleCycle = c, c
+	start, length := c.span(id)
+	cursor, advance, before := s.cursor, s.AdvanceAfterSelect, len(s.syls)
 	s.AdvanceAfterSelect = false
 	s.selectCandidate(s.candidateID(id))
-	s.AdvanceAfterSelect, s.cursor = advance, cursor
+	s.AdvanceAfterSelect = advance
+	// 全形符號的字數不一定一樣（——／—、……／…）：之後的輪換與游標照換上去的長度。
+	grown := len(s.syls) - before
+	if c.split == 0 || id < c.split {
+		c.length += grown
+	}
+	if cursor >= start+length {
+		cursor += grown
+	} else if cursor > start {
+		cursor = min(cursor, start+length+grown)
+	}
+	s.cursor = cursor
 }
 
-// changeSegmentation keeps the displayed characters, changing only lexical
-// boundaries. At a boundary Tab joins adjacent words; inside a word it splits.
-// At the end it cycles the feasible segmentations of the displayed sentence.
-func (s *Session) changeSegmentation() {
-	s.refresh()
-	if len(s.syls) < 2 || len(s.literals) > 0 {
-		return
+// cycleChoices 列出 items[lo:hi] 裡 ↑ 輪得到的項目，以及目前顯示的那一項在其中的位置（不在其中時是 -1）。
+func (s *Session) cycleChoices(c *candState, lo, hi int) (ids []int, at int) {
+	current := s.spanText(c.span(lo))
+	if c.literal && !fullWidthSymbol(current) {
+		return nil, -1
 	}
-	var text []rune
-	for _, g := range s.path {
-		text = append(text, []rune(g.Word)...)
-	}
-	if len(text) != len(s.syls) {
-		return
-	}
-	var choices [][]int
-	visited := 0
-	var walk func(int, []int)
-	walk = func(start int, ends []int) {
-		visited++
-		if len(choices) >= 64 || visited > 2048 {
-			return
+	at = -1
+	for id := lo; id < hi; id++ {
+		text := c.items[id].Entry.Surface
+		if c.keyLiterals[id] != "" || c.raw && id == len(c.items)-1 || c.literal && !fullWidthSymbol(text) {
+			continue
 		}
-		if start == len(text) {
-			choices = append(choices, slices.Clone(ends))
-			return
+		if text == current && at < 0 {
+			at = len(ids)
 		}
-		for end := min(len(text), start+decode.MaxLen(s.dec.Lex)); end > start; end-- {
-			word := string(text[start:end])
-			for _, e := range s.dec.Lex.Exact(s.syls[start:end]) {
-				if e.Surface == word {
-					walk(end, append(ends, end))
-					break
-				}
-			}
+		ids = append(ids, id)
+	}
+	return ids, at
+}
+
+// fullWidthSymbol：全形的符號（，、【 ……），不含半形字元與注音符號（半形 , 的 ↓ 第二項 ㄝ）。
+func fullWidthSymbol(text string) bool {
+	for _, r := range text {
+		if r <= unicode.MaxASCII || zhuyin.ClassOf(r) != zhuyin.None {
+			return false
 		}
 	}
-	walk(0, nil)
-	if len(choices) < 2 {
-		return
-	}
-	current := []int{}
-	for _, g := range s.path {
-		current = append(current, g.End)
-	}
-	var selected []int
-	if s.cursor == len(text) {
-		for i, ends := range choices {
-			if slices.Equal(ends, current) {
-				selected = choices[(i+1)%len(choices)]
-				break
-			}
-		}
-	} else if s.cursor > 0 {
-		wantBreak := !slices.Contains(current, s.cursor)
-		best := len(text) + 1
-		for _, ends := range choices {
-			if slices.Contains(ends, s.cursor) != wantBreak {
-				continue
-			}
-			diff := 0
-			for i := 1; i < len(text); i++ {
-				if slices.Contains(ends, i) != slices.Contains(current, i) {
-					diff++
-				}
-			}
-			if diff < best {
-				selected = ends
-				best = diff
-			}
-		}
-	}
-	if selected == nil {
-		return
-	}
-	s.locks = map[int]decode.Lock{}
-	start := 0
-	for _, end := range selected {
-		s.locks[start] = decode.Lock{Word: string(text[start:end]), Len: end - start, Segmentation: true}
-		start = end
-	}
-	s.pathSig = ""
-	s.refresh()
+	return text != ""
 }
 
 // These raw mappings were observed in the isolated Windows 11
@@ -471,13 +341,4 @@ func microsoftRawPunctuation(k string) bool {
 		return true
 	}
 	return false
-}
-
-// microsoftRaw：微軟參考打半形原字元的鍵；排列把它當注音鍵時（倚天的 ' 是 ㄘ）讓給排列（fork 的 0c 風格是微軟參考）。
-func (s *Session) microsoftRaw(k string) bool {
-	if s.InputStyle.Punctuation != "microsoft" || !microsoftRawPunctuation(k) {
-		return false
-	}
-	_, phonetic := s.layout.Symbol(rune(k[0]))
-	return !phonetic
 }

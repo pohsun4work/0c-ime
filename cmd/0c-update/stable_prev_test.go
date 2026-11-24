@@ -28,9 +28,6 @@ func contentOf(t *testing.T, path string) string {
 
 func withPreviousKept(t *testing.T) string {
 	t.Helper()
-	old := keepsPreviousUpdater
-	keepsPreviousUpdater = true
-	t.Cleanup(func() { keepsPreviousUpdater = old })
 	base := filepath.Join(t.TempDir(), "Zuin")
 	if err := os.MkdirAll(filepath.Join(base, "update"), 0o700); err != nil {
 		t.Fatal(err)
@@ -109,23 +106,6 @@ func TestReplaceStableUpdaterWhenStableMissing(t *testing.T) {
 	}
 	if contentOf(t, stableUpdater(base)) != "v3" || contentOf(t, previousUpdater(base)) != "v2" {
 		t.Fatalf("stable %q prev %q", contentOf(t, stableUpdater(base)), contentOf(t, previousUpdater(base)))
-	}
-}
-
-// Linux、macOS 沒有啟動器，不留上一版。
-func TestReplaceStableUpdaterNoPreviousOffWindows(t *testing.T) {
-	old := keepsPreviousUpdater
-	keepsPreviousUpdater = false
-	t.Cleanup(func() { keepsPreviousUpdater = old })
-	base := filepath.Join(t.TempDir(), "zuin")
-	writeFile(t, stableUpdater(base), "v1")
-	src := filepath.Join(base, "versions", "v2", updaterName())
-	writeFile(t, src, "v2")
-	if err := replaceStableUpdater(src, base); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(previousUpdater(base)); !os.IsNotExist(err) {
-		t.Fatal("previous kept off Windows")
 	}
 }
 

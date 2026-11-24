@@ -68,7 +68,6 @@ func benchmarkFullPackMixedKeys(b *testing.B, saturated, englishMode bool) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	e.MixedInput = true
 	e.EnglishAutocomplete = englishMode
 	if saturated {
 		for day := 100; day < 103; day++ {

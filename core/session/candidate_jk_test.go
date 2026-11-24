@@ -13,7 +13,7 @@ func jkSession(before bool) *Session {
 	s := cursorSession()
 	s.CandidateBeforeCursor = before
 	for _, syl := range []string{"ㄊㄚ", "ㄏㄠˇ", "ㄨㄛˇ"} {
-		typeSyl(s, syl)
+		symbolSyl(s, syl)
 	}
 	return s
 }
@@ -58,11 +58,11 @@ func TestCandidateJKMovesSingleCharacterBothModes(t *testing.T) {
 	}
 }
 
-// 後方模式打完一句在句尾按空白，照規則改用前方模式選最後一個字；這時 j 要真的往前換到前一個字，
+// 後方模式打完一句在句尾按 ↓，照規則改選結束在游標的詞；這時 j 要真的往前換到前一個字，
 // 不能只把游標左移一格又開回同一個字。
 func TestCandidateJKFromSentenceEndInAfterCursorMode(t *testing.T) {
 	s := jkSession(false)
-	cursorRange(t, key(s, " "), 2, 1)
+	cursorRange(t, key(s, proto.KeyDown), 2, 1)
 	jkWalk(t, s, "kjjk", [][2]int{{2, 1}, {1, 1}, {0, 1}, {1, 1}})
 }
 
@@ -74,7 +74,7 @@ func TestCandidateJKStepsWholeWordsOnTheSettingSide(t *testing.T) {
 	setup := func(before bool) *Session {
 		s := cursorSession()
 		for _, syl := range []string{"ㄨㄛˇ", "ㄈㄥ", "ㄐㄧㄥˇ", "ㄏㄠˇ"} {
-			typeSyl(s, syl)
+			symbolSyl(s, syl)
 		}
 		s.Handle(proto.Request{Type: proto.Cursor, To: 1})
 		cursorChoose(t, s, s.Handle(proto.Request{Type: proto.Candidates, Length: 2}), "風景")
@@ -134,9 +134,9 @@ func TestCandidateJKStepsOverLiterals(t *testing.T) {
 		for _, literal := range []string{"，", "👨‍👩‍👧‍👦"} {
 			s := cursorSession()
 			s.CandidateBeforeCursor = before
-			typeSyl(s, "ㄊㄚ")
+			symbolSyl(s, "ㄊㄚ")
 			s.insertLiteral(literal)
-			typeSyl(s, "ㄏㄠˇ")
+			symbolSyl(s, "ㄏㄠˇ")
 			n := len([]rune(literal))
 			s.Handle(proto.Request{Type: proto.Cursor, To: map[bool]int{false: 0, true: 1}[before]})
 			cursorRange(t, key(s, proto.KeyDown), 0, 1)
@@ -187,7 +187,7 @@ func TestCandidateJKSelectionKeysWin(t *testing.T) {
 	jkWalk(t, s, "JK", [][2]int{{2, 1}, {2, 1}})
 }
 
-// Emoji／顏文字選單、中英混打的按鍵候選、注音打到一半的符號候選、` 符號選單都不是「改某個字」，j/k 不動。
+// Emoji／顏文字選單、中英混打的按鍵候選、注音打到一半的符號候選都不是「改某個字」，j/k 不動。
 func TestCandidateJKIgnoredOutsideOrdinaryCandidates(t *testing.T) {
 	unchanged := func(t *testing.T, name string, s *Session) {
 		t.Helper()
@@ -208,8 +208,8 @@ func TestCandidateJKIgnoredOutsideOrdinaryCandidates(t *testing.T) {
 	for _, direct := range []bool{false, true} {
 		s := paletteSession()
 		if !direct {
-			typeSyl(s, "ㄨㄛˇ")
-			typeSyl(s, "ㄏㄠˇ")
+			symbolSyl(s, "ㄨㄛˇ")
+			symbolSyl(s, "ㄏㄠˇ")
 		}
 		key(s, "=")
 		if s.cand == nil || s.cand.kind == "" || s.cand.direct != direct {
@@ -223,7 +223,7 @@ func TestCandidateJKIgnoredOutsideOrdinaryCandidates(t *testing.T) {
 		unchanged(t, s.cand.kind, s)
 	}
 
-	m := mixedSession()
+	m := newSession()
 	mixedType(m, "ji3hello")
 	if key(m, proto.KeyDown); m.cand == nil || !m.cand.mixed {
 		t.Fatalf("mixed fixture: %+v", m.cand)
@@ -232,17 +232,11 @@ func TestCandidateJKIgnoredOutsideOrdinaryCandidates(t *testing.T) {
 
 	p := jkSession(false)
 	key(p, proto.KeyLeft)
-	key(p, "j") // ㄨ，注音打到一半
+	p.Handle(proto.Request{Type: proto.Symbol, Symbol: "ㄨ"}) // 注音打到一半
 	if key(p, proto.KeyDown); p.cand == nil || !p.cand.pending {
 		t.Fatalf("pending fixture: %+v", p.cand)
 	}
 	unchanged(t, "pending", p)
-
-	b := jkSession(false)
-	if openSymbolMenu(b); b.cand == nil || b.cand.symbols == "" {
-		t.Fatalf("symbol menu fixture: %+v", b.cand)
-	}
-	unchanged(t, "symbols", b)
 }
 
 // 英文自動補字的候選也不是改字（#193 的頁尾提示要跟著核心）。

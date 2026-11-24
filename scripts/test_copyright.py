@@ -12,7 +12,6 @@ DEFAULT = "AGPL-3"
 # Only in the source release tarball: the compiled dictionary is not committed.
 TARBALL_ONLY = "assets/data/"
 IMAGES = re.compile(r"\.(png|ico|icns|tiff?|svg|webp|jpe?g|gif)$", re.IGNORECASE)
-THIRD_PARTY = ("platforms/linux-fcitx5/third_party/", "internal/simplified/opencc/")
 
 
 def paragraphs(text):
@@ -75,9 +74,9 @@ class CopyrightTests(unittest.TestCase):
                     self.assertIn(name, self.licenses)
                     self.assertGreater(len(self.licenses[name].split("\n")), 1, f"{name} has no text")
 
-    def test_images_and_third_party_files_are_declared(self):
+    def test_images_are_declared(self):
         for path in self.tracked:
-            if IMAGES.search(path) or path.startswith(THIRD_PARTY) and not path.endswith("README.md"):
+            if IMAGES.search(path):
                 with self.subTest(path=path):
                     self.assertNotEqual(self.license_of(path), DEFAULT, f"{path} needs its own Files entry")
 

@@ -12,10 +12,14 @@ concurrency:
   group: checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  # 腳本讀寫的中文檔案都是 UTF-8；Windows runner 的預設編碼不是。
+  PYTHONUTF8: '1'
+
 jobs:
-  linux:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -24,15 +28,22 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
       - name: Check public source paths
-        run: python3 scripts/check_public_tree.py
-      - name: Test Go code
-        run: go test ./...
+        run: python scripts/check_public_tree.py
       - name: Vet Go code
         run: go vet ./...
-      - name: Test Fcitx5 client
-        run: make -C platforms/linux-fcitx5 test
-      - name: Test upgrades
-        run: make test-upgrade
-      - name: Test release packaging
-        run: make test-release
+      - name: Test Go code
+        run: go test ./...
+      - name: Test release scripts
+        run: python -m unittest discover -s scripts -p "test_*.py"
+      - name: Add 32-bit Rust target
+        run: rustup target add i686-pc-windows-msvc
+      - name: Test Windows shell
+        working-directory: platforms/windows
+        run: cargo test --locked
+      - name: Test settings program
+        working-directory: platforms/settings
+        run: cargo test --locked

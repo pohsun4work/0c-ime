@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// 頁面名稱有三份：這裡（0c-update open-settings 的白名單）、設定程式 Rust 端（--page 與 macOS 切頁通知）、
+// 頁面名稱有三份：這裡（0c-update open-settings 的白名單）、設定程式 Rust 端（--page）、
 // 畫面（側欄與舊名稱的導向）。少了一份，那個名稱就會開成總覽（#207 拆頁時三份一起改）。
 func TestPageNamesMatchTheSettingsApp(t *testing.T) {
 	root := filepath.Join("..", "..", "platforms", "settings")

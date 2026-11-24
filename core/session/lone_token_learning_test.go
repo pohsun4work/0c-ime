@@ -20,9 +20,8 @@ func TestLoneTokenIsNotLearned(t *testing.T) {
 		"空白再Enter": func(s *Session) { key(s, " "); key(s, proto.KeyEnter) },
 	}
 	modes := map[string]func() *Session{
-		"中英混打":      mixedSession,
-		"英文模式補字":    autocompleteSession,
-		"英文模式補字＋混打": func() *Session { s := autocompleteSession(); s.MixedInput = true; return s },
+		"中英混打":   newSession,
+		"英文模式補字": autocompleteSession,
 	}
 	for _, pw := range []string{"steventest", "Passw0rd", "steven1990", "Ab12cd34", "MyPass_99", "qwerty"} {
 		for mode, start := range modes {
@@ -61,9 +60,9 @@ func TestTokenInSentenceIsStillLearned(t *testing.T) {
 		typed string // 打完再按 Enter
 		word  string
 	}{
-		{"混打接中文", mixedSession, "newWidget_52 ji3", "newWidget_52"},
-		{"混打中文在前", mixedSession, "ji3 newWidget_52", "newWidget_52"},
-		{"混打兩個詞", mixedSession, "rclone sync", "rclone"},
+		{"混打接中文", newSession, "newWidget_52 ji3", "newWidget_52"},
+		{"混打中文在前", newSession, "ji3 newWidget_52", "newWidget_52"},
+		{"混打兩個詞", newSession, "rclone sync", "rclone"},
 		{"英文模式按空白", autocompleteSession, "pCloud ", "pCloud"},
 		{"英文模式句尾前", autocompleteSession, "use LingxiCorn now", "LingxiCorn"},
 	}

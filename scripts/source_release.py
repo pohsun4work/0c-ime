@@ -78,23 +78,23 @@ def fetch_models(lock, cache, offline=False):
                     raise ValueError(f"offline cache miss: {role}/{name} ({entry['sha256']})")
                 url = f"https://huggingface.co/{model['repository']}/resolve/{model['revision']}/{name}"
                 print(f"Fetching {role}/{name}", flush=True)
-                with tempfile.NamedTemporaryFile(dir=cache, prefix=".download-", delete=False) as stream:
-                    pending = Path(stream.name)
-                    try:
-                        with urllib.request.urlopen(url, timeout=120) as response:
-                            # Bound a corrupt response before it can exhaust storage.
-                            remaining = entry["size"] + 1
-                            while remaining:
-                                block = response.read(min(1 << 20, remaining))
-                                if not block:
-                                    break
-                                stream.write(block)
-                                remaining -= len(block)
-                        stream.flush()
-                        check_file(pending, entry)
-                        os.replace(pending, target)
-                    finally:
-                        pending.unlink(missing_ok=True)
+                stream = tempfile.NamedTemporaryFile(dir=cache, prefix=".download-", delete=False)
+                pending = Path(stream.name)
+                try:
+                    # Windows cannot rename or delete a file that is still open: close the download before moving it.
+                    with stream, urllib.request.urlopen(url, timeout=120) as response:
+                        # Bound a corrupt response before it can exhaust storage.
+                        remaining = entry["size"] + 1
+                        while remaining:
+                            block = response.read(min(1 << 20, remaining))
+                            if not block:
+                                break
+                            stream.write(block)
+                            remaining -= len(block)
+                    check_file(pending, entry)
+                    os.replace(pending, target)
+                finally:
+                    pending.unlink(missing_ok=True)
             check_file(target, entry)
 
 # Selection packages are v1 through 0.2.11 and v2 (tone_policy) from 0.2.12; older releases must still verify.
@@ -120,7 +120,18 @@ def check_models(root, lock):
                 raise ValueError("selection vocabulary and manifest bind different system dictionaries")
 
 
-def inventory(root, skip=(RECORD, MODELS_RECORD)):
+def executables(archive, top=True):
+    """Files whose tar header has an execute bit, relative to the source root (below the top-level directory when top).
+    Windows file systems keep no execute bit, so modes come from the archive, never from the extracted files."""
+    names = set()
+    for member in archive.getmembers():
+        if member.isfile() and member.mode & 0o111:
+            parts = PurePosixPath(member.name).parts
+            names.add("/".join(parts[1:] if top else parts))
+    return names
+
+
+def inventory(root, executable=frozenset(), skip=(RECORD, MODELS_RECORD)):
     files = {}
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root).as_posix()
@@ -133,7 +144,7 @@ def inventory(root, skip=(RECORD, MODELS_RECORD)):
             files[relative] = {"link": os.readlink(path)}
         elif path.is_file():
             files[relative] = {"sha256": digest(path), "size": path.stat().st_size,
-                               "mode": 0o755 if path.stat().st_mode & 0o111 else 0o644}
+                               "mode": 0o755 if relative in executable else 0o644}
         elif not path.is_dir():
             raise ValueError(f"unsupported source file: {relative}")
     return files
@@ -156,12 +167,13 @@ def git(repo, *args):
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
 
-def pack(root, tarball, epoch):
+def pack(root, tarball, epoch, executable=frozenset()):
     def normalized(info):
         info.uid = info.gid = 0
         info.uname = info.gname = ""
         info.mtime = epoch
-        info.mode = 0o755 if info.isdir() or info.mode & 0o111 else 0o644
+        relative = "/".join(PurePosixPath(info.name).parts[1:])
+        info.mode = 0o755 if info.isdir() or relative in executable else 0o644
         info.pax_headers = {}
         return info
 
@@ -190,6 +202,7 @@ def build(repo, tag, output, cache, offline=False, data_dir=None):
         root.mkdir()
         with tarfile.open(source_tar) as archive:
             extract(archive, root)
+            executable = executables(archive, top=False)
         for generated in (RECORD, MODELS_RECORD):
             if (root / generated).exists():
                 raise ValueError(f"{generated} is generated and must not be committed")
@@ -227,7 +240,7 @@ def build(repo, tag, output, cache, offline=False, data_dir=None):
             os.rename(root / "models" / role, models_root / "models" / role)
         record = {"schema": 3, "tag": tag, "commit": commit, "source_date_epoch": epoch,
                   "dictionary_lock_sha256": digest(root / release_dictionary.LOCK),
-                  "models_lock_sha256": digest(root / LOCK), "files": inventory(root)}
+                  "models_lock_sha256": digest(root / LOCK), "files": inventory(root, executable)}
         (root / RECORD).write_bytes(json_bytes(record))
         from pair_models import PAIR_LOCK
         models_record = {"schema": 1, "tag": tag, "commit": commit, "source_date_epoch": epoch,
@@ -239,7 +252,7 @@ def build(repo, tag, output, cache, offline=False, data_dir=None):
         stage.mkdir()
         tarball = stage / (name + ".tar.xz")
         models = stage / f"{MODELS_NAME}-{tag[1:]}.tar.xz"
-        pack(root, tarball, epoch)
+        pack(root, tarball, epoch, executable)
         pack(models_root, models, epoch)
         (stage / "SHA256SUMS").write_text("".join(f"{digest(path)}  {path.name}\n" for path in sorted((tarball, models))),
                                           encoding="ascii")
@@ -253,6 +266,7 @@ def verify(tarball, models=None):
         destination = Path(temp)
         with tarfile.open(tarball) as archive:
             extract(archive, destination)
+            executable = executables(archive)
         roots = list(destination.iterdir())
         if len(roots) != 1 or not roots[0].is_dir() or roots[0].is_symlink():
             raise ValueError("expected exactly one source directory")
@@ -265,7 +279,7 @@ def verify(tarball, models=None):
             raise ValueError("source directory does not match version")
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", record["commit"]):
             raise ValueError("invalid source commit")
-        if inventory(root, skip=(RECORD,)) != record["files"]:
+        if inventory(root, executable, skip=(RECORD,)) != record["files"]:
             raise ValueError("source release file inventory mismatch")
         check_paths(record["files"], read_rules((root / RULES).read_text(encoding="utf-8")))
         if digest(root / LOCK) != record["models_lock_sha256"]:
@@ -299,11 +313,12 @@ def verify_models(models, destination, root, record):
                       and (member.isfile() or member.isdir())):
                 raise ValueError(f"unexpected models archive member: {member.name}")
         extract(archive, destination)
+        executable = executables(archive)
     models_record = json.loads((root / MODELS_RECORD).read_text(encoding="utf-8"))
     if (models_record.get("schema") != 1 or models_record.get("tag") != record["tag"]
             or models_record.get("commit") != record["commit"]):
         raise ValueError("models tarball belongs to another release")
-    files = {path: entry for path, entry in inventory(root, skip=(RECORD, MODELS_RECORD)).items()
+    files = {path: entry for path, entry in inventory(root, executable, skip=(RECORD, MODELS_RECORD)).items()
              if path.startswith("models/") and path.split("/")[1] in ROLES}
     if files != models_record["files"]:
         raise ValueError("models tarball file inventory mismatch")

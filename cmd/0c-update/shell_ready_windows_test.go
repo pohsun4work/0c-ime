@@ -36,10 +36,7 @@ func TestShellReadyOnlyChecksTheReceipt(t *testing.T) {
 
 // #253：Windows 裝好後協調器不等登入。
 func TestWindowsShellDoesNotWaitForLogin(t *testing.T) {
-	if shellPendingAfterInstall() {
-		t.Fatal("Windows 裝好不該回 pending")
-	}
-	if !(&system{}).ShellActiveWithoutRelogin() || !shellWithoutRelogin {
+	if !(&system{}).ShellActiveWithoutRelogin() {
 		t.Fatal("Windows 要走不等重新登入的路徑")
 	}
 }

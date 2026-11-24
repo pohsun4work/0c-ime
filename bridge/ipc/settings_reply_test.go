@@ -46,9 +46,10 @@ func TestDrainDeliversFinalCommitReplyBeforeDisconnect(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if !srv.Drain() {
+	if !srv.markDrain() {
 		t.Fatal("drain did not start")
 	}
+	srv.runDrain()
 	select {
 	case <-drained:
 		t.Error("drained before the commit reply was delivered")

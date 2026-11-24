@@ -9,7 +9,7 @@ func TestEnglishAutocompleteSettingContractReportsPendingAndUnknownRuntime(t *te
 	base := t.TempDir()
 	writeSettings(t, base, `{"english_autocomplete":true}`)
 	for _, tc := range []struct{ runtime, want string }{{"true", "on"}, {"false", "off"}, {"", ""}} {
-		v, ok := runningValues(map[string]string{"english_autocomplete": tc.runtime})["english-autocomplete"]
+		v, ok := settings.RunningValues(map[string]string{"english_autocomplete": tc.runtime})["english-autocomplete"]
 		if v != tc.want || ok != (tc.runtime != "") {
 			t.Fatalf("runtime %q: %q %v", tc.runtime, v, ok)
 		}

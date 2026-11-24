@@ -318,7 +318,7 @@ type supervisors struct {
 }
 
 func (s *supervisors) attach(e *engine.Engine, data string, timeout time.Duration, threads int) error {
-	b := neural.FindBundled(data)
+	b := neural.Find(data)
 	if !b.HasSelect {
 		return fmt.Errorf("%s 旁沒有可用的 neural/select", data)
 	}

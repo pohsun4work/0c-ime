@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/english"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -28,7 +29,6 @@ func knownAlnumSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	var words []english.Word
 	for _, w := range []string{"a", "i", "win", "windows", "java", "gen", "line", "bug", "mini", "raid", "us", "top"} {
 		words = append(words, english.Word{Text: w, Weight: 65})
@@ -116,7 +116,7 @@ func TestAlnumTokensAreNotInOrderSyllables(t *testing.T) {
 			continue
 		}
 		body := tok
-		if sym, ok := s.layout.Symbol(rune(tok[len(tok)-1])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
+		if sym, ok := layout.Standard.Symbol(rune(tok[len(tok)-1])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
 			body = tok[:len(tok)-1]
 		}
 		if _, ok := s.mixedComposer(body); ok && s.keysInSyllableOrder(body) {

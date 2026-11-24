@@ -1,5 +1,5 @@
 //! 一個輸入欄位在 0c-server 上的 session：請求、重連後的重播、快照的解讀。
-//! 與 Fcitx 5 外殼的 session.cpp 對應；不依賴 TSF，可單獨測試。
+//! 不依賴 TSF，可單獨測試。
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -40,21 +40,12 @@ pub struct Snapshot {
     pub english_autocomplete: bool,
     pub english_pending: bool,
     pub english_can_start: bool,
-    /// 引擎記得的 Caps Lock 狀態（caps_lock，#173）；跟按鍵當下的鎖定狀態不同時外殼送 caps_lock。
-    pub caps_lock: bool,
-    /// 目前的英文是 Caps Lock 帶來的（caps_english，#173），關掉 Caps Lock 會回到注音。
-    pub caps_english: bool,
     pub reconnected: bool,
     pub context_id: u64, // 本次提交可供外殼確認的代號；不是文件文字
     /// 核心這次請求的提示（例如「已加入詞庫：…」，#123）；顯示在候選窗上方，下一鍵或幾秒後消失。
     pub notices: Vec<String>,
     /// 讀音提示（#162）：中英混打時照字面顯示的數字按空白會組成的注音（20 → ㄉㄢ）；沒有時為空字串。
     pub reading_hint: String,
-    /// 送出的文字目前會轉成簡體（output_simplified，#169）。只有回報 output_simplified_live 的引擎才有這一項。
-    pub output_simplified: bool,
-    /// 這一鍵被擋下（bell，#300 打錯注音時提示）：按了聲調但讀音沒有字，注音停在組字區。外殼用 MessageBeep 提示；
-    /// 只在擋下的那次快照出現。舊引擎沒有這一項。
-    pub bell: bool,
 }
 
 impl Snapshot {
@@ -144,24 +135,8 @@ pub struct Session {
     mode_known: bool,
     // 引擎回報「所有輸入框共用中英模式」（mode_memory=shared，#115）：換欄位後別的程式可能已經切換，重新查。
     shared: bool,
-    // 引擎認得 caps_lock 請求而且「Caps Lock 開著時直接打英文」開著（health／open 的 caps_lock_english，#173）。
-    // 跟著最近一次 health（learn_mode）或 open 快取：新開的程式第一個按鍵前就知道，換欄位（session 關掉）也沿用。
-    caps_lock_english: bool,
-    // caps_lock_english 是在哪一代連線上問到的（#173）。設定一改，0c-update 就請引擎存檔退出、再以新設定啟動，
-    // 舊連線跟著斷；連線還在而且是同一代時快取一定是新的，Caps Lock 鍵不必再問 health（refresh_caps_lock_english）。
-    caps_generation: u32,
-    // 最近一次快照的 caps_english（#173），換欄位清掉 english_state 後仍保留：重開 session 還原模式時，
-    // Caps Lock 帶來的英文以 caps_lock 還原（關掉 Caps Lock 才回得到注音），不當成使用者切的英文。
-    caps_english: bool,
-    // 「輸出簡體字」（#169）：引擎能即時切換（health／open 的 output_simplified_live），以及引擎目前的值
-    // （health／open 的 output_simplified、之後每個快照的 output_simplified）。輸入指示器的「简」與選單打勾看這兩項；
-    // 跟著 session 物件（這個程式的 TSF 執行緒），換欄位也沿用。
-    simplified_live: bool,
-    simplified: bool,
-    // 上一次從引擎得知「輸出簡體字」的時間（health／open／快照）；換欄位時剛問過就不再問（refresh_simplified_after）。
-    simplified_at: Option<Instant>,
     // 沒在組字時哪些鍵交給引擎（health 的 info，見 idle_key_from，#183）與它是在哪一代連線上問到的。設定一改引擎就重啟、
-    // 舊連線跟著斷，所以同一代、連線還在時沿用，不每按一個鍵就問一次 health（同 caps_generation）。
+    // 舊連線跟著斷，所以同一代、連線還在時沿用，不每按一個鍵就問一次 health。
     idle_info: Option<Value>,
     idle_generation: u32,
 }
@@ -171,27 +146,6 @@ pub struct Session {
 /// 當成注音，跟以前只在英文時還原相同。
 fn restore_mode(known: bool, want_english: bool, start_english: bool) -> Option<bool> {
     (known && want_english != start_english).then_some(want_english)
-}
-
-/// 重開 session 時依序送出的還原請求。Caps Lock 帶來的英文（#173，caps_english）底下是注音：模式照注音還原
-/// （開始時英文就先設回注音），設定還開著時再以 caps_lock 還原暫時的英文，新 session 也記得是暫時的，關掉 Caps Lock
-/// 才回到注音。設定剛關掉（引擎以新設定重啟）時就是注音。不這樣的話，暫時的英文會變成這個程式自己的英文。
-fn restore_requests(
-    known: bool,
-    want_english: bool,
-    caps_english: bool,
-    caps_lock_english: bool,
-    start_english: bool,
-) -> Vec<Value> {
-    let caps = want_english && caps_english;
-    let mut out: Vec<Value> = restore_mode(known, want_english && !caps, start_english)
-        .map(|english| json!({"type": "mode", "on": english}))
-        .into_iter()
-        .collect();
-    if caps && caps_lock_english {
-        out.push(json!({"type": "caps_lock", "on": true}));
-    }
-    out
 }
 
 /// health 回報的新 session 開始時的模式（#160 的 initial_mode；全部共用時是目前共用的模式）。舊引擎沒有這一項時為 None。
@@ -230,65 +184,9 @@ impl Session {
             vocab_keys: false,
             mode_known: false,
             shared: false,
-            caps_lock_english: false,
-            caps_generation: 0,
-            caps_english: false,
-            simplified_live: false,
-            simplified: false,
-            simplified_at: None,
             idle_info: None,
             idle_generation: 0,
         }
-    }
-
-    /// 從 health／open 的 info 記下「輸出簡體字」的能力與目前的值；回傳狀態是否因此改變。
-    fn learn_simplified(&mut self, info: &Value) -> bool {
-        let before = (self.simplified_live, self.simplified);
-        self.simplified_live = info["output_simplified_live"] == "true";
-        self.simplified = self.simplified_live && info["output_simplified"] == "true";
-        self.simplified_at = Some(Instant::now());
-        before != (self.simplified_live, self.simplified)
-    }
-
-    /// 「輸出簡體字」目前的值；引擎不能即時切換（舊引擎）或還沒問過時為 None，選單改看 0c-update 的狀態。
-    pub fn simplified(&self) -> Option<bool> {
-        self.simplified_live.then_some(self.simplified)
-    }
-
-    /// 換欄位時重新確認「輸出簡體字」（#169）：可能剛在設定程式或別的程式切換過，輸入指示器的「简」要跟上。
-    /// 只用已經在執行的引擎、不為此啟動，沒有 session 時查完不留連線（同 learn_mode）。回傳狀態是否改變。
-    pub fn refresh_simplified(&mut self) -> bool {
-        let probe = !self.client.connected();
-        if probe && !self.client.connect_existing() {
-            return false;
-        }
-        let reply = self.client.call(&json!({"op": "health"}));
-        if probe && self.id == 0 {
-            self.client.release();
-        }
-        match reply.filter(|r| r["ok"] == true) {
-            Some(reply) => self.learn_simplified(&reply["info"]),
-            None => false,
-        }
-    }
-
-    /// 換欄位用的 refresh_simplified：fresh 之內已經從引擎得知（剛打過字、剛換過欄位）就不再問，回傳 false。
-    /// 換欄位在宿主的 UI 執行緒上，一次點擊常連著好幾次焦點變化；同一段時間裡值不會變，不必每次都多一次同步 IPC。
-    pub fn refresh_simplified_after(&mut self, fresh: Duration) -> bool {
-        if self.simplified_at.is_some_and(|at| at.elapsed() < fresh) {
-            return false;
-        }
-        self.refresh_simplified()
-    }
-
-    /// 切換「輸出簡體字」（#169）：引擎立即改變之後送出的文字（所有程式，包括已經在組字區的字）並寫進設定檔，
-    /// 組字不動；快照帶「已切換為輸出簡體字／繁體字」的提示。這是全域設定，不記進重播紀錄。
-    /// 引擎不能即時切換時回 handled=false（呼叫端改請 0c-ui 執行 0c-update）。
-    pub fn output_simplified(&mut self, on: bool) -> Snapshot {
-        if !self.simplified_live {
-            return Snapshot::default();
-        }
-        self.handle(json!({"type": "output_simplified", "on": on}))
     }
 
     /// 還不知道這個程式（TSF 執行緒）的中英模式時，向引擎查新 session 開始時的模式（#160）。
@@ -303,7 +201,6 @@ impl Session {
             return false;
         }
         let reply = self.client.call(&json!({"op": "health"}));
-        let generation = self.client.generation();
         if probe && self.id == 0 {
             self.client.release();
         }
@@ -312,15 +209,11 @@ impl Session {
         };
         self.mode_known = true;
         self.shared = reply["info"]["mode_memory"] == "shared";
-        self.caps_lock_english = reply["info"]["caps_lock_english"] == "true";
-        self.caps_generation = generation;
-        let simplified = self.learn_simplified(&reply["info"]);
         let before = self.english;
         if let Some(english) = initial_english(&reply["info"]) {
             self.english = english;
-            self.caps_english = false; // 模式照引擎的（共用模式或開始時的）；Caps Lock 由下一個按鍵重新同步（#173）
         }
-        before != self.english || simplified
+        before != self.english
     }
 
     /// 目前的 session 是否可以送 #123 的新鍵名（Shift＋←／→、Shift＋Delete／Backspace）。
@@ -359,94 +252,39 @@ impl Session {
         self.english
     }
 
-    /// 按鍵當下的 Caps Lock 鎖定狀態要不要告訴引擎（#173）：引擎回報 caps_lock_english，而且跟引擎記得的不同。
-    /// 換欄位後（english_state 已清掉）還記得 Caps Lock 帶來的英文時當成開著：在別處關掉 Caps Lock 回來，
-    /// 第一個按鍵就回到注音。設定關閉或舊引擎時一律 false，注音模式照舊不理 Caps Lock（#168）。
-    pub fn caps_needs_sync(&self, on: bool) -> bool {
-        self.caps_lock_english && (self.english_state.caps_lock || self.caps_english) != on
-    }
-
-    /// Caps Lock 鍵本身（#173）：確認 caps_lock_english 的快取還是新的。剛在設定程式打開這一項時引擎重啟了，
-    /// open／health 的快取是舊的，不重新確認的話第一個字母會照注音打、下一個才切英文。設定改了一定會重啟引擎，
-    /// 所以連線還在（不送請求，只看管道另一端關了沒有）而且快取是這一代連線上問到的就沿用，不在 UI 執行緒上問引擎；
-    /// 連線斷了或還沒問過才以 health 重新確認。沒有連線而且引擎沒在執行時不為此啟動，沿用快取；
-    /// 沒有 session 時查完不留連線（同 learn_mode），只按過 Caps Lock、沒打過字的程式不佔著一條連線。
-    pub fn refresh_caps_lock_english(&mut self) {
-        if self.client.connected() && self.caps_generation == self.client.generation() && self.client.alive() {
-            return;
-        }
-        let probe = !self.client.connected(); // alive() 發現斷線時已經關掉，這裡重連
-        if probe && !self.client.connect_existing() {
-            return;
-        }
-        let reply = self.client.call(&json!({"op": "health"}));
-        let generation = self.client.generation();
-        if probe && self.id == 0 {
-            self.client.release();
-        }
-        if let Some(reply) = reply.filter(|r| r["ok"] == true) {
-            self.caps_lock_english = reply["info"]["caps_lock_english"] == "true";
-            self.caps_generation = generation;
-        }
-    }
-
-    /// 回報 Caps Lock 狀態（#173）：開啟時引擎先送出組字、切到英文；關閉時回到原本的模式。
-    pub fn caps_lock(&mut self, on: bool) -> Snapshot {
-        self.handle(json!({"type": "caps_lock", "on": on}))
+    /// 設定的 Shift＋空白有動作（切全半形、插入空白、開單字候選）時送 ShiftSpace；跟 idle_key 用同一份快取。
+    pub fn style_shift_space(&mut self) -> bool {
+        let _ = self.idle_key("");
+        matches!(self.idle_info.as_ref().and_then(|v| v["shift_space"].as_str()), Some("fullwidth" | "space" | "single"))
     }
 
     /// 沒在組字時這個鍵要不要交給引擎（見 idle_key_from）。TestKeyDown 只查設定，不送按鍵：答錯時 WPF 會掉鍵，
-    /// 或吃掉應用程式的鍵（關閉 Emoji 捷徑時的 =、許氏的數字與 q）。所有可見字元依排列及風格查詢；
-    /// health 的答案跟著連線快取（設定一改引擎就重啟、連線跟著斷），連線還在時不再往返。
+    /// 或吃掉應用程式的鍵。health 的答案跟著連線快取（設定一改引擎就重啟、連線跟著斷），連線還在時不再往返。
     /// 問不到（引擎正在交接、剛重啟還沒起來、連線錯誤）時不交還宿主：OnKeyDown 的 handle() 會等交接結束再送，
-    /// 這裡說不吃的字母卻直接以英文打進文件（改設定後的第一個字）。沿用上一次問到的答案；從沒問到過就照沒有設定資訊的
-    /// 舊推算（字母交給引擎，同 0.2.4 的本地判斷）。不記代數，下一個鍵重新問。英文模式、Ctrl／Alt 組合不會走到這裡（wants_key）。
-    pub fn style_shift_space(&mut self) -> bool {
-        let _ = self.idle_key("");
-        matches!(self.idle_info.as_ref().and_then(|v| v["input_style_shift_space"].as_str()), Some("fullwidth" | "space" | "single"))
-    }
-
-    pub fn style_caps_lower(&mut self) -> bool {
-        let _ = self.idle_key("");
-        self.idle_info.as_ref().is_some_and(|v| v["input_style_caps_letter"] == "lower")
-    }
-
+    /// 這裡說不吃的字母卻直接以英文打進文件（改設定後的第一個字）。沿用上一次問到的答案；從沒問到過就照
+    /// keys::starts_composition 的固定集合。不記代數，下一個鍵重新問。英文模式、Ctrl／Alt 組合不會走到這裡（wants_key）。
     pub fn idle_key(&mut self, key: &str) -> bool {
         let fresh = self.idle_info.is_some()
             && self.client.connected()
             && self.idle_generation == self.client.generation()
             && self.client.alive();
-        // 字寬是 session 的狀態（Shift＋空白，#278），跟著最近一次快照；換欄位清掉 english_state 時引擎也開新的半形 session。
-        let full_width = self.english_state.full_width;
         if !fresh {
             match self.client.call(&json!({"op": "health"})).filter(|r| r["ok"] == true) {
                 Some(reply) => {
                     self.idle_info = Some(reply["info"].clone());
                     self.idle_generation = self.client.generation();
                 }
-                None => return idle_key_from(self.idle_info.as_ref().unwrap_or(&Value::Null), key, full_width),
+                None => return idle_key_from(self.idle_info.as_ref().unwrap_or(&Value::Null), key),
             }
         }
-        self.idle_info.as_ref().is_some_and(|info| idle_key_from(info, key, full_width))
+        self.idle_info.as_ref().is_some_and(|info| idle_key_from(info, key))
     }
 
-    /// 「用快捷鍵切換簡體字」開著、引擎也能即時切換（health 的 simplified_hotkey 與 output_simplified_live，#192）。
-    /// 只在按下 Ctrl＋Shift＋F11 時查詢（同 ctrl_punctuation），設定套用（引擎重啟）後第一次按就照新設定；
-    /// 順便記下引擎目前的「輸出簡體字」，切換的方向才對。引擎不可用或舊版引擎沒有這一項時為 false，照舊交給應用程式。
-    pub fn simplified_hotkey(&mut self) -> bool {
-        let Some(reply) = self.client.call(&json!({"op": "health"})).filter(|r| r["ok"] == true) else {
-            return false;
-        };
-        self.learn_simplified(&reply["info"]);
-        self.simplified_live && reply["info"]["simplified_hotkey"] == "true"
-    }
-
-    /// 引擎是否認得 Ctrl＋標點的鍵名 `key` 而且設定開著（health 的 ctrl_punctuation 與 ctrl_punctuation_keys，#168、#231）。
-    /// 只在按下 Ctrl＋標點鍵時查詢，設定套用（引擎重啟）後立即生效；引擎不可用或舊版引擎沒有這一項時為 false，照舊交給應用程式。
+    /// 引擎是否認得 Ctrl＋標點的鍵名 `key`（health 的 ctrl_punctuation_keys，#168、#231）。
+    /// 只在按下 Ctrl＋標點鍵時查詢；引擎不可用時為 false，照舊交給應用程式。
     pub fn ctrl_punctuation(&mut self, key: &str) -> bool {
         self.client.call(&json!({"op": "health"})).is_some_and(|reply| {
             reply["ok"] == true
-                && reply["info"]["ctrl_punctuation"] == "true"
                 && crate::keys::ctrl_punct_known(key, reply["info"]["ctrl_punctuation_keys"].as_str().unwrap_or(""))
         })
     }
@@ -494,9 +332,6 @@ impl Session {
         self.generation = self.client.generation();
         self.vocab_keys = reply["info"]["vocab_keys"] == "true";
         self.shared = reply["info"]["mode_memory"] == "shared";
-        self.caps_lock_english = reply["info"]["caps_lock_english"] == "true";
-        self.caps_generation = self.generation;
-        self.learn_simplified(&reply["info"]);
         let start_english = reply["info"]["start_mode"] == "english";
         self.pending_context = None; // 新 session 不認得舊代號
         if self.context_enabled {
@@ -524,13 +359,8 @@ impl Session {
         } else {
             self.replay_english
         };
-        for req in restore_requests(
-            self.mode_known,
-            want,
-            self.caps_english,
-            self.caps_lock_english,
-            start_english,
-        ) {
+        if let Some(english) = restore_mode(self.mode_known, want, start_english) {
+            let req = json!({"type": "mode", "on": english});
             let restored = self
                 .client
                 .call(&json!({"op": "handle", "session": self.id, "req": req}));
@@ -612,11 +442,6 @@ impl Session {
                 self.pending_context = None;
             }
             self.english = s.english;
-            self.caps_english = s.caps_english;
-            if self.simplified_live {
-                self.simplified = s.output_simplified; // 設定程式或別的程式切換後，下一個快照就跟上（#169）
-                self.simplified_at = Some(Instant::now());
-            }
             self.mode_known = true;
             self.english_state = s.clone();
             self.down = false;
@@ -628,9 +453,7 @@ impl Session {
                     self.cleared = Some((log, self.replay_english));
                 }
                 self.log.clear();
-            } else if kind != "caps_lock" && kind != "output_simplified" {
-                // Caps Lock 狀態不重播（#173）：重開的 session 由還原模式與下一個按鍵重新同步。
-                // 「輸出簡體字」是全域設定，重播會再切一次（#169）。
+            } else {
                 if self.log.is_empty() {
                     match cleared.take().filter(|_| kind == "toggle") {
                         Some((log, english)) => {
@@ -723,11 +546,7 @@ fn parse(reply: &Value) -> Snapshot {
     s.english_autocomplete = j["english_autocomplete"].as_bool().unwrap_or(false);
     s.english_pending = j["english_pending"].as_bool().unwrap_or(false);
     s.english_can_start = j["english_can_start"].as_bool().unwrap_or(false);
-    s.caps_lock = j["caps_lock"].as_bool().unwrap_or(false);
-    s.caps_english = j["caps_english"].as_bool().unwrap_or(false);
     s.reading_hint = j["reading_hint"]["text"].as_str().unwrap_or("").to_string();
-    s.output_simplified = j["output_simplified"].as_bool().unwrap_or(false);
-    s.bell = j["bell"].as_bool().unwrap_or(false);
     if let Some(notices) = j["notices"].as_array() {
         s.notices = notices
             .iter()
@@ -846,25 +665,6 @@ mod parse_tests {
         assert_eq!(initial_english(&json!({"version": "old"})), None, "舊引擎沒有回報");
     }
 
-    // #173：Caps Lock 帶來的英文重開 session 時以 caps_lock 還原；設定關掉或開始時英文都不能變成這個程式自己的英文。
-    #[test]
-    fn caps_english_is_restored_as_temporary() {
-        let caps_on = json!({"type": "caps_lock", "on": true});
-        let zhuyin = json!({"type": "mode", "on": false});
-        let english = json!({"type": "mode", "on": true});
-        assert_eq!(restore_requests(true, true, true, true, false), vec![caps_on.clone()], "跟以前一樣");
-        assert_eq!(
-            restore_requests(true, true, true, true, true),
-            vec![zhuyin.clone(), caps_on.clone()],
-            "開始時英文：先設回注音，Caps Lock 的英文才是暫時的"
-        );
-        assert_eq!(restore_requests(true, true, true, false, false), Vec::<Value>::new(), "設定剛關掉：照注音開始");
-        assert_eq!(restore_requests(true, true, true, false, true), vec![zhuyin.clone()], "設定剛關掉、開始時英文：設回注音");
-        assert_eq!(restore_requests(true, true, false, true, false), vec![english.clone()], "Shift 切的英文照舊還原");
-        assert_eq!(restore_requests(true, false, false, true, true), vec![zhuyin.clone()]);
-        assert_eq!(restore_requests(false, true, true, true, false), vec![caps_on], "還沒問過模式：仍還原 Caps Lock");
-    }
-
     #[test]
     fn candidate_notes_line_up_with_candidates() {
         let reply: Value = serde_json::from_str(
@@ -891,15 +691,6 @@ mod parse_tests {
         assert_eq!(old.candidate_keys, vec!["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]);
         let english = parse(&json!({"snapshot": {"mode": "english", "candidates": {"items": [{"id": 0, "text": "hello"}]}}}));
         assert_eq!(english.candidate_keys, vec![""]);
-    }
-
-    // #300：擋下聲調的快照帶 bell，外殼嗶一聲；舊引擎或其他快照沒有這一項。
-    #[test]
-    fn bell_is_parsed() {
-        let s = parse(&json!({"snapshot": {"handled": true, "bell": true,
-            "preedit": [{"text": "ㄅㄩ", "style": "pending"}]}}));
-        assert!(s.bell && s.text() == "ㄅㄩ");
-        assert!(!parse(&json!({"snapshot": {"handled": true}})).bell, "舊引擎沒有 bell");
     }
 
     #[test]
@@ -955,100 +746,30 @@ mod parse_tests {
     }
 }
 
-/// 沒在組字時的聲調鍵 3 4 6 7 要不要交給引擎，依 health 的 info：
-/// - 沒開中英混打（tone_mark_keys）：引擎先把數字留在組字區，緊接空白換成聲調符號（#135）。
-/// - 中英混打（mixed_input）：引擎把數字照字面留在組字區，跟 Linux／macOS 一樣，後面的 54 才知道前面是數字、
-///   354 整串留數字（#175）；以前交還宿主時「3」直接打進文件，54 就組成「至」。
-/// 引擎不可用或舊版引擎兩項都沒有時為 false，維持原本交還宿主的行為。
-fn idle_tone_keys(info: &Value) -> bool {
-    info["tone_mark_keys"] == "true" || info["mixed_input"] == "true"
-}
-
-/// 沒在組字時這個鍵要不要交給引擎，依 health 的 info：
-/// - 引擎回報 idle_keys（#183 起）：照它。答案依鍵盤排列與設定而不同（許氏的數字、- / 不是注音鍵、交還宿主），
-///   由引擎算（core/session.IdleKeys，測試逐鍵比對實際處理結果），外殼不必為每種排列各寫一份按鍵表。
-/// - 舊引擎：依 keyboard_layout（標準或倚天，#83）、emoji_shortcut 與聲調鍵設定（idle_tone_keys）推算。
-/// - 全形（`full_width`，Shift＋空白，#278）：照引擎回報的 idle_keys_full_width（core/session.FullWidthIdleKeys），
-///   @ # * + 等不是注音鍵也不是標點的鍵都打全形。舊引擎沒有這一項時照半形的答案，另由 full_width_extra_key 補攔。
-fn idle_key_from(info: &Value, key: &str, full_width: bool) -> bool {
-    if let Some(keys) = info["idle_keys_full_width"].as_str().filter(|_| full_width) {
-        return key.chars().count() == 1 && keys.contains(key);
-    }
-    if let Some(keys) = info["idle_keys"].as_str() {
-        return key.chars().count() == 1 && keys.contains(key);
-    }
-    use crate::keys::{starts_composition, tone_key, Layout};
-    let layout = if info["keyboard_layout"] == "eten" { Layout::ETen } else { Layout::Standard };
-    if key == "=" && layout == Layout::Standard {
-        info["emoji_shortcut"] == "equals"
-    } else if tone_key(layout, key) {
-        idle_tone_keys(info)
-    } else {
-        starts_composition(layout, key)
+/// 沒在組字時這個鍵要不要交給引擎，照 health 回報的 idle_keys（core/session.IdleKeys，半形全形相同，測試逐鍵比對
+/// 實際處理結果）。從沒問到過引擎（`info` 是 Null）時照 keys::starts_composition 的固定集合。
+fn idle_key_from(info: &Value, key: &str) -> bool {
+    match info["idle_keys"].as_str() {
+        Some(keys) => key.chars().count() == 1 && keys.contains(key),
+        None => crate::keys::starts_composition(key),
     }
 }
 
 #[cfg(test)]
-mod idle_tone_key_tests {
+mod idle_key_tests {
     use super::*;
 
     #[test]
-    fn idle_tone_keys_go_to_the_engine_in_mixed_input_too() {
-        assert!(idle_tone_keys(&json!({"tone_mark_keys": "true", "mixed_input": "false"})), "#135");
-        assert!(idle_tone_keys(&json!({"tone_mark_keys": "false", "mixed_input": "true"})), "#175：354");
-        assert!(!idle_tone_keys(&json!({"tone_mark_keys": "false", "mixed_input": "false"})));
-        assert!(!idle_tone_keys(&json!({})), "舊引擎");
-    }
-
-    #[test]
     fn idle_keys_follow_the_engine_report() {
-        // #183 許氏：數字與 - / 交還宿主，字母、, . ; = 交給引擎。
-        let hsu = json!({"idle_keys": "!\"&'(),.:;<=>?[\\]^_`abcdefghijklmnoprstuvwxyz{}~", "keyboard_layout": "hsu", "mixed_input": "true", "tone_mark_keys": "true"});
-        for key in ["1", "3", "4", "6", "7", "0", "-", "/", "q"] {
-            assert!(!idle_key_from(&hsu, key, false), "{key}");
+        let partial = json!({"idle_keys": "abc@"});
+        assert!(idle_key_from(&partial, "@"));
+        assert!(!idle_key_from(&partial, "#"), "引擎沒列的鍵交還宿主，不能吃了又不處理");
+        assert!(!idle_key_from(&partial, "KP1"), "數字鍵盤不在清單，由 wants_key 看字寬");
+        // 從沒問到過引擎：可見 ASCII 都交給引擎。
+        for key in ["a", ",", "@", "3"] {
+            assert!(idle_key_from(&Value::Null, key), "{key}");
         }
-        for key in ["=", "a", ","] {
-            assert!(idle_key_from(&hsu, key, false), "{key}");
-        }
-        // 舊引擎沒有 idle_keys：照原本的推算。
-        let standard = json!({"keyboard_layout": "standard", "emoji_shortcut": "equals", "tone_mark_keys": "true"});
-        for key in ["1", "2", "5", "3", "7", "=", "-", "/"] {
-            assert!(idle_key_from(&standard, key, false), "{key}");
-        }
-        let eten = json!({"keyboard_layout": "eten", "emoji_shortcut": "equals", "tone_mark_keys": "true"});
-        for key in ["1", "2", "7", "="] {
-            assert!(idle_key_from(&eten, key, false), "{key}");
-        }
-        for key in ["5", "6"] {
-            assert!(!idle_key_from(&eten, key, false), "{key}");
-        }
-        assert!(!idle_key_from(&json!({"emoji_shortcut": "off"}), "=", false));
-        assert!(!idle_key_from(&json!({}), "3", false), "舊引擎沒有聲調設定：交還宿主");
-    }
-
-    #[test]
-    fn full_width_idle_keys_follow_the_engine_report() {
-        // #278：客戶的設定（標準排列、Shift＋空白切全形）。半形時 @ # * + 交還宿主，全形時由引擎打成全形。
-        let info = json!({
-            "idle_keys": "!\"&'(),-./0123456789:;<=>?[\\]^_`abcdefghijklmnopqrstuvwxyz{}~",
-            "idle_keys_full_width": "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
-        });
-        for key in ["@", "#", "$", "%", "*", "+", "|", "A"] {
-            assert!(!idle_key_from(&info, key, false), "半形 {key}");
-            assert!(idle_key_from(&info, key, true), "全形 {key}");
-        }
-        for key in ["j", "3", ",", "["] {
-            assert!(idle_key_from(&info, key, false) && idle_key_from(&info, key, true), "{key}");
-        }
-        assert!(!idle_key_from(&info, "KP1", true), "數字鍵盤不在清單，由 wants_key 看字寬");
-        // 引擎的全形清單沒列的鍵（例如以後的排列把某個可見字元當一聲）全形時照樣交還宿主，不能吃了又不處理。
-        let partial = json!({"idle_keys": "abc", "idle_keys_full_width": "abc@"});
-        assert!(idle_key_from(&partial, "@", true));
-        assert!(!idle_key_from(&partial, "#", true));
-        // 舊引擎沒有 idle_keys_full_width：照半形的答案（大寫、\ ' " < > ? 另由 full_width_extra_key 補攔）。
-        let old = json!({"idle_keys": "abc"});
-        assert!(!idle_key_from(&old, "@", true));
-        assert!(idle_key_from(&old, "a", true));
+        assert!(!idle_key_from(&Value::Null, "KP1"));
     }
 }
 
@@ -1120,19 +841,16 @@ mod tests {
         assert!(s.log.is_empty(), "提交後重播紀錄要清空");
     }
 
+    // P4.5：= 直接打 =，跟其他明確的符號一樣先留在組字區（Emoji 到 P11 才移進符號表）。
     #[test]
-    fn emoji_opens_without_preedit_and_double_equals_commits_once() {
+    fn equals_types_equals() {
         let Some(mut s) = session() else { return };
         assert!(s.idle_key("="));
         assert_eq!(s.id, 0, "查設定不能建立或改動組字");
-        let palette = s.key("=");
-        assert!(palette.ok && palette.handled && palette.composing());
-        assert_eq!(palette.text(), "");
-        assert_eq!(palette.candidate_kind, "emoji");
-        assert!(!palette.candidates.is_empty());
-        let literal = s.key("=");
-        assert_eq!(literal.commit, "=");
-        assert!(!literal.composing());
+        let typed = s.key("=");
+        assert!(typed.ok && typed.handled && typed.candidates.is_empty());
+        assert_eq!(typed.text(), "=");
+        assert_eq!(s.key("Enter").commit, "=");
     }
 
     #[test]
@@ -1202,50 +920,9 @@ mod tests {
         assert!(other.learn_mode(true) && other.english(), "另一個新開的程式從英文開始");
     }
 
-    // #169：選單切換「輸出簡體字」即時生效（ZUIN_TEST_SIMPLIFIED_PIPE：testdata/toy、暫存個人資料的獨立引擎；
-    // 這個測試會改它的設定，不和其他測試共用引擎）。另一個程式已經在組字區的字照新的設定送出；切換不記進重播紀錄。
-    #[test]
-    fn output_simplified_switches_live_and_is_not_replayed() {
-        let Ok(pipe) = std::env::var("ZUIN_TEST_SIMPLIFIED_PIPE") else {
-            return;
-        };
-        let mut menu = Session::with_client(Client::with_pipe(&pipe));
-        let mut editor = Session::with_client(Client::with_pipe(&pipe));
-        assert_eq!(menu.simplified(), None, "還沒問過引擎");
-        assert!(menu.refresh_simplified(), "health 回報能即時切換");
-        assert_eq!(menu.simplified(), Some(false));
-        assert!(!menu.client.connected(), "換欄位的查詢不留連線");
-        let scenery = ["z", "/", " ", "r", "u", "/", "3"]; // ㄈㄥ ㄐㄧㄥˇ
-        for k in scenery {
-            editor.key(k);
-        }
-        assert_eq!(editor.english_state.text(), "風景");
-        let snap = menu.output_simplified(true);
-        assert!(snap.ok && snap.handled && snap.output_simplified, "{:?}", snap);
-        assert_eq!(snap.notice(), "已切換為輸出簡體字");
-        assert_eq!(menu.simplified(), Some(true));
-        // 換欄位的確認：剛從快照得知就不問（一次點擊連著好幾次焦點變化）；過了時效才問，指示器跟上別處的切換。
-        assert!(!editor.refresh_simplified_after(Duration::from_secs(60)));
-        assert_eq!(editor.simplified(), Some(false), "時效內沿用上一個快照");
-        assert!(editor.refresh_simplified_after(Duration::ZERO), "過了時效重新問引擎");
-        assert_eq!(editor.simplified(), Some(true));
-        let sent = editor.key("Enter");
-        assert_eq!(sent.commit, "风景", "組字中切換後照新設定送出");
-        assert_eq!(editor.simplified(), Some(true), "下一個快照就跟上");
-        for k in scenery {
-            menu.key(k);
-        }
-        let snap = menu.output_simplified(false);
-        assert_eq!(snap.text(), "風景", "切換不動組字");
-        assert!(menu.log.iter().all(|r| r["type"] != "output_simplified"), "不記進重播紀錄");
-        menu.client.disconnect_for_test();
-        assert_eq!(menu.key("Enter").commit, "風景", "重連重播後送出，不會再切一次");
-        assert_eq!(menu.simplified(), Some(false));
-    }
-
     // #278：Shift＋空白切全形後，TestKeyDown 的預檢（idle_key、full_width_keypad）要跟引擎實際的處理一致：
     // 說要吃卻回未處理，WPF 會掉鍵；說不吃，@ # * 就交給應用程式打成半形。ZUIN_TEST_FULL_WIDTH_PIPE 是
-    // settings.json 有 style-shift-space=fullwidth 的獨立引擎（例如「我的原有設定」改 Shift＋空白切換全半形）。
+    // settings.json 有 shift_space=fullwidth 的獨立引擎。
     #[test]
     fn full_width_preflight_matches_the_engine() {
         let Ok(pipe) = std::env::var("ZUIN_TEST_FULL_WIDTH_PIPE") else {
@@ -1278,113 +955,6 @@ mod tests {
                 s.reset();
             }
         }
-    }
-
-    // #192：一般的 ZUIN_TEST_PIPE（設定關閉）不回報 simplified_hotkey，Ctrl＋Shift＋F11 照舊交給應用程式；
-    // ZUIN_TEST_HOTKEY_PIPE（暫存個人資料、settings.json 有 simplified_hotkey=true 的獨立引擎；這個測試會改它的設定）
-    // 回報開著，按下時送選單同一個請求：組字不動，之後送出簡體。
-    #[test]
-    fn simplified_hotkey_follows_the_setting() {
-        let _engine = crate::hotkey_engine_lock();
-        if let Some(mut s) = session() {
-            assert!(!s.simplified_hotkey(), "設定關閉時不攔");
-        }
-        let Ok(pipe) = std::env::var("ZUIN_TEST_HOTKEY_PIPE") else {
-            return;
-        };
-        let mut s = Session::with_client(Client::with_pipe(&pipe));
-        assert!(s.simplified_hotkey(), "設定開著");
-        assert_eq!(s.simplified(), Some(false), "順便知道目前是繁體");
-        for k in ["z", "/", " ", "r", "u", "/", "3"] {
-            s.key(k);
-        }
-        let snap = s.output_simplified(!s.simplified().unwrap());
-        assert!(snap.ok && snap.handled && snap.text() == "風景", "{:?}", snap);
-        assert_eq!(snap.notice(), "已切換為輸出簡體字");
-        assert_eq!(s.key("Enter").commit, "风景");
-        let back = s.output_simplified(!s.simplified().unwrap());
-        assert!(back.handled && s.simplified() == Some(false), "再按一次切回繁體");
-    }
-
-    // #173：引擎開著「Caps Lock 開著時直接打英文」（ZUIN_TEST_CAPS_PIPE 的 settings.json 有 caps_lock_english=true）。
-    // 開 Caps Lock 先送出組字、切到英文；換欄位或引擎重啟後仍是暫時的英文，關掉 Caps Lock 回到注音。
-    // 一般的 ZUIN_TEST_PIPE（設定關閉）不回報 caps_lock_english，外殼不送 caps_lock。
-    #[test]
-    fn caps_lock_english_survives_focus_and_reconnect() {
-        if let Some(mut s) = session() {
-            s.learn_mode(true);
-            assert!(s.mode_known && !s.caps_needs_sync(true), "設定關閉時不送 caps_lock");
-        }
-        let Ok(pipe) = std::env::var("ZUIN_TEST_CAPS_PIPE") else {
-            return;
-        };
-        let mut s = Session::with_client(Client::with_pipe(&pipe));
-        s.learn_mode(true);
-        assert!(s.mode_known && !s.english());
-        assert!(s.caps_needs_sync(true) && !s.caps_needs_sync(false), "新開的程式第一個按鍵前就知道要同步");
-        for k in ["s", "u", "3"] {
-            assert!(s.key(k).handled);
-        }
-        let snap = s.caps_lock(true);
-        assert!(snap.ok && snap.commit == "你" && snap.english && snap.caps_lock && snap.caps_english);
-        assert!(!s.caps_needs_sync(true));
-        let snap = s.key("A");
-        assert!(snap.ok && !snap.handled, "暫時英文的 A 交給應用程式");
-        // 換欄位：session 關掉；Caps Lock 還開著時不必重送，引擎重開 session 時以 caps_lock 還原。
-        s.reset();
-        assert!(s.english() && !s.caps_needs_sync(true) && s.caps_needs_sync(false));
-        // 在別的程式關掉了 Caps Lock：回來第一個按鍵就回到注音。
-        let snap = s.caps_lock(false);
-        assert!(snap.ok && !snap.english && !snap.caps_english, "關 Caps Lock 應回到注音：{snap:?}");
-        // 引擎重啟（斷線）時 Caps Lock 帶來的英文照樣是暫時的。
-        s.caps_lock(true);
-        s.client.disconnect_for_test();
-        let snap = s.caps_lock(false);
-        assert!(snap.ok && !snap.english, "重開 session 後關 Caps Lock 也回到注音：{snap:?}");
-        // Shift 切到英文後開關 Caps Lock：維持英文。
-        s.toggle();
-        s.caps_lock(true);
-        let snap = s.caps_lock(false);
-        assert!(snap.ok && snap.english, "Shift 切的英文不受 Caps Lock 影響");
-        s.toggle();
-    }
-
-    // #173 code review：引擎重啟後重開 session 時，Caps Lock 帶來的英文不能變成這個程式自己的英文。
-    // (a) Caps Lock 英文中在設定程式關掉這一項：以 ZUIN_TEST_PIPE（設定關閉）的引擎當作重啟後的新引擎。
-    // (b) ZUIN_TEST_CAPS_START_ENGLISH_PIPE：start_mode=english、caps_lock_english=true、mode_memory=native。
-    #[test]
-    fn caps_english_stays_temporary_after_engine_restart() {
-        if let (Ok(caps), Ok(plain)) = (std::env::var("ZUIN_TEST_CAPS_PIPE"), std::env::var("ZUIN_TEST_PIPE")) {
-            let mut s = Session::with_client(Client::with_pipe(&caps));
-            s.learn_mode(true);
-            assert!(s.caps_lock(true).caps_english);
-            s.client = Client::with_pipe(&plain); // 引擎以新設定（關閉）重啟
-            s.id = 0;
-            let snap = s.key("j");
-            assert!(snap.ok && !snap.english && snap.handled, "設定關掉後照注音：{snap:?}");
-            assert_eq!(snap.text(), "ㄨ");
-            s.key("Escape");
-        }
-        let Ok(pipe) = std::env::var("ZUIN_TEST_CAPS_START_ENGLISH_PIPE") else {
-            return;
-        };
-        let mut s = Session::with_client(Client::with_pipe(&pipe));
-        s.learn_mode(true);
-        assert!(s.english(), "開始時英文");
-        assert!(!s.toggle().english, "這個程式切到注音");
-        let snap = s.caps_lock(true);
-        assert!(snap.english && snap.caps_english);
-        s.client.disconnect_for_test();
-        let snap = s.key("A");
-        assert!(snap.ok && snap.english && snap.caps_english && !snap.handled, "重開後仍是暫時的英文：{snap:?}");
-        let snap = s.caps_lock(false);
-        assert!(snap.ok && !snap.english, "關掉 Caps Lock 回到這個程式的注音：{snap:?}");
-        // 開始時的英文（不是 Caps Lock 帶來的）照舊：開關 Caps Lock 都是英文。
-        assert!(s.toggle().english);
-        s.caps_lock(true);
-        s.client.disconnect_for_test();
-        assert!(s.key("A").english);
-        assert!(s.caps_lock(false).english, "使用者的英文不受 Caps Lock 影響");
     }
 
     #[test]
@@ -1607,7 +1177,7 @@ mod tests {
         let mut s = Session::with_client(Client::with_pipe(&server.name));
         assert!(s.idle_key("a"), "從沒問到過：字母交給引擎（同 0.2.4）");
         assert!(s.client.restart_pending(), "引擎回了「引擎正在切換」");
-        // 上一次在舊連線上問到的答案（許氏：數字交還宿主、字母交給引擎）照樣適用，不因交接把數字也吃掉。
+        // 上一次在舊連線上問到的答案（這裡沒列數字與 q）照樣適用，不因交接把沒列的鍵也吃掉。
         s.idle_info = Some(json!({"idle_keys": "!\"&'(),.:;<=>?[\\]^_`abcdefghijklmnoprstuvwxyz{}~"}));
         assert!(s.idle_key("a") && s.idle_key("j"));
         assert!(!s.idle_key("1") && !s.idle_key("q"));
@@ -1954,22 +1524,20 @@ mod tests {
         assert_eq!(server.finish(), 0);
     }
 
-    /// #173 的假引擎：health／open 回報 caps_lock_english，記下 health 次數與 handle 請求。`test_restart` 模擬套用設定時
-    /// 引擎存檔退出、以新設定再起來：回覆讀完後關掉這條連線、caps_lock_english 換成另一個值（start_mode 不變），
-    /// 下一條連線是「新的引擎」。永遠有一個管道在等連線。
-    struct CapsServer {
+    /// 套用設定時會重啟的假引擎：health／open 回報 Shift 與 Shift＋空白的設定（`on` 時開著）。`test_restart` 模擬
+    /// 引擎存檔退出、以新設定再起來：回覆讀完後關掉這條連線、設定換成相反的值，下一條連線是「新的引擎」。
+    /// 永遠有一個管道在等連線。
+    struct RestartingServer {
         name: String,
-        health: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        requests: std::sync::Arc<std::sync::Mutex<Vec<Value>>>,
         restarted: std::sync::mpsc::Receiver<()>,
     }
 
-    impl CapsServer {
-        fn new(caps: bool, start_english: bool) -> Self {
+    impl RestartingServer {
+        fn new(on: bool) -> Self {
             use std::io::{Read, Write};
             use std::os::windows::io::FromRawHandle;
-            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-            use std::sync::{Arc, Mutex};
+            use std::sync::atomic::{AtomicBool, Ordering};
+            use std::sync::Arc;
             use windows::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
             use windows::Win32::System::Pipes::{
                 ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
@@ -1977,20 +1545,17 @@ mod tests {
             };
             use windows_core::PCWSTR;
             let name = format!(
-                r"\\.\pipe\0c-tsf-caps-{}-{}",
+                r"\\.\pipe\0c-tsf-restart-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos()
             );
-            let health = Arc::new(AtomicUsize::new(0));
-            let requests = Arc::new(Mutex::new(Vec::new()));
-            let caps = Arc::new(AtomicBool::new(caps));
+            let on = Arc::new(AtomicBool::new(on));
             let (restart_tx, restarted) = std::sync::mpsc::channel();
             let (ready, wait) = std::sync::mpsc::channel();
             let pipe_name = zuin_win_common::wide(&name);
-            let (h, r) = (health.clone(), requests.clone());
             std::thread::spawn(move || {
                 let create = || unsafe {
                     CreateNamedPipeW(
@@ -2010,7 +1575,7 @@ mod tests {
                     let handle = next;
                     let _ = unsafe { ConnectNamedPipe(handle, None) };
                     next = create(); // 先開好下一個，客戶端重連時一定有管道
-                    let (health, requests, caps, restart_tx) = (h.clone(), r.clone(), caps.clone(), restart_tx.clone());
+                    let (on, restart_tx) = (on.clone(), restart_tx.clone());
                     let mut file = unsafe { std::fs::File::from_raw_handle(handle.0) };
                     std::thread::spawn(move || {
                         loop {
@@ -2021,30 +1586,18 @@ mod tests {
                             let mut body = vec![0; u32::from_le_bytes(header) as usize];
                             file.read_exact(&mut body).unwrap();
                             let request: Value = serde_json::from_slice(&body).unwrap();
+                            let enabled = on.load(Ordering::SeqCst);
                             let info = json!({
-                                "caps_lock_english": caps.load(Ordering::SeqCst).to_string(),
-                                "left_shift": caps.load(Ordering::SeqCst).to_string(),
-                                "right_shift": caps.load(Ordering::SeqCst).to_string(),
-                                "input_style_shift_space": if caps.load(Ordering::SeqCst) { "fullwidth" } else { "disabled" },
-                                "input_style_caps_letter": if caps.load(Ordering::SeqCst) { "lower" } else { "platform" },
-                                "start_mode": if start_english { "english" } else { "zhuyin" },
-                                "initial_mode": if start_english { "english" } else { "zhuyin" },
+                                "left_shift": enabled.to_string(),
+                                "right_shift": enabled.to_string(),
+                                "shift_space": if enabled { "fullwidth" } else { "disabled" },
+                                "start_mode": "zhuyin",
+                                "initial_mode": "zhuyin",
                                 "mode_memory": "native",
                             });
                             let reply = match request["op"].as_str() {
-                                Some("health") => {
-                                    health.fetch_add(1, Ordering::SeqCst);
-                                    json!({"ok": true, "info": info})
-                                }
+                                Some("health") => json!({"ok": true, "info": info}),
                                 Some("open") => json!({"ok": true, "session": 1, "info": info}),
-                                Some("handle") => {
-                                    let req = request["req"].clone();
-                                    requests.lock().unwrap().push(req.clone());
-                                    let caps_on = req["type"] == "caps_lock" && req["on"] == true;
-                                    json!({"ok": true, "snapshot": {"handled": req["type"] != "key",
-                                        "mode": if caps_on { "english" } else { "zhuyin" },
-                                        "caps_lock": caps_on, "caps_english": caps_on}})
-                                }
                                 _ => json!({"ok": true}),
                             };
                             if file.write_all(&zuin_win_common::frame(&reply).unwrap()).is_err() {
@@ -2053,7 +1606,7 @@ mod tests {
                             if request["op"] == "test_restart" {
                                 let _ = file.sync_all(); // 等客戶端讀完回覆
                                 drop(file);
-                                caps.store(!caps.load(Ordering::SeqCst), Ordering::SeqCst);
+                                on.store(!on.load(Ordering::SeqCst), Ordering::SeqCst);
                                 restart_tx.send(()).unwrap();
                                 return;
                             }
@@ -2062,16 +1615,7 @@ mod tests {
                 }
             });
             wait.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-            CapsServer {
-                name,
-                health,
-                requests,
-                restarted,
-            }
-        }
-
-        fn health(&self) -> usize {
-            self.health.load(std::sync::atomic::Ordering::SeqCst)
+            RestartingServer { name, restarted }
         }
 
         fn restart(&self, s: &mut Session) {
@@ -2084,88 +1628,19 @@ mod tests {
 
     #[test]
     fn first_style_modifier_after_handoff_uses_replacement_capabilities() {
-        for first in ["shift", "space", "caps"] {
-            let server = CapsServer::new(false, false);
+        for first in ["shift", "space"] {
+            let server = RestartingServer::new(false);
             let mut s = Session::with_client(Client::with_pipe(&server.name));
-            assert!(!s.style_shift_space() && !s.style_caps_lower());
+            assert!(!s.style_shift_space());
             assert!(!s.shift_config().toggles(crate::keys::Side::Left));
             for enabled in [true, false] {
                 server.restart(&mut s);
                 let actual = match first {
                     "shift" => s.shift_config().toggles(crate::keys::Side::Left),
-                    "space" => s.style_shift_space(),
-                    _ => s.style_caps_lower(),
+                    _ => s.style_shift_space(),
                 };
                 assert_eq!(actual, enabled, "first {first} after handoff");
             }
         }
-    }
-
-    // #173 code review：Caps Lock 鍵本身確認 caps_lock_english 時，沒有 session 的程式查完不留連線；連線還在、
-    // 快取是這條連線上問到的就不問引擎；引擎以新設定重啟（舊連線斷了）照樣在第一次 Caps Lock 就生效。
-    #[test]
-    fn caps_lock_key_checks_the_setting_without_holding_or_repeating() {
-        let server = CapsServer::new(false, false);
-        let mut s = Session::with_client(Client::with_pipe(&server.name));
-        s.refresh_caps_lock_english();
-        assert_eq!(server.health(), 1);
-        assert!(!s.client.connected(), "只按過 Caps Lock、沒打過字的程式不留連線");
-        assert!(!s.caps_needs_sync(true), "設定關閉");
-        s.refresh_caps_lock_english();
-        assert_eq!(server.health(), 2, "沒有連線時只能再問一次");
-        assert!(!s.client.connected());
-
-        // 打過字（有 session）：open 回覆的值就是這條連線上的，Caps Lock 鍵不再問 health。
-        s.key("j");
-        let before = server.health();
-        for _ in 0..3 {
-            s.refresh_caps_lock_english();
-        }
-        assert_eq!(server.health(), before, "連線還在時沿用 open 的值");
-        assert!(s.client.connected());
-
-        // 在設定程式打開這一項：引擎存檔退出、以新設定再起來。第一次 Caps Lock 就知道要切英文。
-        server.restart(&mut s);
-        s.refresh_caps_lock_english();
-        assert_eq!(server.health(), before + 1, "舊連線斷了才重新確認");
-        assert!(s.caps_needs_sync(true), "設定剛打開：這次 Caps Lock 就送 caps_lock");
-        s.refresh_caps_lock_english();
-        assert_eq!(server.health(), before + 1, "新連線上問到的值沿用");
-        assert!(s.client.connected(), "有 session 的程式照舊保留連線");
-    }
-
-    // #173 code review：Caps Lock 帶來的英文在引擎重啟後重開 session 時不能變成這個程式自己的英文。
-    #[test]
-    fn reopened_session_keeps_caps_english_temporary() {
-        let modes_after = |server: &CapsServer, from: usize| -> Vec<Value> {
-            server.requests.lock().unwrap()[from..]
-                .iter()
-                .filter(|r| r["type"] == "mode" || r["type"] == "caps_lock")
-                .cloned()
-                .collect()
-        };
-        // (a) Caps Lock 英文中在設定程式關掉這一項（引擎以新設定重啟）：照注音重開，不送「設成英文」。
-        let server = CapsServer::new(true, false);
-        let mut s = Session::with_client(Client::with_pipe(&server.name));
-        s.key("j");
-        assert!(s.caps_lock(true).caps_english);
-        server.restart(&mut s);
-        let from = server.requests.lock().unwrap().len();
-        s.key("a");
-        assert_eq!(modes_after(&server, from), Vec::<Value>::new(), "設定關掉後照注音開始");
-
-        // (b) 開始時英文：先設回注音，再以 caps_lock 還原暫時的英文（關掉 Caps Lock 才回得到注音）。
-        let server = CapsServer::new(true, true);
-        let mut s = Session::with_client(Client::with_pipe(&server.name));
-        s.key("j");
-        assert!(s.caps_lock(true).caps_english);
-        server.restart(&mut s); // 換成關閉
-        server.restart(&mut s); // 再換回開啟：引擎重啟過、設定仍開著
-        let from = server.requests.lock().unwrap().len();
-        s.key("A");
-        assert_eq!(
-            modes_after(&server, from),
-            vec![json!({"type": "mode", "on": false}), json!({"type": "caps_lock", "on": true})]
-        );
     }
 }

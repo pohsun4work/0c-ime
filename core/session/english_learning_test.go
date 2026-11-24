@@ -11,7 +11,7 @@ import (
 const englishDay = int64(86400)
 
 func TestMixedEnglishLearnsOnlyCommittedIndependentWords(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	m := s.model
 	for i := 0; i < 20; i++ {
 		mixedType(s, "newWidget_52")
@@ -63,7 +63,7 @@ func TestMixedEnglishLearnsOnlyCommittedIndependentWords(t *testing.T) {
 func TestMixedEnglishAssistedOriginsSurviveCursorEdits(t *testing.T) {
 	for _, edit := range []string{"unchanged", "cursor", "delete", "undo"} {
 		t.Run(edit, func(t *testing.T) {
-			s := mixedSession()
+			s := newSession()
 			s.model.AdvanceTime(100 * englishDay)
 			mixedType(s, "recieve")
 			key(s, proto.KeyTab)
@@ -94,9 +94,9 @@ func TestMixedEnglishAssistedOriginsSurviveCursorEdits(t *testing.T) {
 }
 
 func TestMixedEnglishCancelPrivacyPauseAndURLsLeaveNoEvidence(t *testing.T) {
-	for _, mode := range []string{"cancel", "private", "pause", "resume", "symbol", "url", "path", "off"} {
+	for _, mode := range []string{"cancel", "private", "pause", "resume", "symbol", "url", "path"} {
 		t.Run(mode, func(t *testing.T) {
-			s := mixedSession()
+			s := newSession()
 			text := "newWidget_52"
 			switch mode {
 			case "private":
@@ -111,8 +111,6 @@ func TestMixedEnglishCancelPrivacyPauseAndURLsLeaveNoEvidence(t *testing.T) {
 				text = "https://example.com/a?q=1"
 			case "path":
 				text = "C:\\Users\\kevin"
-			case "off":
-				s.MixedInput = false
 			}
 			mixedType(s, text)
 			if mode == "resume" {
@@ -131,7 +129,7 @@ func TestMixedEnglishCancelPrivacyPauseAndURLsLeaveNoEvidence(t *testing.T) {
 }
 
 func TestMixedEnglishPrivateQueriesCannotExposePersonalNames(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	for day := 100; day < 103; day++ {
 		s.model.AdvanceTime(int64(day) * englishDay)
 		mixedType(s, "newWidget_52 ji3")
@@ -173,7 +171,7 @@ func TestMixedEnglishPrivateQueriesCannotExposePersonalNames(t *testing.T) {
 }
 
 func TestMixedEnglishEditsForgetAndExplicitRecovery(t *testing.T) {
-	s := mixedSession()
+	s := newSession()
 	m := s.model
 	m.AdvanceTime(100 * englishDay)
 	mixedType(s, "newWidget_52")

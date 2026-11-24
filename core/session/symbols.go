@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
+	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/suggest"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
@@ -14,8 +15,7 @@ import (
 // 同組符號可用 ↓ 重選；左右括號分組，避免把開括號換成閉括號。每一項是一個符號，可以是多個字元
 // （刪節號「……」、破折號「——」各算一個，見 symbolUnits）。
 //
-// 符號出現在多組時，以最後一組為它的本組：↓ 列本組。↑ 的符號選單另有分類目錄（core/symbols，#290），
-// 這裡的每個符號都要列在選單的某個分頁裡（symbol_palette_test.go 檢查）。
+// 符號出現在多組時，以最後一組為它的本組：↓ 列本組。
 // 所以「…」「⋯」歸刪節號組、「—」「－」歸破折號組、「←」「→」歸箭頭組（#118）。
 // ^、_ 兩組參考新酷音（libchewing symbol.rs）與小麥注音（BPMFPunctuations.txt）的 ^、_ 符號組，
 // 最後附半形原字元，讓中文模式要打半形 ^、_ 的人換得回來。
@@ -166,14 +166,11 @@ func (s *Session) openingBracketHalf(k string) (half, ok bool) {
 // 另一種寬度記在 literalKeys，↓ 第二項換得回來：半形 ) ] } 不在任何符號組裡（symbolGroups），全形的組裡也沒有半形，
 // 不記的話選錯寬度就換不回來（比照 #190 的「，」記 <）。
 func (s *Session) insertPairedBracket(k string) bool {
-	if s.halfwidthShift(k) {
-		return false // Shift＋符號打半形（#258）：) } 一律半形，全形改用 Ctrl＋Shift＋0 或 ↓
-	}
 	half, ok := s.openingBracketHalf(k)
 	if !ok {
 		return false
 	}
-	full, ok := s.layout.Punct([]rune(k)[0])
+	full, ok := layout.Standard.Punct([]rune(k)[0])
 	if !ok {
 		return false
 	}
@@ -190,17 +187,13 @@ func (s *Session) insertPairedBracket(k string) bool {
 // insertPunctKey 在游標處插入標點鍵 k 打出的全形標點 p。中英混打時 Shift＋, Shift＋. 的「，」「。」記下原按鍵，
 // ↓ 第二項是半形 < >（#190）：混打的注音鍵、數字鍵出字後 ↓ 第二項都是原按鍵（#162、#175、#187），這兩個鍵比照辦理，
 // 不切英文也打得出大於、小於。只限這兩個鍵在混打下；一般注音模式與其他標點維持全形（#177），Ctrl＋標點（#168）也不附。
-// 混打的閉括號跟著配對的開括號（#232，insertPairedBracket）。設定「Shift＋符號打半形」開著時 Shift 符號打半形的 k（#258）。
+// 混打的閉括號跟著配對的開括號（#232，insertPairedBracket）。
 func (s *Session) insertPunctKey(k, p string) {
-	if s.halfwidthShift(k) {
-		s.insertHalfwidthShift(k, p)
-		return
-	}
 	if s.insertPairedBracket(k) {
 		return
 	}
 	s.insertLiteral(p)
-	if s.mixedInput() && (k == "<" || k == ">") || s.halfwidthAlternative(k, p) {
+	if s.mixedInput() && (k == "<" || k == ">") {
 		s.setLiteralKey(s.cursor-1, k)
 	}
 }
@@ -273,7 +266,6 @@ func (s *Session) selectLiteral(id int) bool {
 		s.insertLiteral(text)
 	}
 	s.keepLiteralEdit(shown, start, start+length)
-	s.rememberSymbol(c, text)
 	s.cand = nil
 	return true
 }

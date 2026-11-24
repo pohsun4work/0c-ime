@@ -47,7 +47,6 @@ func TestEscapeOnlyPendingZhuyinEndsComposition(t *testing.T) {
 
 func TestEscapeClearsPendingMixedKeysFirst(t *testing.T) {
 	s := newSession()
-	s.MixedInput = true
 	typeSyl(s, "ㄨㄛˇ")
 	key(s, "j")
 	key(s, "i")

@@ -67,7 +67,6 @@ func TestKeypadInEnglishModeIsPlainDigit(t *testing.T) {
 
 func TestKeypadInMixedInputDoesNotJoinPendingKeys(t *testing.T) {
 	s := newSession()
-	s.MixedInput = true
 	typeSyl(s, "ㄨㄛˇ")
 	if snap := key(s, "KP7"); !snap.Handled || snap.Text() != "我7" {
 		t.Fatalf("中英混打時數字鍵盤不當輕聲：%q", snap.Text())

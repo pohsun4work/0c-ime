@@ -30,7 +30,6 @@ func mixedReadingSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	s.English = english.New([]english.Word{{Text: "hello", Weight: 3}, {Text: "hell", Weight: 2}})
 	return s
 }

@@ -34,7 +34,6 @@ func deferredNumberSession() *Session {
 		sys.SetUni(e.w, e.p)
 	}
 	s := New(personal.NewModel(lex, sys))
-	s.MixedInput = true
 	return s
 }
 

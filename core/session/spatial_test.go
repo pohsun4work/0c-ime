@@ -135,51 +135,6 @@ func TestSpatialCandidatesAreLabelled(t *testing.T) {
 	}
 }
 
-// 你好 打成 ㄋㄧˇㄍㄠ（不打聲調，ㄍ 旁邊是 ㄏ；ㄍㄠ 合法但詞庫沒有字）。沒打聲調的音節換掉一鍵的讀音（鄰鍵）同打了聲調時一樣是修正，不是使用者打的音：組字區標 corrected、候選標
-// corrected，Fix 也不能只靠鄰鍵對上的讀音把詞固定下來（Fits 只算打的音）。沒打聲調的展開照舊保留。
-func TestSpatialUntonedAlternativesAreCorrections(t *testing.T) {
-	typed := func() *Session {
-		s := spatialSession(true, 1)
-		for _, k := range []string{"ㄋ", "ㄧ", "ˇ"} {
-			touch(s, k)
-		}
-		touch(s, "ㄍ", proto.NearKey{Symbol: "ㄏ", Cost: 1})
-		touch(s, "ㄠ")
-		s.Handle(proto.Request{Type: proto.Key, Key: "'"}) // 只切音節：ㄍㄠ 不打聲調就完成
-		return s
-	}
-	s := typed()
-	snap := s.snapshot()
-	if snap.Text() != "你好" {
-		t.Fatalf("text %q", snap.Text())
-	}
-	corrected := false
-	for _, seg := range snap.Preedit {
-		corrected = corrected || seg.Style == proto.StyleCorrected
-	}
-	if !corrected {
-		t.Errorf("a neighbour-key reading is shown as corrected: %+v", snap.Preedit)
-	}
-
-	s = typed()
-	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
-	labels := map[string]string{}
-	for _, it := range s.Handle(proto.Request{Type: proto.Candidates, Length: 1}).Candidates.Items {
-		labels[it.Text] = it.Label
-	}
-	if labels["好"] != proto.CandidateCorrected {
-		t.Errorf("labels %v", labels)
-	}
-
-	s = spatialSession(true, 1) // 只打 ㄍㄠ：好 只能靠鄰鍵對上
-	touch(s, "ㄍ", proto.NearKey{Symbol: "ㄏ", Cost: 1})
-	touch(s, "ㄠ")
-	s.Handle(proto.Request{Type: proto.Key, Key: "'"})
-	if snap := s.Handle(proto.Request{Type: proto.Fix, To: 0, Length: 1, Word: "好"}); len(snap.Notices) == 0 || len(s.locks) != 0 {
-		t.Errorf("fix took a word only a neighbour key reaches: %+v locks %v", snap.Preedit, s.locks)
-	}
-}
-
 func editSession(toneless bool, missed float64) *Session {
 	s := spatialSession(toneless, 1)
 	s.Spatial.Penalty, s.Spatial.Missed = 2, missed

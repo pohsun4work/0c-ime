@@ -18,7 +18,7 @@ func TestPaletteStableSelectionAcrossRecentChangesAndPartialPage(t *testing.T) {
 		t.Fatalf("open selection changed: %q", snap.Text())
 	}
 	r := New(s.model)
-	r.EmojiShortcut = "equals"
+	r.equalsPalette = true
 	r.CandidateColumns = 5
 	typeSyl(r, "ㄨㄛˇ")
 	key(r, "=")
@@ -35,10 +35,10 @@ func TestPaletteStableSelectionAcrossRecentChangesAndPartialPage(t *testing.T) {
 	}
 }
 
+// paletteSession 打開 = 的 Emoji／片語選單（fork 的 = 直接打 =，選單機制留給 P10／P11）。
 func paletteSession() *Session {
 	s := newSession()
-	s.EmojiShortcut = "equals"
-	s.EmojiEqualsFirst = false // exercise the emoji-only layout as well.
+	s.equalsPalette = true
 	s.CandidateColumns = 5
 	return s
 }
@@ -52,7 +52,7 @@ func TestPaletteDirectSelectionAndEscapes(t *testing.T) {
 	if snap := key(s, "="); snap.Candidates == nil || snap.Candidates.Columns != 5 || !s.Composing() {
 		t.Fatalf("palette: %+v", snap)
 	}
-	snap := key(s, "1")
+	snap := key(s, "2") // 第一項是 = 本身
 	if snap.Commit != "😀" || snap.Text() != "" || snap.Candidates != nil || !snap.PersonalChanged {
 		t.Fatalf("selection: %+v", snap)
 	}
@@ -70,12 +70,12 @@ func TestPaletteDirectSelectionAndEscapes(t *testing.T) {
 	if snap := key(s, proto.KeyEscape); snap.Commit != "" || snap.Candidates != nil || s.Composing() {
 		t.Fatalf("cancel: %+v", snap)
 	}
-	s.EmojiShortcut = "off"
+	s.equalsPalette = false
 	if snap := key(s, "="); !snap.Handled || snap.Candidates != nil || snap.Text() != "=" {
 		t.Fatal("disabled trigger: = is an explicit symbol and stays in the composition (fork)")
 	}
 	key(s, proto.KeyEscape)
-	s.EmojiShortcut = "equals"
+	s.equalsPalette = true
 	s.Handle(proto.Request{Type: proto.Mode, On: true})
 	if snap := key(s, "="); snap.Handled || snap.Candidates != nil {
 		t.Fatal("English trigger captured input")
@@ -84,7 +84,6 @@ func TestPaletteDirectSelectionAndEscapes(t *testing.T) {
 
 func TestPaletteDoesNotCaptureMixedURLsOrLearnKaomojiWords(t *testing.T) {
 	s := paletteSession()
-	s.MixedInput = true
 	text := "https://example.test/?a=b"
 	for _, r := range text {
 		if snap := key(s, string(r)); snap.Candidates != nil {
@@ -140,12 +139,10 @@ func TestPalettePreservesPendingAndGridNavigation(t *testing.T) {
 
 func TestPaletteDefaultEqualsChoiceAndOptOut(t *testing.T) {
 	for _, columns := range []int{1, 5} {
-		for _, first := range []bool{true, false} {
+		for _, first := range []bool{true} {
 			s := newSession()
-			if s.EmojiShortcut != "equals" || !s.EmojiEqualsFirst {
-				t.Fatal("palette defaults must enable equals and the first literal choice")
-			}
-			s.CandidateColumns, s.EmojiEqualsFirst = columns, first
+			s.equalsPalette = true
+			s.CandidateColumns = columns
 			s.model.RememberEmoji("😂")
 			snap := key(s, "=")
 			want := "😂"

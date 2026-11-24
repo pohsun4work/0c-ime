@@ -6,11 +6,9 @@ import (
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/fuzzy"
-	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/proto"
-	"github.com/0c-biggo/0c-ime/core/zhconv"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -48,66 +46,11 @@ func TestOpenSessionCarriesPrefixCacheKeys(t *testing.T) {
 	}
 }
 
-// 使用者關閉「空白鍵選字」時，之後開的每個 session 都照設定；預設空白選字。
-func TestOpenSessionCarriesSpaceSelection(t *testing.T) {
-	e := testEngine()
-	if e.Session(e.OpenSession()).SpaceInsertsSpace {
-		t.Fatal("預設空白鍵選字")
-	}
-	e.SpaceInsertsSpace = true
-	if !e.Session(e.OpenSession()).SpaceInsertsSpace {
-		t.Fatal("session 沒有帶到關閉空白鍵選字的設定")
-	}
-}
-
-// #83：使用者選倚天 41 鍵時，之後開的每個 session 都用倚天排列；預設標準排列。
-func TestOpenSessionCarriesLayout(t *testing.T) {
-	e := testEngine()
-	if snap := e.Session(e.OpenSession()).Handle(proto.Request{Type: proto.Key, Key: "1"}); !snap.Handled {
-		t.Fatal("預設標準排列：1 是 ㄅ")
-	}
-	e.Layout = layout.ETen
-	if snap := e.Session(e.OpenSession()).Handle(proto.Request{Type: proto.Key, Key: "5"}); snap.Handled {
-		t.Fatal("倚天排列：閒置時的 5 不是注音鍵，應交還應用程式")
-	}
-	s := e.Session(e.OpenSession())
-	s.Handle(proto.Request{Type: proto.Key, Key: "1"})
-	if snap := s.Handle(proto.Request{Type: proto.Key, Key: " "}); snap.Text() != "˙" {
-		t.Fatalf("倚天排列：1 是輕聲，單按＋空白是 ˙（#135）：%q", snap.Text())
-	}
-}
-
-// #135：閒置聲調鍵由輸入法處理，只有中英混打（標準排列）例外；倚天排列不混打。
-func TestToneMarkKeysFollowMixedInputAndLayout(t *testing.T) {
-	e := testEngine()
-	if !e.ToneMarkKeys() {
-		t.Fatal("預設沒開混打：聲調鍵由輸入法處理")
-	}
-	e.MixedInput = true
-	if e.ToneMarkKeys() {
-		t.Fatal("中英混打：聲調鍵照混打規則")
-	}
-	if e.Layout = layout.Standard; e.ToneMarkKeys() {
-		t.Fatal("明確選標準排列＋混打")
-	}
-	if e.Layout = layout.ETen; !e.ToneMarkKeys() {
-		t.Fatal("倚天排列停用混打，聲調鍵由輸入法處理")
-	}
-}
-
-// #183：外殼查詢的閒置按鍵依排列與設定；許氏的數字不是注音鍵，交還應用程式。
-func TestIdleKeysFollowLayout(t *testing.T) {
+// #183：外殼查詢的閒置按鍵：1 是 ㄅ；= 是明確打的符號，留在組字區（fork）。
+func TestIdleKeysIncludePhoneticAndSymbolKeys(t *testing.T) {
 	e := testEngine()
 	if got := e.IdleKeys(); !strings.Contains(got, "1") || !strings.Contains(got, "=") {
-		t.Fatalf("標準排列：1 是 ㄅ、= 開 Emoji：%q", got)
-	}
-	e.Layout = layout.Hsu
-	if got := e.IdleKeys(); strings.ContainsAny(got, "0123456789") || !strings.Contains(got, "a") || !strings.Contains(got, ",") {
-		t.Fatalf("許氏：%q", got)
-	}
-	e.EmojiShortcut = "off"
-	if !strings.Contains(e.IdleKeys(), "=") {
-		t.Fatal("關閉 Emoji 選單時 = 是明確打的符號，留在組字區（fork）")
+		t.Fatalf("1 是 ㄅ、= 是符號：%q", got)
 	}
 }
 
@@ -133,22 +76,6 @@ func TestOpenSessionCarriesAdvanceAfterSelect(t *testing.T) {
 	}
 }
 
-// #118：使用者開啟「輸出簡體字」時，之後開的每個 session 都用同一個轉換器；預設送出繁體。
-func TestOpenSessionCarriesSimplified(t *testing.T) {
-	e := testEngine()
-	if e.Session(e.OpenSession()).Simplified != nil {
-		t.Fatal("預設送出繁體")
-	}
-	conv, err := zhconv.TW2S(zhconv.Data{CJKCompatibility: "\uF900\t豈\n", TWVariants: "着\t著\n", TWVariantsRevPhrases: "什么\t什麼\n", TSPhrases: "計畫\t计划\n", TSCharacters: "計\t计\n"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.Simplified = conv
-	if e.Session(e.OpenSession()).Simplified != conv {
-		t.Fatal("session 沒有帶到簡體轉換器")
-	}
-}
-
 // #112：使用者選的選字鍵帶到之後開的每個 session；預設空字串（1234567890）。
 func TestOpenSessionCarriesSelectionKeys(t *testing.T) {
 	e := testEngine()
@@ -166,8 +93,9 @@ func TestFuzzyNoteSurvivesTheByteProtocol(t *testing.T) {
 	e := testEngine()
 	e.Fuzzy = fuzzy.Config{}.With(fuzzy.CCh, fuzzy.Select)
 	id := e.OpenSession()
-	for _, k := range []string{"h", " "} { // ㄘ（大千：h＋一聲）
-		if _, err := e.Handle(id, []byte(`{"type":"key","key":"`+k+`"}`)); err != nil {
+	// ㄘ＋一聲：用注音鍵（symbol）打，混打不會把 h␣ 當英文。
+	for _, req := range []string{`{"type":"symbol","symbol":"ㄘ"}`, `{"type":"key","key":" "}`} {
+		if _, err := e.Handle(id, []byte(req)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -223,28 +151,6 @@ func TestSharedModeAcrossSessions(t *testing.T) {
 	}
 	if mode(a, proto.Request{Type: proto.Mode, On: true}) != proto.ModeEnglish || mode(b, proto.Request{Type: proto.Key, Key: "j"}) != proto.ModeZhuyin {
 		t.Fatal("Caps Lock 的設成英文只影響那個輸入框")
-	}
-	// #173 Caps Lock 開著時直接打英文：開啟只影響那個輸入框；關閉回到共用的模式（期間別的輸入框切到英文就是英文）。
-	e3 := testEngine()
-	e3.SharedMode, e3.CapsLockEnglish = true, true
-	p, q := e3.OpenSession(), e3.OpenSession()
-	mode3 := func(id uint64, r proto.Request) string {
-		snap, err := e3.Do(id, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return snap.Mode
-	}
-	if mode3(p, proto.Request{Type: proto.CapsLock, On: true}) != proto.ModeEnglish || mode3(q, proto.Request{Type: proto.Key, Key: "j"}) != proto.ModeZhuyin {
-		t.Fatal("Caps Lock 的暫時英文只影響那個輸入框")
-	}
-	if mode3(p, proto.Request{Type: proto.CapsLock, On: false}) != proto.ModeZhuyin {
-		t.Fatal("關 Caps Lock 回到共用的注音")
-	}
-	mode3(p, proto.Request{Type: proto.CapsLock, On: true})
-	mode3(q, proto.Request{Type: proto.Key, Key: proto.KeyEscape})
-	if mode3(q, proto.Request{Type: proto.Toggle}) != proto.ModeEnglish || mode3(p, proto.Request{Type: proto.CapsLock, On: false}) != proto.ModeEnglish {
-		t.Fatal("暫時英文期間別的輸入框切到英文：關 Caps Lock 後是共用的英文")
 	}
 	// 沒有開全部共用：各自的模式，照外殼原本的做法。
 	e2 := testEngine()

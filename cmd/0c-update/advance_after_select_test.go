@@ -11,7 +11,7 @@ func TestAdvanceAfterSelectContractReportsPendingAndUnknownRuntime(t *testing.T)
 	base := t.TempDir()
 	writeSettings(t, base, `{"advance_after_select":true}`)
 	for _, tc := range []struct{ runtime, want string }{{"true", "on"}, {"false", "off"}, {"", ""}} {
-		v, ok := runningValues(map[string]string{"advance_after_select": tc.runtime})["advance-after-select"]
+		v, ok := settings.RunningValues(map[string]string{"advance_after_select": tc.runtime})["advance-after-select"]
 		if v != tc.want || ok != (tc.runtime != "") {
 			t.Fatalf("runtime %q: %q %v", tc.runtime, v, ok)
 		}

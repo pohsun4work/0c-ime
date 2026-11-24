@@ -32,21 +32,6 @@ const (
 	Mode       = "mode"       // On：設定中英模式（true 為英文）；外殼重連後用它還原模式
 	Toggle     = "toggle"     // 中英模式切換（單按 Shift）；Restore 見 Request
 	Display    = "display"    // 外殼可呈現的欄數；1 表示原生直排。
-	// CapsLock（#173）：On 為按鍵事件帶的 Caps Lock 鎖定狀態。設定「Caps Lock 開著時直接打英文」開著時，
-	// 開啟先送出組字、暫時切到英文，關閉回到原本的模式；設定關閉時回 handled=false、什麼都不改。
-	// 外殼只在引擎回報 caps_lock_english=true、而且狀態跟快照的 CapsLock 不同時送（Windows、Linux）。
-	CapsLock = "caps_lock"
-	// OutputSimplified（#169）：On 為「輸出簡體字」要開或關。輸入法選單的開關送這個請求，引擎立即改變之後送出的
-	// 文字（所有輸入框，包括已經在組字區、還沒送出的字），並寫進設定檔；組字不變、不重啟引擎。快照的 Notices
-	// 帶「已切換為輸出簡體字／繁體字」，OutputSimplified 是切換後的狀態。外殼只在 health／open 回報
-	// output_simplified_live=true 時送；引擎不支援即時切換時回 handled=false、什麼都不改。
-	// 這是全域設定，不屬於組字：外殼不把它記進斷線重播的紀錄。
-	OutputSimplified = "output_simplified"
-	// NineReading（注音九宮格，觸控）：To、Word。把一個九宮格音節固定成讀音 Word（快照 nine_readings.readings 的一項），
-	// 移除其他讀音（左欄「注音選擇」）。To 是快照 nine_readings.at：pending 時（To 等於游標、還有沒完成的鍵）固定的是那串鍵
-	// 的拼法，之後照常按聲調鍵完成；否則是第 To 個已完成的音節，蓋到它的手選解除、重新解碼。Word 不是那個位置的讀音時
-	// 什麼都不改，Notices 帶「沒有這個讀音」。
-	NineReading = "nine_reading"
 )
 
 // 輸入模式。
@@ -76,7 +61,7 @@ const (
 	KeyShiftLeft      = "ShiftLeft"      // 組字中往左標示要加入詞庫的範圍
 	KeyShiftRight     = "ShiftRight"     // 組字中往右標示
 	KeyShiftDelete    = "ShiftDelete"    // 候選窗的反悔鍵：刪除自訂詞或忘記學到的詞
-	KeyShiftBackspace = "ShiftBackspace" // 同上（Mac 筆電沒有獨立的 Delete 鍵）
+	KeyShiftBackspace = "ShiftBackspace" // 同上（Shift＋Backspace）
 )
 
 // Ctrl＋標點（#168）：中文模式按 Ctrl＋, 打「，」等全形標點。Key 為 CtrlPrefix 加上不按 Ctrl 時這一鍵產生的字元
@@ -152,12 +137,6 @@ type Request struct {
 	// 由外殼依觸控位置的空間模型算出。核心在音節格放入換成鄰鍵的讀音，
 	// 打的鍵接不上音節時也可改用鄰鍵；沒有 Near 時行為與沒有此功能時相同。
 	Near []NearKey `json:"near,omitempty"`
-	// Group（注音九宮格，只用於 Symbol）：這顆鍵代表的一組注音，例如 "ㄇㄋㄜㄝ"（三星式分組）；這時 Symbol 不看、Near 不用。
-	// 鍵先存著，按聲調鍵（Group 全是聲調符號，例如 "ˊˇˋ˙"：音節結束、聲調未指定）、空白（Symbol "ˉ"，一聲）
-	// 或指定聲調（Symbol 是單一聲調符號）時，核心把每顆鍵各取一個注音組成合法音節，全部放進音節格由解碼依前後文挑。
-	// 有沒完成的九宮格鍵時，不帶 Group 的單一注音（長按選的）當成只有那個注音的一顆鍵。
-	// 沒有 Group（也沒有沒完成的九宮格鍵）時行為與沒有此功能時相同。
-	Group string `json:"group,omitempty"`
 }
 
 // NearKey 是一次點按的鄰鍵假設。
@@ -182,11 +161,6 @@ const (
 type Segment struct {
 	Text  string `json:"text"`
 	Style string `json:"style"`
-	// Unfinished 標出外殼替使用者結束組字（commit 請求：失焦、切到別的輸入法）時不照畫面送出的那段：
-	// 未打完的注音（含中英混打顯示成注音的暫存按鍵）會丟掉，聲調選填／九宮格已是完整音節的會換成解碼的字（#322）。
-	// 由應用程式或框架自己把畫面上的組字送進文件的平台（Fcitx5 的用戶端組字、IBus 的 COMMIT 模式）
-	// 靠它不把這段帶進文件。同樣是 pending 樣式、照畫面送出的保底注音與英文暫存按鍵不標。舊核心沒有這一項。
-	Unfinished bool `json:"unfinished,omitempty"`
 }
 
 // CursorPos 同時以兩種單位給出游標在組字區文字中的位置，外殼不自行換算。
@@ -269,34 +243,7 @@ type Snapshot struct {
 	Candidates          *CandidateList  `json:"candidates,omitempty"` //
 	Notices             []string        `json:"notices,omitempty"`    //
 	Mode                string          `json:"mode"`                 // zhuyin 或 english
-	// CapsLock（#173）：核心記得的 Caps Lock 狀態（最近一次 caps_lock 請求；切換模式的 mode 請求會清掉）。
-	// 外殼看到按鍵的鎖定狀態跟它不同時才送 caps_lock，換欄位、重開 session 後自然重新同步。
-	CapsLock bool `json:"caps_lock,omitempty"`
-	// CapsEnglish（#173）：目前的英文模式是 Caps Lock 帶來的，關掉 Caps Lock 會回到注音。外殼自己記中英模式時
-	// （Windows 每個程式各自記住）記的是這一項以外的模式，重開 session 時不把它當成使用者切的英文。
-	CapsEnglish bool         `json:"caps_english,omitempty"`
-	ReadingHint *ReadingHint `json:"reading_hint,omitempty"`
-	// OutputSimplified（#169）：送出的文字目前會轉成簡體（設定「輸出簡體字」）。外殼據此在狀態顯示標出簡體，
-	// 從設定程式或別的輸入框切換後，下一個快照就跟上。只有回報 output_simplified_live 的引擎才有這一項，
-	// 舊引擎沒有時外殼不能當成「繁體」，要看 health 的 output_simplified。
-	OutputSimplified bool `json:"output_simplified,omitempty"`
-	// Bell（#300）：這一鍵被擋下，外殼要提示使用者。目前只有「打錯注音時提示」：按了聲調但讀音沒有字，聲調不收，
-	// 注音停在組字區（style pending 的那一段）等使用者修改。Windows 用 MessageBeep、macOS 用 NSBeep；Fcitx5、IBus
-	// 沒有統一的提示音，把這個快照裡 pending 的那一段畫成醒目樣式。只出現在擋下按鍵的那一次請求的快照，下一個快照
-	// 就沒有。舊外殼不認得這一項時不提示，聲調照樣被擋（注音停住，再按一次同一個聲調照舊收下）。
-	Bell bool `json:"bell,omitempty"`
-	// NineReadings（注音九宮格）：左欄「注音選擇」要畫的讀音；沒有九宮格的鍵或音節時省略。
-	NineReadings *NineReadings `json:"nine_readings,omitempty"`
-}
-
-// NineReadings 是一個九宮格音節可以選的讀音（注音，沒打聲調的不帶聲調、一聲不標）。
-// 有還沒完成的九宮格鍵時是那串鍵目前可能的拼法（Pending，音節的開頭），At 是游標（那個音節會插入的位置）；
-// 否則是游標前那個有多個讀音的九宮格音節，At 是它的位置。外殼點了其中一項送 nine_reading（To 為 At、Word 為那一項）。
-type NineReadings struct {
-	At       int      `json:"at"`
-	Pending  bool     `json:"pending,omitempty"`
-	Readings []string `json:"readings"` // 依常用程度；Pending 時第一項是組字區畫的那個
-	Current  int      `json:"current"`  // 組字目前用的那一項（Readings 的索引）；Pending 時一律 0
+	ReadingHint         *ReadingHint    `json:"reading_hint,omitempty"`
 }
 
 // SuggestedText 回傳按 Tab 接受後預覽的完整組字；無建議或範圍不合法時為空。

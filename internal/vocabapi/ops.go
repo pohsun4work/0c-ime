@@ -76,7 +76,7 @@ type removeInput struct {
 }
 
 type snippetsOutput struct {
-	Snippets []vocab.Phrase `json:"snippets" desc:"「我的片語」，依使用者排的順序；在注音模式按 = 開選單選取"`
+	Snippets []vocab.Phrase `json:"snippets" desc:"「我的片語」，依使用者排的順序"`
 	Batch    *vocab.Batch   `json:"batch,omitempty"`
 }
 
@@ -188,7 +188,7 @@ var Ops = []Op{
 			return changed(d, engine.VocabRequest{Op: engine.VocabRemove, Texts: q.Words})
 		}},
 	{Name: "list_snippets", Summary: "列出我的片語", Method: "GET", Path: "/v1/snippets",
-		Description: "列出「我的片語」：常用字串、地址、簽名等，使用者在注音模式按 = 從選單選取。",
+		Description: "列出「我的片語」：常用字串、地址、簽名等。",
 		Output:      snippetsOutput{},
 		call: func(d Doer, in json.RawMessage) (any, *vocab.Error) {
 			resp, e := run(d, engine.VocabRequest{Op: engine.VocabPhrases})

@@ -1,12 +1,8 @@
-//go:build !windows
-
 package main
 
 import (
 	"bytes"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +24,7 @@ func TestVocabOverIPCPersistsAndRespectsGate(t *testing.T) {
 	data, _ := filepath.Abs("../../testdata/toy")
 	user := filepath.Join(dir, "user.json")
 	vocabPath := filepath.Join(dir, "vocab.json")
-	sock := filepath.Join(dir, "vocab.sock")
+	sock := testPipe("vocab")
 	const name, reading = "王小明", "ㄨㄤˊ ㄒㄧㄠˇ ㄇㄧㄥˊ"
 
 	run := func(legacyOff bool, fn func(call func(ipc.Envelope) ipc.Reply)) string {
@@ -40,24 +36,11 @@ func TestVocabOverIPCPersistsAndRespectsGate(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, settings.FileName), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		server := exec.Command(binary, "-data", data, "-user", user, "-socket", sock)
-		var logs bytes.Buffer
-		server.Stderr = &logs
-		if err := server.Start(); err != nil {
-			t.Fatal(err)
-		}
+		server, logs := startServer(t, binary, "-data", data, "-user", user, "-socket", sock)
 		// 讀 logs 之前要先等行程結束：exec 在另一個 goroutine 把 stderr 抄進 logs（-race 會抓到）。
-		stopped := false
-		stop := func() {
-			if !stopped {
-				stopped = true
-				server.Process.Signal(os.Interrupt)
-				server.Wait()
-			}
-		}
-		defer stop()
+		defer stopServer(t, server)
 		waitDial(t, sock)
-		conn, err := net.Dial("unix", sock)
+		conn, err := dial(sock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +57,7 @@ func TestVocabOverIPCPersistsAndRespectsGate(t *testing.T) {
 			return r
 		})
 		conn.Close()
-		stop()
+		stopServer(t, server)
 		return logs.String()
 	}
 	add := &engine.VocabRequest{Op: engine.VocabAdd, Words: []vocab.Entry{{Text: name, Readings: []string{reading}}}}
