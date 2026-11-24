@@ -6,7 +6,7 @@
 |---|---|
 | `core/` | 不依賴 I/O 的輸入法邏輯 |
 | `bridge/`、`internal/`、`cmd/` | IPC、系統整合與命令列入口 |
-| `platforms/` | Linux、macOS、Windows 外殼與設定程式 |
+| `platforms/` | Windows 外殼、設定程式與神經推論 |
 | `data/` | 詞庫來源格式、帳本、授權聲明與編譯輸入 |
 | `scripts/` | 建置、打包與回歸工具 |
 | `testdata/` | 測試資料 |

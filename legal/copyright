@@ -12,15 +12,11 @@ License: AGPL-3
 Files: .github/assets/*
        internal/settingsapp/icon.ico
        internal/settingsapp/icon.png
-       platforms/linux-fcitx5/icons/*
-       platforms/macos/Icon/0c.tiff
-       platforms/macos/Icon/AppIcon.icns
        platforms/settings/icons/*
        platforms/settings/ui/icon.png
 Copyright: 2026 Funmula Co., Limited
 License: CC-BY-SA-4.0
-Comment: App 圖示的設計原檔是 .github/assets/logo.svg；macOS 的 0c.tiff、AppIcon.icns 由
- platforms/macos/Icon/make_icon.swift、make_app_icon.swift 產生。
+Comment: App 圖示的設計原檔是 .github/assets/logo.svg。
 
 Files: data/lexicon/corrections.tsv
        data/lexicon/reachability.tsv
@@ -97,11 +93,6 @@ Copyright: 2022 Robyn Speer（wordfreq）
 License: CC-BY-SA-4.0
 Comment: wordfreq 3.1.1 的英文 Zipf 詞頻，只取 data/english 詞表收錄的詞，由 scripts/export_wordfreq.py 產生；
  出處見 data/sources/licenses/wordfreq.txt。
-
-Files: platforms/linux-fcitx5/third_party/nlohmann/*
-Copyright: 2013-2023 Niels Lohmann <https://nlohmann.me>
-License: Expat
-Comment: nlohmann/json 3.11.3。
 
 License: AGPL-3
                      GNU AFFERO GENERAL PUBLIC LICENSE

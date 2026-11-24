@@ -12,8 +12,6 @@ Copyright (C) 2026 Funmula Co., Limited
 
 - `.github/assets/`
 - `internal/settingsapp/icon.ico`、`internal/settingsapp/icon.png`
-- `platforms/linux-fcitx5/icons/`
-- `platforms/macos/Icon/`
 - `platforms/settings/icons/`、`platforms/settings/ui/icon.png`
 
 ## 商業授權

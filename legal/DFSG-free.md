@@ -18,7 +18,6 @@
 | 圖示與圖片素材 | CC BY-SA 4.0，Funmula Co., Limited | 符合 |
 | Go 相依模組 | MIT、BSD-2-Clause、BSD-3-Clause | 符合 |
 | Rust 相依 crate（設定程式、Windows 外殼） | MIT、Apache-2.0、MPL-2.0、Unicode-3.0 等 | 符合 |
-| 內附第三方程式碼：nlohmann/json | MIT | 符合 |
 | 推論執行環境：NumPy、ONNX Runtime | BSD-3-Clause、MIT | 符合（Debian main 已收錄） |
 | 詞庫來源（`data/`） | CC BY-SA 4.0、CC BY 4.0、MIT、政府資料開放授權條款第 1 版 | 符合 |
 | 簡體轉換字典（`internal/simplified/opencc`） | Apache-2.0 | 符合 |
@@ -46,8 +45,6 @@
 | golang.org/x/sys | v0.10.0 | BSD-3-Clause＋Go 專利授權 | golang-golang-x-sys |
 | github.com/sirupsen/logrus、golang.org/x/mod、golang.org/x/tools | — | MIT、BSD-3-Clause | 已收錄；只在模組圖中，不編進執行檔 |
 
-go-winio 只用於 Windows 的 named pipe，Linux 與 macOS 的執行檔不含。
-
 ### Rust 相依 crate
 
 `platforms/settings/Cargo.lock`（設定程式，Tauri 2）與 `platforms/windows/Cargo.lock`（Windows 外殼）共 463 個 crate，依 crates.io 的授權欄位全部是自由授權：
@@ -60,11 +57,7 @@ go-winio 只用於 Windows 的 named pipe，Linux 與 macOS 的執行檔不含�
 | 單一授權：BSD-3-Clause、Zlib、ISC、Apache-2.0 WITH LLVM-exception | 6 |
 | MPL-2.0（`cssparser`、`selectors` 等） | 5 |
 
-`windows_*`、`winapi-*-pc-windows-gnu` 這類 crate 內含 Windows 匯入程式庫的預編譯檔，`webview2-com-sys` 綁定 WebView2；這些只在 Windows 目標使用，Linux 建置不會用到，Debian 的 Rust 套件也會把它們排除。
-
-### 內附第三方程式碼
-
-`platforms/linux-fcitx5/third_party/nlohmann/json.hpp` 為 MIT。Debian 打包時可改用系統的 `nlohmann-json3-dev`。
+`windows_*`、`winapi-*-pc-windows-gnu` 這類 crate 內含 Windows 匯入程式庫的預編譯檔，`webview2-com-sys` 綁定 WebView2。
 
 ### 詞庫來源
 
@@ -91,7 +84,7 @@ go-winio 只用於 Windows 的 named pipe，Linux 與 macOS 的執行檔不含�
 
 ### 神經模型
 
-兩個模型的權重採 MIT，但模型卡寫明「Training code and training materials are not included」。依 Debian 機器學習政策，沒有公開訓練程式與訓練資料的模型不能進 main，本專案也不公開它們。因此自 0.2.3 起，模型不放在原始碼 tarball，改由同一個 Release 的 `0c-ime-models-<版本>.tar.xz` 另行提供；Git 只保存模型與配對的 lock 檔。沒有模型時輸入法以統計選字運作，`make assets MODELS=0` 只取字典。Debian 可把模型另外打包成 non-free 的選用套件，主套件以 `Suggests` 指向它。
+兩個模型的權重採 MIT，但模型卡寫明「Training code and training materials are not included」。依 Debian 機器學習政策，沒有公開訓練程式與訓練資料的模型不能進 main，本專案也不公開它們。因此自 0.2.3 起，模型不放在原始碼 tarball，改由同一個 Release 的 `0c-ime-models-<版本>.tar.xz` 另行提供；Git 只保存模型與配對的 lock 檔。沒有模型時輸入法以統計選字運作，`python scripts/fetch_assets.py --no-models` 只取字典。Debian 可把模型另外打包成 non-free 的選用套件，主套件以 `Suggests` 指向它。
 
 0.2.2 以前的 Release 只有一個 tarball，內含模型，不符合本文件的要求。
 
@@ -101,21 +94,20 @@ go-winio 只用於 Windows 的 named pipe，Linux 與 macOS 的執行檔不含�
 
 ### 圖示與圖片
 
-`.github/assets/`、`internal/settingsapp/`、`platforms/settings/icons/`、`platforms/settings/ui/icon.png`、`platforms/linux-fcitx5/icons/`、`platforms/macos/Icon/` 的圖示與截圖為專案自有。SVG 只以名稱指定字型，沒有內嵌字型檔。依 [legal/README.md](README.md) 採 CC BY-SA 4.0，著作權屬 Funmula Co., Limited，條款全文在 [CC-BY-SA-4.0.txt](CC-BY-SA-4.0.txt)。原始檔都在 repo 內：App 圖示的設計原檔是 `.github/assets/logo.svg`（與官網 favicon 相同）；macOS 的 `0c.tiff`、`AppIcon.icns` 由 `platforms/macos/Icon/make_icon.swift`、`make_app_icon.swift` 繪製產生；設定程式與 `internal/settingsapp` 的 PNG、ICO 是同一設計的點陣輸出；fcitx5 狀態列圖示本身就是 SVG。
+`.github/assets/`、`internal/settingsapp/`、`platforms/settings/icons/`、`platforms/settings/ui/icon.png` 的圖示與截圖為專案自有。SVG 只以名稱指定字型，沒有內嵌字型檔。依 [legal/README.md](README.md) 採 CC BY-SA 4.0，著作權屬 Funmula Co., Limited，條款全文在 [CC-BY-SA-4.0.txt](CC-BY-SA-4.0.txt)。原始檔都在 repo 內：App 圖示的設計原檔是 `.github/assets/logo.svg`（與官網 favicon 相同）；設定程式與 `internal/settingsapp` 的 PNG、ICO 是同一設計的點陣輸出。
 
 ## 送 Debian 前的其他事項
 
 以下不影響 DFSG 判定，但 Debian 打包時會遇到：
 
 - **上游 tarball**：0.2.3 起 `0c-ime-<版本>.tar.xz` 不含模型，可直接當 Debian 的上游 tarball；0c-ime-data 的詞對統計可當 component tarball。0.2.2 以前的 tarball 含模型，要以 `Files-Excluded: models/select models/punct` 重新打包成 `+dfsg` 版本。
-- **自動更新**：Linux 安裝後 `0c-update` 會建立 systemd user timer，從 `s3.biggo.com` 取得已簽章的更新並自行安裝。Debian 套件由 apt 管理更新，需要能在建置或安裝時關閉自動更新與更新提示。
-- **內嵌的第三方副本**：`nlohmann/json.hpp`（Debian：`nlohmann-json3-dev`）與 `internal/simplified/opencc` 的 OpenCC 字典（Debian：`opencc` 1.4.2）。Debian 偏好使用系統套件，至少要在 `debian/copyright` 逐一列出。
+- **內嵌的第三方副本**：`internal/simplified/opencc` 的 OpenCC 字典（Debian：`opencc` 1.4.2）。Debian 偏好使用系統套件，至少要在 `debian/copyright` 逐一列出。
 - **設定程式**：`platforms/settings` 使用 Tauri 2；`tauri`、`wry`、`tao` 等 crate 目前不在 Debian，要先打包這些 crate，或第一版不含設定程式。
 - **工具鏈與執行相依**：`go.mod` 要求 Go 1.26（Debian sid 為 1.27）；`platforms/neural/requirements.txt` 固定 `onnxruntime==1.30.0`、`numpy==2.5.3`，Debian sid 為 ONNX Runtime 1.27.1、NumPy 2.4.6，要確認推論 worker 在這些版本可用。
 - **測試金鑰**：`testdata/e2e/` 的私鑰只供測試（見該目錄 README），lintian 會提出警告，需要 override 並說明。
 
 ## 維持方式
 
-- 新增相依套件、第三方程式碼或資料來源前，確認授權在「判斷標準」的範圍內，並更新本文件、`data/sources/ledger.tsv` 與 [copyright](copyright)。`scripts/test_copyright.py`（`make test-source-release`）檢查 copyright 的每個路徑都存在、每個授權都附全文，圖檔與第三方檔案都有自己的段落。
+- 新增相依套件、第三方程式碼或資料來源前，確認授權在「判斷標準」的範圍內，並更新本文件、`data/sources/ledger.tsv` 與 [copyright](copyright)。`scripts/test_copyright.py` 檢查 copyright 的每個路徑都存在、每個授權都附全文，圖檔與第三方檔案都有自己的段落。
 - Release 內每個編譯產物都要能從同一個 Release 公開的內容重建。
 - 模型更新時，訓練程式與訓練資料的公開狀態一併記錄在模型卡與本文件。
