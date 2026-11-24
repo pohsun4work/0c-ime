@@ -70,7 +70,9 @@ func TestKeyboardLayoutUnknownValueKept(t *testing.T) {
 func TestETenDisablesMixedAndEmojiItems(t *testing.T) {
 	s := Default()
 	s.MixedInput = true
-	s.Set("toggle-key", ToggleRight) // macOS 預設不用 Shift，開始模式另外停用（#184）；這裡只看倚天
+	s.Set("toggle-key", ToggleRight)       // macOS 預設不用 Shift，開始模式另外停用（#184）；這裡只看倚天
+	s.Set("shift-symbol-halfwidth", "off") // fork 預設所有符號鍵打半形會固定 Ctrl＋標點；這裡只看排列
+	const punctReason = "標點操作不是靈犀時關閉"      // fork：0c 風格的標點操作是微軟參考，不打聲調一律停用
 	disabled := func(s Settings) map[string]string {
 		out := map[string]string{}
 		for _, it := range s.Items() {
@@ -81,7 +83,7 @@ func TestETenDisablesMixedAndEmojiItems(t *testing.T) {
 		return out
 	}
 	// 標準排列時混打起作用，只有空白鍵選字（#288）與打錯注音時提示（#300）停用；倚天時混打停用，兩者恢復。
-	if d := disabled(s); len(d) != 2 || d["space-selects"] != mixedSpaceReason || d["zhuyin-error-hint"] != zhuyinHintMixedReason {
+	if d := disabled(s); len(d) != 3 || d["space-selects"] != mixedSpaceReason || d["zhuyin-error-hint"] != zhuyinHintMixedReason || d["toneless"] != punctReason {
 		t.Fatalf("標準排列只有空白鍵選字與打錯注音時提示因混打停用：%v", d)
 	}
 	if err := s.Set("keyboard-layout", "eten"); err != nil {
@@ -89,7 +91,7 @@ func TestETenDisablesMixedAndEmojiItems(t *testing.T) {
 	}
 	d := disabled(s)
 	// 不打聲調（#150）只在標準排列有效，倚天時也停用。
-	if len(d) != 4 || d["mixed-input"] != "倚天 41 鍵時關閉" || d["emoji-shortcut"] != "倚天 41 鍵時關閉" || d["emoji-equals-first"] == "" || d["toneless"] != "倚天 41 鍵時關閉" {
+	if len(d) != 4 || d["mixed-input"] != "倚天 41 鍵時關閉" || d["emoji-shortcut"] != "倚天 41 鍵時關閉" || d["emoji-equals-first"] == "" || d["toneless"] != punctReason {
 		t.Fatalf("倚天停用混打與 Emoji：%v", d)
 	}
 	for _, it := range s.Items() {
@@ -100,7 +102,7 @@ func TestETenDisablesMixedAndEmojiItems(t *testing.T) {
 	if err := s.Set("keyboard-layout", "standard"); err != nil {
 		t.Fatal(err)
 	}
-	if d := disabled(s); len(d) != 2 || d["space-selects"] != mixedSpaceReason || d["zhuyin-error-hint"] != zhuyinHintMixedReason || !s.MixedInput || s.EmojiShortcut != "equals" {
+	if d := disabled(s); len(d) != 3 || d["space-selects"] != mixedSpaceReason || d["zhuyin-error-hint"] != zhuyinHintMixedReason || d["toneless"] != punctReason || !s.MixedInput || s.EmojiShortcut != "equals" {
 		t.Fatalf("切回標準排列恢復原本的值：%v %+v", d, s)
 	}
 }
@@ -110,6 +112,7 @@ func TestHsuDisablesOnlyMixedInput(t *testing.T) {
 	s := Default()
 	s.MixedInput = true
 	s.Set("toggle-key", ToggleRight)
+	s.Set("shift-symbol-halfwidth", "off") // fork：預設所有符號鍵打半形會固定 Ctrl＋標點；這裡只看排列
 	if err := s.Set("keyboard-layout", "hsu"); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +129,8 @@ func TestHsuDisablesOnlyMixedInput(t *testing.T) {
 		}
 	}
 	// 不打聲調（#150）只在標準排列有效，許氏時也停用。
-	if strings.Join(disabled, "、") != "mixed-input：許氏排列時關閉、toneless：許氏排列時關閉" {
+	// fork：0c 風格的標點操作是微軟參考，不打聲調先因標點停用。
+	if strings.Join(disabled, "、") != "mixed-input：許氏排列時關閉、toneless：標點操作不是靈犀時關閉" {
 		t.Fatalf("許氏只停用混打：%v", disabled)
 	}
 }

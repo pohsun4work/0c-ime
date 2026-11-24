@@ -4,8 +4,6 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/0c-biggo/0c-ime/core/layout"
 )
 
 // shiftedSymbols 是美式鍵盤要按 Shift 才打得出的符號。外殼送來的是按鍵實際產生的字元（Shift＋9 是 "("，
@@ -15,17 +13,16 @@ const shiftedSymbols = "~!@#$%^&*()_+{}|:\"<>?"
 // halfwidthShift（#258，設定「Shift＋符號打半形」）：注音模式下這一鍵打它原本那個全形標點的半形版本（halfwidthPunct），
 // 不打全形。只管排列有全形標點的 Shift 符號鍵；@ # $ 等本來就是半形。照舊的有：未按 Shift 的 [ ] ' \（打「」、，
 // 給 [ ] 留著唯一一鍵打引號的路）、全形模式（Shift＋空白切的全形，要的就是全形）、英文模式、
-// Ctrl＋符號（#168，全形）與微軟參考的反引號前導（全形），後兩者在進到這裡之前就處理掉了。
+// Ctrl＋符號（#168，全形），在進到這裡之前就處理掉了。
 // 風格本來就打半形原字元的鍵也照風格（#272，微軟參考的 " < > ?，microsoftRawPunctuation）：這個設定是「Shift 組合
 // 不打全形」，不是把已經是半形的鍵帽字元換成另一個字。
-// 跟沒開時的全形標點一樣：組字中插在游標處、留在組字區。沒在組字時，半形就是鍵帽字元的交還應用程式
-// （同 @ #，引擎的 idle_keys 也拿掉它們），不是的（< > "）由核心直接送出半形。
+// 跟沒開時的全形標點一樣：插在游標處、留在組字區；沒在組字時也一樣（fork：明確打的符號，hoshi_symbols.go）。
 func (s *Session) halfwidthShift(k string) bool {
 	// 「所有符號鍵打半形」（#282）在 allSymbolsKey 處理；全形時兩者都不作用。
 	if !s.ShiftSymbolHalfwidth || s.AllSymbolsHalfwidth || s.fullWidth || s.english || len(k) != 1 || !strings.Contains(shiftedSymbols, k) {
 		return false
 	}
-	if s.InputStyle.Punctuation == "microsoft" && microsoftRawPunctuation(k) {
+	if s.microsoftRaw(k) {
 		return false
 	}
 	_, ok := s.layout.Punct(rune(k[0]))
@@ -68,20 +65,4 @@ func (s *Session) insertHalfwidth(half, k, p string) {
 	if len(alts) > 0 {
 		s.setLiteralKey(s.cursor-1, strings.Join(alts, literalKeySep))
 	}
-}
-
-// HalfwidthShiftKeys 回報設定「Shift＋符號打半形」開啟時，排列 l 裡改打半形、沒在組字時交還應用程式的按鍵（#258）：
-// 半形就是鍵帽字元的那些。引擎從 IdleKeys 拿掉它們，Windows 的 TestKeyDown 才不會吃掉之後又沒處理；
-// < > " 打的是 , . ;，由核心送出，照舊留在 IdleKeys。
-func HalfwidthShiftKeys(l layout.Layout) string {
-	if l == nil {
-		l = layout.Standard
-	}
-	var b strings.Builder
-	for _, r := range shiftedSymbols {
-		if p, ok := l.Punct(r); ok && halfwidthPunct(p, string(r)) == string(r) {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }

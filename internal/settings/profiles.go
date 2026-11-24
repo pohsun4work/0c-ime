@@ -163,9 +163,14 @@ func (s *Settings) applyProfile(p Profile) error {
 			next.forget("caps_lock_english")
 			continue
 		}
-		if err := next.Set(k, v); err != nil {
+		if err := next.set(k, v); err != nil {
 			return err
 		}
+	}
+	// 規則衝突照這份快照自己的規則檢查，不是目前內建 0c 的規則（fork 改了 0c 的標點操作，舊快照照舊有效）；
+	// 排列是否支援由呼叫端對使用中的風格檢查（validateProfileCombination），沒在用的風格不影響。
+	if err := next.styleConflictError(p.Rules); err != nil {
+		return err
 	}
 	next.profiles = s.profiles
 	*s = next
@@ -173,7 +178,12 @@ func (s *Settings) applyProfile(p Profile) error {
 }
 func (s Settings) profileAvailability(p Profile) (bool, string) {
 	// A preset never silently changes the separately selected physical layout.
-	if s.KeyboardLayout != LayoutStandard && p.Rules != inputstyleDefaultRules() {
+	// fork：0c 風格的標點操作改成微軟參考；官方 0c 標點的舊快照照舊算預設規則，倚天、許氏的使用者不受影響。
+	r := p.Rules
+	if r.Punctuation == "0c" {
+		r.Punctuation = inputstyleDefaultRules().Punctuation
+	}
+	if s.KeyboardLayout != LayoutStandard && r != inputstyleDefaultRules() {
 		return false, "此風格目前支援標準注音排列；請先在「鍵盤與符號」選擇標準排列"
 	}
 	return true, ""
@@ -206,7 +216,7 @@ func (s Settings) profileItem(p Profile) ProfileItem {
 	} else if p.ID != "0c" {
 		description = "參考常用操作的相近風格；字詞排序、候選視窗與未列出的功能仍使用靈犀注音"
 		if p.ID == "microsoft" {
-			description += "。此版參考全半形、反引號前導與選字鍵；反斜線、引號、角括號與問號已對照 Windows 11 注音實測，其餘操作依靈犀規則"
+			description += "。此版參考全半形與選字鍵；反斜線、引號、角括號與問號已對照 Windows 11 注音實測，其餘操作依靈犀規則"
 		}
 		if p.ID == "macos" {
 			description += "。此版參考選字位置、空白選字與退回聲調；系統輸入來源切換仍由 macOS 管理"
@@ -403,8 +413,6 @@ type styleConflict struct {
 
 func styleConflicts() []styleConflict {
 	return []styleConflict{
-		// 混打的英文照半形留在組字區，全形下打出「我Ｈello」這種半形全形夾雜。
-		{"style-shift-space", "mixed-input", "Shift＋空白切換全半形時關閉", func(r inputstyle.Rules) bool { return r.ShiftSpace == "fullwidth" }},
 		// Tab 要接受混打的英文補全；調整斷詞時 Tab 一律拿去改斷詞。
 		{"style-tab", "mixed-input", "Tab 調整斷詞時關閉", func(r inputstyle.Rules) bool { return r.Tab == "segment" }},
 		// 混打靠 Shift＋字母打大寫英文（DNS、iPhone）；送出組字會把字拆開（我ㄛPhone），打小寫則改掉大小寫。
@@ -453,7 +461,11 @@ func (s Settings) validateProfileCombination() error {
 	if ok, reason := s.profileAvailability(p); !ok {
 		return profileError(reason)
 	}
-	rules := s.ProfileRules()
+	return s.styleConflictError(s.ProfileRules())
+}
+
+// styleConflictError 檢查規則 rules 跟目前開著的功能有沒有衝突（styleConflicts）。
+func (s Settings) styleConflictError(rules inputstyle.Rules) error {
 	for _, c := range styleConflicts() {
 		if c.when(rules) && s.featureOn(c.feature) {
 			feature, _ := lookup(c.feature)

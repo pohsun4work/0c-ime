@@ -98,16 +98,20 @@ const (
 	KeyCtrlColon      = "Ctrl+:" // ：（Ctrl+Shift+;）
 	KeyCtrlParenLeft  = "Ctrl+(" // （（Ctrl+Shift+9）
 	KeyCtrlParenRight = "Ctrl+)" // ）（Ctrl+Shift+0）
+	// fork：照微軟新注音的 Ctrl+[ ]
+	KeyCtrlBracketLeft  = "Ctrl+[" // 【
+	KeyCtrlBracketRight = "Ctrl+]" // 】
 )
 
 // CtrlPunctKeys 是引擎認得的 Ctrl＋標點鍵（去掉 CtrlPrefix 的字元），在 health 與 open 的 info 以 ctrl_punctuation_keys 回報。
-const CtrlPunctKeys = ",.';?!:()"
+const CtrlPunctKeys = ",.';?!:()[]"
 
 // CtrlPunct 回傳 Ctrl＋標點鍵打出的全形標點；不是 CtrlPunctKeys 裡的鍵回傳 false。
 func CtrlPunct(k string) (string, bool) {
 	p, ok := map[string]string{KeyCtrlComma: "，", KeyCtrlPeriod: "。", KeyCtrlQuote: "、",
 		KeyCtrlSemicolon: "；", KeyCtrlQuestion: "？", KeyCtrlExclaim: "！",
-		KeyCtrlColon: "：", KeyCtrlParenLeft: "（", KeyCtrlParenRight: "）"}[k]
+		KeyCtrlColon: "：", KeyCtrlParenLeft: "（", KeyCtrlParenRight: "）",
+		KeyCtrlBracketLeft: "【", KeyCtrlBracketRight: "】"}[k]
 	return p, ok
 }
 

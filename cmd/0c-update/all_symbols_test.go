@@ -6,7 +6,7 @@ import "testing"
 // 照舊標示待套用。Ctrl＋標點與聲調選填比的是實際值（Effective），不會一直顯示待套用。
 func TestAllSymbolsHalfwidthContractReportsPending(t *testing.T) {
 	base := t.TempDir()
-	writeSettings(t, base, `{"shift_symbol_halfwidth":true,"all_symbols_halfwidth":true,"ctrl_punctuation":false,"toneless":true}`)
+	writeOfficialPunctuationSettings(t, base, [2]string{"ctrl-punctuation", "off"}, [2]string{"toneless", "on"}, [2]string{"shift-symbol-halfwidth", "all"}) // fork：先回官方標點，不打聲調才開得了
 	for _, tc := range []struct {
 		shift, all, want string
 		pending          bool

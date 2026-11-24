@@ -1,4 +1,4 @@
-// Package symbols 是反引號（`）符號選單的分類目錄與「最近」分頁的清理規則（#290）。
+// Package symbols 是符號選單（fork 從符號上按 ↑ 開）的分類目錄與「最近」分頁的清理規則（#290）。
 // 只有手選的 Unicode 字串，沒有讀音、詞庫或語言模型關係；同組變體（↓）另在 session 的 symbolGroups。
 //
 // 分類參考開源輸入法的符號表：新酷音 libchewing 的 symbols.dat（常用符號、左右括號、上下括號、數學符號、

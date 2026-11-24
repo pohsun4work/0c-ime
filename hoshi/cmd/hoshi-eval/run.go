@@ -359,7 +359,7 @@ func (e *engine) replay(c Case) (CaseResult, error) {
 
 // shellCtrlKeys 是 Windows 外殼認得的 Ctrl＋標點（platforms/windows/tsf/src/keys.rs 的 ctrl_punct_name）；
 // 不在這裡的 Ctrl 鍵引擎認得也送不到。
-const shellCtrlKeys = ",.';?!:()"
+const shellCtrlKeys = ",.';?!:()[]"
 
 // shell 模擬 Windows 外殼（platforms/windows/tsf/src/service.rs 的 wants_key、commit_before_host_key、
 // confirm_document_context）決定哪些鍵送進引擎、哪些交給應用程式，並模擬應用程式裡的文字與游標。

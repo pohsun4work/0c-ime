@@ -15,8 +15,9 @@ func TestAllSymbolsHalfwidthPersistsAndStaysCompatible(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := Load(path)
-	if v, _ := s.Value("shift-symbol-halfwidth"); err != nil || v != "on" {
-		t.Fatalf("舊設定檔的 true 是 Shift＋符號打半形：%q %v", v, err)
+	// fork：預設 all，缺 all_symbols_halfwidth 的舊設定檔照預設讀成 all。
+	if v, _ := s.Value("shift-symbol-halfwidth"); err != nil || v != "all" {
+		t.Fatalf("舊設定檔缺 all_symbols_halfwidth 時照預設：%q %v", v, err)
 	}
 	for _, value := range []string{"all", "on", "off", "all"} {
 		s, err := Load(path)
@@ -51,6 +52,7 @@ func TestAllSymbolsHalfwidthPersistsAndStaysCompatible(t *testing.T) {
 // 「所有符號鍵打半形」時 Ctrl＋標點固定開啟、聲調選填暫停（設定檔的值不動），停用原因帶到「標點寬度」；換回來照舊。
 func TestAllSymbolsHalfwidthFixesCtrlAndPausesToneless(t *testing.T) {
 	s := Default()
+	officialPunctuation(t, &s) // fork：先回官方標點，不打聲調才開得了
 	for _, kv := range [][2]string{{"ctrl-punctuation", "off"}, {"toneless", "on"}, {"shift-symbol-halfwidth", "all"}} {
 		if err := s.Set(kv[0], kv[1]); err != nil {
 			t.Fatalf("%v：%v", kv, err)

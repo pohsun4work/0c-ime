@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+// officialPunctuation 換回官方的標點操作（靈犀）與全形標點。
+// fork：0c 風格預設微軟參考、所有符號鍵打半形，兩者都讓不打聲調不能用或暫停。
+func officialPunctuation(t *testing.T, s *Settings) {
+	t.Helper()
+	if err := s.ProfileAction("copy", s.ActiveProfile().ID, "官方標點"); err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range [][2]string{{"style-punctuation", "0c"}, {"shift-symbol-halfwidth", "off"}} {
+		if err := s.Set(kv[0], kv[1]); err != nil {
+			t.Fatalf("%v：%v", kv, err)
+		}
+	}
+}
+
 // #150：「不打聲調也能選字」預設關閉，舊設定檔沒有欄位時也是關；可以開、改回，讀不懂的值退回預設並保留原文。
 // 開著時設定程式的中英混打反灰（與混打二選一），已儲存的 mixed_input 不動。
 func TestTonelessDefaultsOffAndPersists(t *testing.T) {
@@ -18,6 +32,14 @@ func TestTonelessDefaultsOffAndPersists(t *testing.T) {
 		t.Fatalf("命令列預設值：%q", v)
 	}
 	if err := os.WriteFile(path, []byte(`{"schema":1,"mixed_input":true,"future":42}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	official, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	officialPunctuation(t, &official)
+	if err := Save(path, official); err != nil {
 		t.Fatal(err)
 	}
 	for _, value := range []string{"on", "off", "on"} {
@@ -79,6 +101,7 @@ func TestTonelessDefaultsOffAndPersists(t *testing.T) {
 // #207：不打聲調時反灰的中英混打指向「不打聲調也能選字」，設定程式據此連到「選字」頁；排列造成的停用照舊指向鍵盤排列。
 func TestTonelessDisabledMixedInputNamesItsCause(t *testing.T) {
 	s := Default()
+	officialPunctuation(t, &s)
 	s.Toneless, s.MixedInput = true, true
 	for _, it := range s.Items() {
 		if it.Key == "mixed-input" && (it.DisabledBy != "toneless" || it.DisabledReason != "不打聲調時關閉") {
@@ -97,6 +120,7 @@ func TestTonelessDisabledMixedInputNamesItsCause(t *testing.T) {
 func TestTonelessDisabledOutsideStandardLayout(t *testing.T) {
 	for layout, reason := range map[string]string{LayoutETen: "倚天 41 鍵時關閉", LayoutHsu: "許氏排列時關閉", LayoutStandard: ""} {
 		s := Default()
+		officialPunctuation(t, &s)
 		s.Toneless, s.MixedInput = true, true
 		if err := s.Set("keyboard-layout", layout); err != nil {
 			t.Fatal(err)

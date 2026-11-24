@@ -20,13 +20,14 @@ func IdleKeys(l layout.Layout, mixedInput bool, emojiShortcut string) string {
 	}
 	mixed := mixedInputActive(mixedInput, l == layout.Standard)
 	_, equalsPhonetic := l.Symbol('=')
+	equals := emojiShortcut == "equals" && !equalsPhonetic
 	var b strings.Builder
 	for r := rune(0x21); r <= 0x7e; r++ {
 		sym, phonetic := l.Symbol(r)
 		_, punct := l.Punct(r)
 		switch {
-		case r == '`', punct:
-		case r == '=' && emojiShortcut == "equals" && !equalsPhonetic:
+		case punct, explicitSymbolKey(l, r, equals): // ` 與其他明確打的符號沒在組字時也留在組字區（hoshi_symbols.go）
+		case r == '=' && equals:
 		case mixed:
 		case phonetic && (zhuyin.ClassOf(sym) != zhuyin.Tone || sym != zhuyin.Tone1):
 		default:

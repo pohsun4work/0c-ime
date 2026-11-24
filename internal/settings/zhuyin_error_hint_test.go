@@ -3,6 +3,7 @@ package settings
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -108,6 +109,9 @@ func TestZhuyinErrorHintDisabledByMixedInputAndToneless(t *testing.T) {
 		{"所有符號鍵打半形時不打聲調暫停：照常", [][2]string{{"toneless", "on"}, {"shift-symbol-halfwidth", "all"}}, "", ""},
 	} {
 		s := Default() // 我的原有設定：混打、不打聲調都能改（內建風格把它們固定住）
+		if slices.Contains(c.set, [2]string{"toneless", "on"}) {
+			officialPunctuation(t, &s) // fork：0c 風格的標點操作是微軟參考，不打聲調要先換回靈犀標點
+		}
 		for _, kv := range c.set {
 			if err := s.Set(kv[0], kv[1]); err != nil {
 				t.Fatalf("%s：%v", c.name, err)

@@ -155,7 +155,8 @@ func TestNoLearningSkipsPaletteAndSymbolHistory(t *testing.T) {
 
 	s = newSession()
 	s.NoLearning = true
-	keys(s, "`", proto.KeyTab, proto.KeyTab, proto.KeyTab, proto.KeyTab) // 圖形
+	openSymbolMenu(s)
+	keys(s, proto.KeyTab, proto.KeyTab, proto.KeyTab, proto.KeyTab) // 圖形
 	if snap := pickText(t, s, "※"); snap.PersonalChanged || snap.Text() != "※" {
 		t.Fatalf("選了符號照常插入、不要求存檔：%+v", snap)
 	}

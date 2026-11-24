@@ -175,9 +175,14 @@ func TestHsuRetypeSyllableLiteral(t *testing.T) {
 func TestHsuIdleKeysAndPunct(t *testing.T) {
 	s := hsuSession(t)
 	s.MixedInput = true
-	for _, k := range []string{"1", "3", "4", "6", "7", "0", "-", "/", " ", "A"} {
+	for _, k := range []string{"1", "3", "4", "6", "7", "0", " ", "A"} {
 		if key(s, k).Handled {
 			t.Errorf("許氏沒在組字時 %q 應交還應用程式", k)
+		}
+	}
+	for _, k := range []string{"-", "/"} { // fork：不是注音鍵的符號鍵是明確打的符號，留在組字區
+		if snap := key(hsuSession(t), k); !snap.Handled || snap.Text() != k {
+			t.Errorf("許氏沒在組字時 %q 應留在組字區：%+v", k, snap)
 		}
 	}
 	if s.mixedInput() {
@@ -218,7 +223,7 @@ func TestIdleKeysMatchSession(t *testing.T) {
 			}
 		}
 	}
-	if got := IdleKeys(layout.Hsu, false, "equals"); strings.ContainsAny(got, "0123456789-/ ") || !strings.Contains(got, "abcdefghijklmnoprstuvwxyz") || strings.Contains(got, "q") || !strings.ContainsAny(got, "=,.;'`") {
+	if got := IdleKeys(layout.Hsu, false, "equals"); strings.ContainsAny(got, "0123456789 ") || !strings.Contains(got, "abcdefghijklmnoprstuvwxyz") || strings.Contains(got, "q") || !strings.ContainsAny(got, "=,.;'`") || !strings.Contains(got, "-") || !strings.Contains(got, "/") {
 		t.Errorf("許氏的閒置按鍵 %q", got)
 	}
 }

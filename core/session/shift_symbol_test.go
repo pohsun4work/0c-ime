@@ -39,7 +39,7 @@ func TestShiftSymbolHalfwidthOffKeepsFullWidth(t *testing.T) {
 	}
 }
 
-// 沒在組字時：半形就是鍵帽字元的交還應用程式（同 @ # 等本來就是半形的符號），不同的（< > "）由核心直接送出；
+// 沒在組字時也留在組字區（fork：明確打的符號，hoshi_symbols.go；官方是交還應用程式，< > " 由核心直接送出）；
 // 組字中插在游標處、留在組字區。
 func TestShiftSymbolHalfwidthTypesTheKey(t *testing.T) {
 	for _, k := range halfShiftKeys {
@@ -50,13 +50,10 @@ func TestShiftSymbolHalfwidthTypesTheKey(t *testing.T) {
 			}
 		}
 		s := halfShiftSession()
-		snap := key(s, k)
-		if half == k && (snap.Handled || snap.Text() != "" || snap.Commit != "") {
-			t.Fatalf("沒在組字時 %q 應交還應用程式：%+v", k, snap)
+		if snap := key(s, k); !snap.Handled || snap.Text() != half || snap.Commit != "" {
+			t.Fatalf("沒在組字時 %q 應以半形 %q 留在組字區：%+v", k, half, snap)
 		}
-		if half != k && (!snap.Handled || snap.Text() != "" || snap.Commit != half) {
-			t.Fatalf("沒在組字時 %q 應直接送出 %q：%+v", k, half, snap)
-		}
+		key(s, proto.KeyEnter)
 		typeSyl(s, "ㄨㄛˇ")
 		if snap := key(s, k); !snap.Handled || snap.Commit != "" || snap.Text() != "我"+half {
 			t.Fatalf("組字中 %q 應以半形 %q 留在組字區：%+v", k, half, snap)
@@ -181,12 +178,12 @@ func TestShiftSymbolHalfwidthOtherStatesUnchanged(t *testing.T) {
 			}
 		}
 	}
-	// 微軟參考的反引號前導照舊打全形。
+	// fork：反引號不是微軟參考的前導鍵，打 `。
 	s = styleSession("microsoft")
 	s.ShiftSymbolHalfwidth = true
 	key(s, "`")
-	if snap := key(s, "("); snap.Text() != "（" {
-		t.Fatalf("反引號前導照舊全形：%+v", snap)
+	if snap := key(s, "("); snap.Text() != "`(" {
+		t.Fatalf("反引號打 `：%+v", snap)
 	}
 }
 
@@ -214,8 +211,8 @@ func TestShiftSymbolHalfwidthMixedInput(t *testing.T) {
 	}
 	s := mixedSession()
 	s.ShiftSymbolHalfwidth = true
-	if snap := key(s, "("); snap.Handled {
-		t.Fatalf("混打沒在組字時 ( 交還應用程式：%+v", snap)
+	if snap := key(s, "("); !snap.Handled || snap.Text() != "(" {
+		t.Fatalf("混打沒在組字時 ( 留在組字區（fork）：%+v", snap)
 	}
 }
 
@@ -238,17 +235,11 @@ func TestShiftSymbolHalfwidthOtherLayouts(t *testing.T) {
 	}
 }
 
-// 閒置按鍵（Windows 的 TestKeyDown）：設定開啟時從 IdleKeys 拿掉 HalfwidthShiftKeys，結果要跟 session 實際的處理一致。
+// 閒置按鍵（Windows 的 TestKeyDown）：設定開啟時 IdleKeys 要跟 session 實際的處理一致（fork 不拿掉 Shift 符號鍵）。
 func TestShiftSymbolHalfwidthIdleKeysMatchSession(t *testing.T) {
 	for _, l := range []layout.Layout{layout.Standard, layout.ETen, layout.Hsu} {
 		for _, mixed := range []bool{false, true} {
-			drop := HalfwidthShiftKeys(l)
-			idle := strings.Map(func(r rune) rune {
-				if strings.ContainsRune(drop, r) {
-					return -1
-				}
-				return r
-			}, IdleKeys(l, mixed, "equals"))
+			idle := IdleKeys(l, mixed, "equals")
 			for r := rune(0x21); r <= 0x7e; r++ {
 				s := hsuSession(t)
 				s.SetLayout(l)
@@ -259,15 +250,6 @@ func TestShiftSymbolHalfwidthIdleKeysMatchSession(t *testing.T) {
 				}
 			}
 		}
-	}
-	got := HalfwidthShiftKeys(layout.Standard)
-	for _, k := range halfShiftKeys {
-		if strings.Contains(got, k) != (halfShiftWant[k] == k) {
-			t.Errorf("標準排列沒在組字時交還應用程式的 Shift 鍵（半形就是鍵帽字元）對 %q 不對：%q", k, got)
-		}
-	}
-	if strings.ContainsAny(got, "[]',.;\\@#<>\"") {
-		t.Errorf("未按 Shift 或本來就半形的鍵不算：%q", got)
 	}
 }
 
@@ -304,9 +286,10 @@ func TestShiftSymbolHalfwidthKeepsMicrosoftRawKeys(t *testing.T) {
 	}
 	s := styleSession("microsoft")
 	s.ShiftSymbolHalfwidth = true
-	if snap := key(s, "<"); snap.Handled {
-		t.Fatalf("微軟風格閒置的 Shift＋, 照風格交還應用程式打 <：%+v", snap)
+	if snap := key(s, "<"); !snap.Handled || snap.Text() != "<" {
+		t.Fatalf("微軟風格閒置的 Shift＋, 照風格打 <、留在組字區（fork）：%+v", snap)
 	}
+	key(s, proto.KeyEnter)
 	typeSyl(s, "ㄨㄛˇ")
 	key(s, "<")
 	key(s, ">")
@@ -327,7 +310,7 @@ func TestShiftSymbolHalfwidthKeepsMicrosoftRawKeys(t *testing.T) {
 	s = styleSession("microsoft")
 	s.ShiftSymbolHalfwidth = true
 	key(s, "`")
-	if snap := key(s, "<"); snap.Text() != "＜" {
-		t.Fatalf("反引號前導照舊全形：%+v", snap)
+	if snap := key(s, "<"); snap.Text() != "`<" {
+		t.Fatalf("fork：反引號不是前導鍵，打 `：%+v", snap)
 	}
 }

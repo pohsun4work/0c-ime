@@ -16,22 +16,20 @@ func TestShiftSymbolHalfwidthReachesSessionsAndIdleKeys(t *testing.T) {
 		t.Fatalf("預設 Shift 符號由核心打全形：%q", e.IdleKeys())
 	}
 	e.ShiftSymbolHalfwidth = true
-	if strings.ContainsAny(e.IdleKeys(), "(){}:?!~&^_") {
-		t.Fatalf("Shift＋符號打半形時不能吃半形就是鍵帽字元的閒置 Shift 符號：%q", e.IdleKeys())
-	}
-	if !strings.Contains(e.IdleKeys(), "<") || !strings.Contains(e.IdleKeys(), ">") || !strings.Contains(e.IdleKeys(), "\"") {
-		t.Fatalf("< > \" 由核心送出半形 , . ;，閒置時也要吃：%q", e.IdleKeys())
+	if !containsAll(e.IdleKeys(), "(){}:?!~&^_<>\"") {
+		t.Fatalf("Shift＋符號打半形時閒置的 Shift 符號也由核心處理（fork）：%q", e.IdleKeys())
 	}
 	if !strings.Contains(e.IdleKeys(), "[") || !strings.Contains(e.IdleKeys(), "`") {
 		t.Fatalf("[ 與 ` 照舊由核心處理：%q", e.IdleKeys())
 	}
 	id := e.OpenSession()
-	if snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: "("}); snap.Handled {
-		t.Fatalf("閒置的 ( 交還應用程式：%+v", snap)
+	if snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: "("}); !snap.Handled || snap.Text() != "(" {
+		t.Fatalf("閒置的 ( 留在組字區（fork）：%+v", snap)
 	}
-	if snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: "<"}); !snap.Handled || snap.Commit != "," {
-		t.Fatalf("閒置的 Shift＋, 直接送出半形逗號：%+v", snap)
+	if snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: "<"}); !snap.Handled || snap.Text() != "(," {
+		t.Fatalf("Shift＋, 打半形逗號：%+v", snap)
 	}
+	styleDo(t, e, id, proto.Request{Type: proto.Key, Key: proto.KeyEnter})
 	if snap := styleDo(t, e, id, proto.Request{Type: proto.Key, Key: "["}); !snap.Handled || snap.Text() != "「" {
 		t.Fatalf("[ 照舊打「：%+v", snap)
 	}
@@ -40,15 +38,14 @@ func TestShiftSymbolHalfwidthReachesSessionsAndIdleKeys(t *testing.T) {
 	}
 }
 
-// 微軟參考風格本來就把 \ ' " < > ? 交還應用程式打半形原字元；開了設定也照風格（#272），閒置按鍵不能列，
-// 設定拿掉的 ( ) 等也不列。
+// 微軟參考風格的 \ ' " < > ? 打半形原字元，開了設定也照風格（#272）。fork 沒在組字時也留在組字區，閒置按鍵要列。
 func TestShiftSymbolHalfwidthMicrosoftIdleKeys(t *testing.T) {
 	e := testEngine()
 	p, _ := inputstyle.Get("microsoft")
 	e.InputStyle = p.Rules
 	e.ShiftSymbolHalfwidth = true
 	keys := e.IdleKeys()
-	if strings.ContainsAny(keys, "\\'\"<>?(){}:") || !strings.Contains(keys, "[") {
+	if !containsAll(keys, "\\'\"<>?(){}:[") { // fork：沒在組字時也留在組字區
 		t.Fatalf("微軟風格＋Shift＋符號打半形的閒置按鍵：%q", keys)
 	}
 	// 閒置按鍵要跟 session 實際的處理一致（Windows 的 TestKeyDown 照它決定要不要吃）。

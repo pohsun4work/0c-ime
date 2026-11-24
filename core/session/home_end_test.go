@@ -61,7 +61,7 @@ func TestHomeEndWithPendingSyllableLikeArrows(t *testing.T) {
 func TestCandidateHomeEndBackspaceDelete(t *testing.T) {
 	s := newSession()
 	typeSyl(s, "ㄨㄛˇ")
-	snap := key(s, "`")
+	snap := openSymbolMenu(s)
 	if snap.Candidates == nil || snap.Candidates.Pages < 3 {
 		t.Fatalf("符號選單應有多頁：%+v", snap.Candidates)
 	}
@@ -75,7 +75,7 @@ func TestCandidateHomeEndBackspaceDelete(t *testing.T) {
 	if !snap.Handled || snap.Candidates == nil || snap.Candidates.Page != 0 || snap.Candidates.Highlight != 0 {
 		t.Fatalf("Home 應到第一個候選：%+v", snap.Candidates)
 	}
-	if snap.Text() != "我" || snap.Cursor.Rune != 1 {
+	if snap.Text() != "我，" || snap.Cursor.Rune != 2 {
 		t.Fatalf("候選中的 Home 不移動組字游標：%+v", snap)
 	}
 	for _, k := range []string{proto.KeyBackspace, proto.KeyDelete, proto.KeyBackTab} {

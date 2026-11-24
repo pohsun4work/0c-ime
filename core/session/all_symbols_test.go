@@ -23,13 +23,14 @@ func allHalfSession() *Session {
 	return s
 }
 
-func TestAllSymbolsHalfwidthIdleKeysGoToTheApp(t *testing.T) {
+// fork：沒在組字時也留在組字區（明確打的符號，hoshi_symbols.go），官方是交還應用程式。
+func TestAllSymbolsHalfwidthIdleKeysStayInComposition(t *testing.T) {
 	for _, mixed := range []bool{false, true} {
 		for _, k := range standardPunctKeys {
 			s := allHalfSession()
 			s.MixedInput = mixed
-			if snap := key(s, k); snap.Handled || snap.Commit != "" || snap.Text() != "" {
-				t.Fatalf("混打=%v：沒在組字時 %q 應交還應用程式打半形：%+v", mixed, k, snap)
+			if snap := key(s, k); !snap.Handled || snap.Commit != "" || snap.Text() != k {
+				t.Fatalf("混打=%v：沒在組字時 %q 應以半形留在組字區：%+v", mixed, k, snap)
 			}
 		}
 	}
@@ -114,8 +115,8 @@ func TestAllSymbolsHalfwidthOtherStates(t *testing.T) {
 		t.Fatalf("候選開著時吃掉不動作：%+v", snap)
 	}
 	s = allHalfSession()
-	if snap := key(s, "<"); snap.Handled {
-		t.Fatalf("沒在組字時 Shift＋, 交給程式打 <：%+v", snap)
+	if snap := key(s, "<"); !snap.Handled || snap.Text() != "<" {
+		t.Fatalf("沒在組字時 Shift＋, 是 <、留在組字區（fork）：%+v", snap)
 	}
 }
 
@@ -134,8 +135,8 @@ func TestAllSymbolsHalfwidthWithStyles(t *testing.T) {
 	s := styleSession("microsoft")
 	s.ShiftSymbolHalfwidth, s.AllSymbolsHalfwidth = true, true
 	key(s, "`")
-	if snap := key(s, "("); snap.Text() != "（" {
-		t.Fatalf("反引號前導照舊打全形：%+v", snap)
+	if snap := key(s, "("); snap.Text() != "`(" {
+		t.Fatalf("fork：反引號不是前導鍵，打 `：%+v", snap)
 	}
 	for _, style := range []string{"microsoft", "chewing"} {
 		a, b := styleSession(style), styleSession(style)
@@ -173,18 +174,12 @@ func TestAllSymbolsHalfwidthMixedInput(t *testing.T) {
 	}
 }
 
-// 閒置按鍵（Windows 的 TestKeyDown）：從 IdleKeys 拿掉 AllSymbolsHalfwidthKeys，結果要跟 session 實際的處理一致。
+// 閒置按鍵（Windows 的 TestKeyDown）：IdleKeys 要跟 session 實際的處理一致。
 func TestAllSymbolsHalfwidthIdleKeysMatchSession(t *testing.T) {
 	for _, l := range []layout.Layout{layout.Standard, layout.ETen, layout.Hsu} {
 		for _, mixed := range []bool{false, true} {
 			for _, emoji := range []string{"equals", "off"} {
-				drop := AllSymbolsHalfwidthKeys(l)
-				idle := strings.Map(func(r rune) rune {
-					if strings.ContainsRune(drop, r) {
-						return -1
-					}
-					return r
-				}, IdleKeys(l, mixed, emoji))
+				idle := IdleKeys(l, mixed, emoji)
 				for r := rune(0x21); r <= 0x7e; r++ {
 					s := hsuSession(t)
 					s.SetLayout(l)

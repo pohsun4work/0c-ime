@@ -28,9 +28,15 @@ func TestSymbolMenuKeepsEveryGroupSymbol(t *testing.T) {
 	}
 }
 
+// fork：` 不再開選單，從符號上按 ↑ 進入（這裡是 Shift＋, 打的 ，，選取會替換它）。
+func openSymbolMenu(s *Session) proto.Snapshot {
+	key(s, "<")
+	return key(s, proto.KeyUp)
+}
+
 func TestSymbolMenuTabs(t *testing.T) {
 	s := newSession()
-	snap := key(s, "`")
+	snap := openSymbolMenu(s)
 	if !snap.Handled || symbolTab(s) != "標點" || snap.Candidates == nil || snap.Candidates.Title != "標點 · Tab → 括號引號" {
 		t.Fatalf("沒有最近使用時從標點開：%q %+v", symbolTab(s), snap.Candidates)
 	}
@@ -62,25 +68,6 @@ func TestSymbolMenuTabs(t *testing.T) {
 	}
 }
 
-// 未完成的注音按 ` 開選單，換分頁後選取照樣替換它；Esc 保留原注音。
-func TestSymbolMenuTabsKeepPendingReplacement(t *testing.T) {
-	s := newSession()
-	typeSyl(s, "ㄨㄛˇ")
-	key(s, "j") // ㄨ 未完成
-	keys(s, "`", proto.KeyTab)
-	if s.cand == nil || !s.cand.pending || s.cand.start != 1 || s.cand.length != 0 {
-		t.Fatalf("換分頁保留替換的對象：%+v", s.cand)
-	}
-	if snap := pickText(t, s, "「"); snap.Text() != "我「" {
-		t.Fatalf("選取替換未完成的注音：%q", snap.Text())
-	}
-	key(s, "j")
-	keys(s, "`", proto.KeyTab, proto.KeyTab)
-	if snap := key(s, proto.KeyEscape); snap.Text() != "我「ㄨ" || snap.Candidates != nil {
-		t.Fatalf("Esc 保留原注音：%q", snap.Text())
-	}
-}
-
 // 組字中游標在符號上按 ↑：開完整符號選單，停在它的分類並反白它，選了就替換它；↓ 照舊是同組變體。
 func TestUpOpensSymbolMenuAtSymbol(t *testing.T) {
 	cases := []struct {
@@ -95,8 +82,8 @@ func TestUpOpensSymbolMenuAtSymbol(t *testing.T) {
 		{[]string{"^"}, "", "……", "標點", "～", "我～"}, // 兩個字元的符號整個換掉
 		{[]string{"]"}, "", "」", "括號引號", "】", "我】"},
 		{[]string{"_", proto.KeyDown}, "→", "→", "箭頭", "⇒", "我⇒"},
-		{[]string{"`", proto.KeyTab, proto.KeyTab}, "÷", "÷", "數學", "×", "我×"},
-		{[]string{"`", proto.KeyBackTab}, "ㄅ", "ㄅ", "注音", "ㄆ", "我ㄆ"},
+		{[]string{"<", proto.KeyUp, proto.KeyTab, proto.KeyTab}, "÷", "÷", "數學", "×", "我×"},
+		{[]string{"<", proto.KeyUp, proto.KeyBackTab}, "ㄅ", "ㄅ", "注音", "ㄆ", "我ㄆ"},
 	}
 	for _, c := range cases {
 		s := newSession()
@@ -179,13 +166,15 @@ func TestUpOutsideSymbolsUnchanged(t *testing.T) {
 // 第一頁是最近使用的符號；排序同表情（常用＋最近），只放一頁；↑ 定位到符號自己的分類。
 func TestSymbolMenuRecentTab(t *testing.T) {
 	s := newSession()
-	keys(s, "`", proto.KeyTab, proto.KeyTab, proto.KeyTab, proto.KeyTab) // 圖形
+	openSymbolMenu(s)
+	keys(s, proto.KeyTab, proto.KeyTab, proto.KeyTab, proto.KeyTab) // 圖形
 	if snap := pickText(t, s, "※"); !snap.PersonalChanged || !slices.Equal(s.model.Store.SymbolRecent, []string{"※"}) {
 		t.Fatalf("選了符號要記下並存檔：%+v %v", snap.PersonalChanged, s.model.Store.SymbolRecent)
 	}
-	snap := key(s, "`")
+	openSymbolMenu(s)
+	snap := key(s, proto.KeyBackTab) // 最近排在標點前面
 	if symbolTab(s) != symbols.Recent || snap.Candidates.Title != "最近 · Tab → 標點" || len(snap.Candidates.Items) != 1 || snap.Candidates.Items[0].Text != "※" {
-		t.Fatalf("有紀錄時從最近開：%q %+v", symbolTab(s), snap.Candidates)
+		t.Fatalf("有紀錄時標點前面是最近：%q %+v", symbolTab(s), snap.Candidates)
 	}
 	// 最近分頁的候選 ID 與它在分類裡相同：選取不受順序影響。
 	if snap = s.Handle(proto.Request{Type: proto.Select, Index: symbols.ID("※")}); snap.Text() != "※※" {
@@ -198,13 +187,11 @@ func TestSymbolMenuRecentTab(t *testing.T) {
 	key(s, proto.KeyEnter)
 	// 有上限：選了很多種之後最近只放一頁。
 	for _, item := range symbols.Tabs[0].Items {
-		key(s, "`")
-		for symbolTab(s) != "標點" {
-			key(s, proto.KeyTab)
-		}
+		openSymbolMenu(s)
 		pickText(t, s, item)
 	}
-	if snap = key(s, "`"); len(s.model.Store.SymbolRecent) != symbols.MaxRecent || len(snap.Candidates.Items) != symbols.MaxRecent || snap.Candidates.Pages != 1 {
+	openSymbolMenu(s)
+	if snap = key(s, proto.KeyBackTab); len(s.model.Store.SymbolRecent) != symbols.MaxRecent || len(snap.Candidates.Items) != symbols.MaxRecent || snap.Candidates.Pages != 1 {
 		t.Fatalf("最近只放一頁：%v %+v", s.model.Store.SymbolRecent, snap.Candidates)
 	}
 	if s.model.Store.Total != 0 || len(s.model.Store.English) != 0 || len(s.model.Store.EmojiRecent) != 0 {
@@ -227,7 +214,8 @@ func TestSymbolRecentPausedAndPrivate(t *testing.T) {
 	s := newSession()
 	s.model.RememberSymbol("※")
 	s.Handle(proto.Request{Type: proto.Pause, On: true})
-	if key(s, "`"); symbolTab(s) != symbols.Recent {
+	openSymbolMenu(s)
+	if key(s, proto.KeyBackTab); symbolTab(s) != symbols.Recent {
 		t.Fatalf("暫停學習照樣列出最近：%q", symbolTab(s))
 	}
 	key(s, proto.KeyTab)
@@ -237,7 +225,8 @@ func TestSymbolRecentPausedAndPrivate(t *testing.T) {
 
 	s = newSession()
 	s.model.RememberSymbol("※")
-	snap := s.Handle(proto.Request{Type: proto.Key, Key: "`", Private: true})
+	s.Handle(proto.Request{Type: proto.Key, Key: "<", Private: true})
+	snap := s.Handle(proto.Request{Type: proto.Key, Key: proto.KeyUp, Private: true})
 	if symbolTab(s) != "標點" || snap.Candidates.Title != "標點 · Tab → 括號引號" {
 		t.Fatalf("私人欄位不列最近：%q %+v", symbolTab(s), snap.Candidates)
 	}
@@ -249,7 +238,8 @@ func TestSymbolRecentPausedAndPrivate(t *testing.T) {
 	// 最近分頁開著時進入私人欄位：關掉，不讓個人資料跨進去。
 	s = newSession()
 	s.model.RememberSymbol("※")
-	key(s, "`")
+	openSymbolMenu(s)
+	key(s, proto.KeyBackTab)
 	if snap = s.Handle(proto.Request{Type: proto.Key, Key: proto.KeyTab, Private: true}); snap.Candidates != nil {
 		t.Fatalf("最近分頁進入私人欄位要關：%+v", snap.Candidates)
 	}

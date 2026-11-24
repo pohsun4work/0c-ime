@@ -7,7 +7,7 @@ import (
 // #168：「Ctrl＋標點打全形」經 settings --json 給設定程式；引擎載入的值不同時標示待套用，舊引擎沒回報時不猜。
 func TestCtrlPunctuationContractReportsPendingAndUnknownRuntime(t *testing.T) {
 	base := t.TempDir()
-	writeSettings(t, base, `{"ctrl_punctuation":false}`)
+	writeSettings(t, base, `{"ctrl_punctuation":false,"shift_symbol_halfwidth":false}`) // fork：預設所有符號鍵打半形會固定開啟 Ctrl＋標點
 	for _, tc := range []struct{ runtime, want string }{{"true", "on"}, {"false", "off"}, {"", ""}} {
 		v, ok := runningValues(map[string]string{"ctrl_punctuation": tc.runtime})["ctrl-punctuation"]
 		if v != tc.want || ok != (tc.runtime != "") {

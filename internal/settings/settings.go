@@ -264,7 +264,7 @@ func (s Settings) FuzzyConfig() fuzzy.Config {
 }
 
 func Default() Settings {
-	s := Settings{Selection: Neural, Punctuation: false, DocumentContext: true, CandidateCursor: defaultCandidateCursor(runtime.GOOS), CandidateLayout: "vertical", EmojiShortcut: "equals", EmojiEqualsFirst: true, EscClear: true, SpaceSelects: true, KeyboardLayout: LayoutStandard, SelectionKeys: SelectDigits, CtrlPunctuation: true, ZhuyinErrorHint: true, PersonalLearning: true,
+	s := Settings{Selection: Neural, Punctuation: false, DocumentContext: true, CandidateCursor: defaultCandidateCursor(runtime.GOOS), CandidateLayout: "vertical", EmojiShortcut: "equals", EmojiEqualsFirst: true, EscClear: true, SpaceSelects: true, KeyboardLayout: LayoutStandard, SelectionKeys: SelectDigits, CtrlPunctuation: true, ShiftSymbolHalfwidth: true, AllSymbolsHalfwidth: true, ZhuyinErrorHint: true, PersonalLearning: true, // fork：標點寬度預設所有符號鍵打半形
 		ToggleKey: defaultToggleKey(runtime.GOOS), ShiftTapMS: DefaultShiftTapMS, ModeMemory: defaultModeMemory(runtime.GOOS), StartMode: StartZhuyin}
 	s.LeftShift = s.TogglesLeft() // 舊欄位跟著切換鍵：Windows 預設左右 Shift 時是 true（#206）
 	return s
@@ -967,7 +967,7 @@ func specs() []spec {
 		func(s Settings) string { return onOff(s.Toneless) }})
 	// #258：放在已有項目之後，0c-update 列出的順序與舊版相同；設定程式另照頁面排在 Ctrl＋標點下面。
 	// #282：擴成三選一，鍵名與 on／off 的意思不變，舊的命令與設定檔照舊。
-	out = append(out, spec{"shift-symbol-halfwidth", "標點寬度", shiftSymbolHalfwidthDescription(runtime.GOOS), "off", []string{"off", "on", "all"},
+	out = append(out, spec{"shift-symbol-halfwidth", "標點寬度", shiftSymbolHalfwidthDescription(runtime.GOOS), "all", []string{"off", "on", "all"},
 		func(s Settings) string { return s.symbolWidth() }})
 	// #273：同上放在最後；設定程式排在「Shift＋符號打半形」下面。
 	out = append(out, spec{"cjk-latin-space", "中英文之間自動加空格", cjkLatinSpaceDescription, "off", []string{"on", "off"},
@@ -1085,7 +1085,7 @@ func ctrlPunctuationDescription(goos string) string {
 			"注音模式時這幾個鍵不再交給 App，要保留時可以關掉；英文模式不受影響"
 	}
 	d := "注音模式按 Ctrl＋, 打「，」、Ctrl＋. 打「。」、Ctrl＋' 打「、」、Ctrl＋; 打「；」、Ctrl＋Shift＋/ 打「？」、Ctrl＋Shift＋1 打「！」、" +
-		"Ctrl＋Shift＋; 打「：」、Ctrl＋Shift＋9 打「（」、Ctrl＋Shift＋0 打「）」，沒在打字時也可以。會占用程式的這幾個快速鍵（例如 VS Code 的 Ctrl＋, 開設定、Ctrl＋. 快速修正"
+		"Ctrl＋Shift＋; 打「：」、Ctrl＋Shift＋9 打「（」、Ctrl＋Shift＋0 打「）」、Ctrl＋[ 打「【」、Ctrl＋] 打「】」，沒在打字時也可以。會占用程式的這幾個快速鍵（例如 VS Code 的 Ctrl＋, 開設定、Ctrl＋. 快速修正"
 	switch goos {
 	case "windows":
 		d += "，Excel 的 Ctrl＋Shift＋; 插入時間、Ctrl＋Shift＋9 取消隱藏列"

@@ -7,7 +7,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/symbols"
 )
 
-// 反引號（`）開的符號選單分頁（#290）：「最近」＋ symbols.Tabs，Tab／Shift＋Tab 換分頁，比照 = 選單。
+// 符號選單分頁（#290；fork 從符號上按 ↑ 開）：「最近」＋ symbols.Tabs，Tab／Shift＋Tab 換分頁，比照 = 選單。
 // 選單沿用一般候選的版面與翻頁（cand.kind 是空字串），只多記目前的分頁 cand.symbols。
 
 // symbolTabNames 是目前可切換的分頁。私人欄位不列「最近」（個人資料），沒有紀錄時也不列；
@@ -34,12 +34,6 @@ func (s *Session) symbolTabItems(name string) []string {
 		}
 	}
 	return nil
-}
-
-// openSymbolMenu 開符號選單：有最近使用的符號時從「最近」開，否則從第一個分類開。
-// start、length、pending 同 openSymbols：選取時替換的區間，pending 表示替換未完成的注音。
-func (s *Session) openSymbolMenu(start, length int, pending bool) {
-	s.openSymbolTab(s.symbolTabNames()[0], start, length, pending)
 }
 
 func (s *Session) openSymbolTab(name string, start, length int, pending bool) {
