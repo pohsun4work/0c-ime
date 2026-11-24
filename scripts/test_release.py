@@ -856,7 +856,7 @@ Successfully verified: 0c-update.exe
     def test_pairing_lock_matches_0c_ime_pair_models(self):
         # #180：發版產生的 pairing.lock 與 0c-ime 以 scripts/pair_models.py 產生的逐位元組相同（兩份不同的字典）。
         import pairing_lock
-        testdata = Path(__file__).resolve().parents[1] / "internal/models/testdata"
+        testdata = Path(__file__).resolve().parent / "testdata"
         for name in ("0c-ime-dfsg-pairing.lock.json", "0c-ime-0.2.3-pairing.lock.json"):
             expected = (testdata / name).read_bytes()
             dictionary = json.loads(expected)["dictionary_manifest_sha256"]
