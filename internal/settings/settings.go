@@ -395,7 +395,7 @@ func fields() []field {
 			inputstyle.CandidateEnterSelect, []string{inputstyle.CandidateEnterSelect, inputstyle.CandidateEnterCommit},
 			map[string]string{inputstyle.CandidateEnterSelect: "選字並保留組字", inputstyle.CandidateEnterCommit: "選字並送出"},
 			func(s *Settings) *string { return &s.CandidateEnter }),
-		numberField("page-size", "每頁候選數", "每頁顯示幾個候選字詞", 10, []int{9, 10}, nil,
+		numberField("page-size", "每頁候選數", "每頁顯示幾個候選字詞", 9, []int{9, 10}, nil,
 			func(s *Settings) *int { return &s.PageSize }),
 		choiceField("shift-delete", "Shift＋Delete", "沒開候選窗時按 Shift＋Delete：同 Delete（反白學到的英文建議時是忘掉它），或在注音沒打完時只退回聲調",
 			inputstyle.ShiftDeleteDelete, []string{inputstyle.ShiftDeleteDelete, inputstyle.ShiftDeleteTone},

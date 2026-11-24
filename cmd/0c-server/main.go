@@ -157,6 +157,7 @@ func serve() string {
 	eng.AdvanceAfterSelect = config.AdvanceAfterSelect
 	eng.CtrlPunct = true
 	eng.ShiftSymbolHalfwidth, eng.AllSymbolsHalfwidth = true, true
+	eng.EmojiShortcut = "off" // = 直接打 =；Emoji 到 P11 搬進符號表
 	eng.NoLearning = !config.PersonalLearning // #297
 	eng.SelectionKeys = config.SelectionKeys  // #112
 	// 0.2.0 正式開放（#128）：引擎的欄位留著，零值給測試確認關閉時行為不變。
