@@ -193,9 +193,9 @@ fn build_theme(dpi: u32, compact: bool) -> Theme {
     let scale = |px: i32| (px * dpi as i32 + 48) / 96;
     let colors = palette::system_palette();
     // 一般：字 18、小字 13、留白 8、列高 28、小字列高 20、小按鍵高 18；
-    // 精簡（使用者 11-25 選的）：字 14、小字 10、留白 2、列高 16、小按鍵高 13。
+    // 精簡（使用者 11-25 選的）：字 14、小字 12、留白 3、列高 17、小按鍵高 14。
     let (font_px, small_px, pad, row, small_row, badge_height) =
-        if compact { (14, 10, 2, 16, 18, 13) } else { (18, 13, 8, 28, 20, 18) };
+        if compact { (14, 12, 3, 17, 18, 14) } else { (18, 13, 8, 28, 20, 18) };
     unsafe {
         let font = CreateFontW(
             -scale(font_px),
@@ -265,7 +265,7 @@ fn build_theme(dpi: u32, compact: bool) -> Theme {
             heading_row: if compact { scale(row) } else { notice_row(scale(small_row)) },
             badge_height: scale(badge_height),
             badge_round: scale(2) * 2,
-            gap: scale(1),
+            gap: scale(2),
             font_middle: font_middle(font),
             small_middle: font_middle(small),
         }
