@@ -250,7 +250,7 @@ func TestNeuralHintShowsCloseSecondAndTabLocksIt(t *testing.T) {
 	s := hintSession(100)
 	typeSyl(s, "ㄨㄛˇ")
 	snap := typeSyl(s, "ㄐㄧㄥˇ")
-	if snap.SuggestionEdit == nil || !strings.Contains(snap.Suggestion, " → ") {
+	if snap.SuggestionEdit == nil || snap.Suggestion != snap.SuggestionEdit.Text {
 		t.Fatalf("missing neural hint: %+v", snap)
 	}
 	want, shown := snap.SuggestionEdit.Text, snap.Text()

@@ -1,6 +1,7 @@
 # wordfreq 3.1.1 英文 Zipf 詞頻（CC BY-SA 4.0，出處見 README.md）；由 scripts/export_wordfreq.py 產生，不要手改
 # data/english/esdb.tsv sha256 0bc3e0c846d49a6b89e089ea2fad325416b6d968752372b77b4a3627dbfb14d4
 # data/english/technical.tsv sha256 df0a4f86e2f001ddaa8b1db83cf52381480968406baf1ecaeae6c0cfe3aab631
+# internal/englishpack/revise.tsv sha256 44c2e8035265aa45f5b8d18af1646a31dea6b5903afe4e9e606107316d95b4e3
 a	7.36
 aah	2.81
 aardvark	2.39
@@ -9408,6 +9409,7 @@ centuries	4.32
 centurion	3.05
 centurions	2.33
 century	5.02
+ceo	4.46
 cephalic	2.12
 cephalopod	2.08
 cephalopods	2.20
@@ -13916,6 +13918,7 @@ cozying	2.06
 cpd	2.80
 cpl	3.09
 cps	3.41
+cpu	3.72
 crab	3.76
 crabbed	1.54
 crabber	1.03
@@ -14581,6 +14584,8 @@ crystallographic	2.29
 crystallography	2.60
 crystals	3.78
 cs	3.90
+css	3.42
+csv	2.57
 ct	4.11
 ctn	1.92
 ctr	2.97
@@ -18339,6 +18344,8 @@ dizzy	3.43
 dizzying	2.67
 dizzyingly	1.49
 djellaba	1.11
+dll	2.62
+dns	3.24
 do	6.35
 doable	3.05
 dob	2.65
@@ -21765,6 +21772,7 @@ excuse	4.56
 excused	3.28
 excuses	3.95
 excusing	2.65
+exe	2.86
 exec	3.32
 execrable	1.99
 execrate	1.20
@@ -26079,6 +26087,7 @@ giblets	2.01
 giddily	1.74
 giddiness	2.01
 giddy	3.22
+gif	3.90
 gift	4.78
 gifted	3.89
 giftedness	2.06
@@ -26721,6 +26730,7 @@ govt	3.75
 gown	3.75
 gowned	1.47
 gowns	3.25
+gpu	3.22
 gr	3.52
 grab	4.52
 grabbed	4.07
@@ -29717,6 +29727,7 @@ hp	4.13
 hr	4.20
 hrs	3.65
 ht	3.38
+html	3.65
 http	4.81
 https	4.42
 huarache	1.86
@@ -32862,6 +32873,7 @@ ionizing	2.77
 ionosphere	2.47
 ionospheric	2.14
 ions	3.52
+ios	4.12
 iota	2.97
 iotas	1.27
 ipecac	2.15
@@ -33519,7 +33531,10 @@ joyriding	1.81
 joys	3.39
 joystick	2.87
 joysticks	2.17
+jpeg	3.04
+jpg	2.93
 jr	4.55
+json	2.75
 jubilant	2.63
 jubilantly	1.73
 jubilation	2.53
@@ -34143,6 +34158,7 @@ kowtowed	1.43
 kowtowing	2.02
 kowtows	1.25
 kph	2.60
+kpi	2.09
 kraal	1.93
 kraals	1.35
 kraut	2.38
@@ -41246,6 +41262,7 @@ nowt	2.40
 noxious	2.91
 nozzle	3.24
 nozzles	2.75
+npm	2.41
 nth	2.92
 nu	3.55
 nuance	3.09
@@ -44155,6 +44172,7 @@ paywalls	1.80
 payware	1.06
 pct	3.15
 pd	3.70
+pdf	3.84
 pea	3.54
 peace	5.02
 peaceable	2.40
@@ -46052,6 +46070,7 @@ pneumococcal	2.24
 pneumococci	1.11
 pneumococcus	1.43
 pneumonia	3.74
+png	3.36
 poach	2.68
 poached	2.99
 poacher	2.58
@@ -58722,6 +58741,7 @@ spymaster	2.13
 spymasters	1.44
 spyware	2.71
 sq	3.83
+sql	3.38
 sqq	1.79
 squab	1.97
 squabble	2.59
@@ -58838,7 +58858,9 @@ squishiest	1.28
 squishing	2.26
 squishy	3.04
 sriracha	2.72
+ssd	3.21
 ssh	3.12
+ssl	2.93
 st	5.20
 stab	3.78
 stabbed	3.90
@@ -61067,6 +61089,7 @@ suturing	2.23
 suzerain	1.87
 suzerainty	2.09
 svelte	2.22
+svg	2.66
 swab	2.83
 swabbed	2.09
 swabbing	2.00
@@ -66947,6 +66970,7 @@ usability	3.01
 usable	3.53
 usage	4.23
 usages	2.67
+usb	3.98
 use	5.81
 used	5.80
 useful	4.72
@@ -68037,6 +68061,7 @@ voyeur	2.68
 voyeurism	2.41
 voyeuristic	2.24
 voyeurs	1.99
+vpn	3.39
 vroom	2.72
 vs	4.85
 vulcanised	1.35
@@ -69173,6 +69198,7 @@ wieners	2.21
 wienie	1.01
 wife	5.23
 wifely	1.90
+wifi	3.94
 wig	3.64
 wigeon	1.73
 wigged	1.79

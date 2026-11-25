@@ -88,7 +88,7 @@ func TestSystemLongWordTab(t *testing.T) {
 	} {
 		id := e.OpenSession()
 		if snap := typeReading(e, id, c.reading); snap.SuggestedText() != c.want {
-			t.Errorf("%s 的提示：%q＋%q", c.reading, snap.Text(), snap.Suggestion)
+			t.Errorf("%s 的提示：%q 提示 %q", c.reading, snap.Text(), snap.Suggestion)
 		}
 		snap, _ := e.Do(id, proto.Request{Type: proto.Key, Key: proto.KeyTab})
 		if snap.Text() != c.want {

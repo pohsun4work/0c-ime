@@ -31,7 +31,7 @@ type Dictionary struct {
 	words     []Word
 	nodes     []trieNode
 	noSuggest []bool
-	priors    *Dictionary // Reranked 換過排序時，門檻（NearCommon）照樣看原本的先驗
+	priors    *Dictionary // Revised 換過詞表與排序時，門檻（NearCommon）照樣看原本的先驗
 }
 
 type trieNode struct {

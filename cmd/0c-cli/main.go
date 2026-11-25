@@ -22,7 +22,7 @@ import (
 const help = `直接輸入按鍵（標準注音排列，空白鍵是一聲；中英混打、標點照微軟、符號鍵打半形），按 Enter 送出這一行的按鍵。
 空行＝提交。以 : 起始的是指令：
   :c [詞長]   開候選（不給詞長則優先目前分詞）    :n ID      選候選
-  :p 頁碼     換頁          :x  關閉候選            :tab       接受補全／候選內切詞長
+  :p 頁碼     換頁          :x  關閉候選            :tab       換成 [Tab] 提示／候選內切詞長
   :bs         退格          :esc 放棄組字           :to 位置   移動游標（音節位置）
   :k 鍵名     送具名鍵：Up Down Left Right Enter Escape Delete PageUp PageDown；Ctrl+, Ctrl+. 等 Ctrl＋標點
               多排候選用方向鍵移動
@@ -246,11 +246,7 @@ func render(s proto.Snapshot) {
 		b.WriteString("  [空白 " + h.Text + "]")
 	}
 	if s.Suggestion != "" {
-		if s.SuggestionEdit != nil {
-			b.WriteString("  ⇥ " + s.Suggestion + "  (:tab 接受，Esc 取消預覽)")
-		} else {
-			b.WriteString("░" + s.Suggestion + "  (:tab 接受)")
-		}
+		b.WriteString("  [Tab] " + s.Suggestion + "  (:tab 換成這個)")
 	}
 	fmt.Printf("  %s\n", b.String())
 	if c := s.Candidates; c != nil {

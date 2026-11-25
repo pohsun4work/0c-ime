@@ -15,7 +15,7 @@ import (
 type Suggestion struct {
 	Word    string            // 完整的詞
 	Start   int               // 該詞在組字區的起點（音節位置）
-	Rest    string            // 尚未輸入的部分，以淡色顯示
+	Rest    string            // 尚未輸入的部分
 	Syls    []zhuyin.Syllable // 尚未輸入的音節
 	Conf    float64
 	Replace string // 非空時為將被替換的已顯示前綴，必須清楚預覽後才接受

@@ -1,0 +1,32 @@
+# 對官方英文資料包的增刪（中英混打用），編進 0c-server，不改資料包。詞<TAB>處理<TAB>說明
+# add：加進來。按鍵是英文詞時組字區照英文、空白照英文留下，不當冗餘音、打錯鍵修正成中文（png␣ 是 png，不是 身）。
+#   只收 ASCII 字母；含數字的英數詞（mp3、win10）在 core/english/alnum.tsv。
+#   加詞前要看前綴：英文字的開頭、又組不成一聲字的按鍵會照英文顯示，前兩三鍵原本不是英文字開頭的詞
+#   會讓打中文時那幾鍵改顯示英文（xml 的 xm 會讓 ㄌㄩ 顯示成 xm，所以不收）。
+# remove：拿掉。字典有這個詞時，後面接注音的按鍵會先把它切成英文。
+png	add	圖檔格式
+jpg	add	圖檔格式
+jpeg	add	圖檔格式
+gif	add	圖檔格式
+svg	add	圖檔格式
+pdf	add	文件格式
+csv	add	資料格式
+json	add	資料格式
+exe	add	執行檔
+dll	add	程式庫檔
+html	add	網頁
+css	add	網頁樣式
+sql	add	資料庫查詢語言
+ssl	add	加密連線；規格原本 ssl␣ 是 孬，改成照英文、Tab 換 ㄋㄠ（2026-11-25 使用者決定）
+vpn	add	網路
+dns	add	網路
+wifi	add	網路
+npm	add	套件管理
+cpu	add	硬體
+gpu	add	硬體
+ssd	add	硬體
+usb	add	硬體
+ios	add	作業系統
+kpi	add	縮寫
+ceo	add	縮寫
+ck	remove	esdb 收的縮寫，會把 ckg6 切成 ck時；規格要 c什（不相鄰的聲母切成英文）

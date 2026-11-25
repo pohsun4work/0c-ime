@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn uiless_host_never_gets_our_window_for_hints_without_candidates() {
-        // #159：英雄聯盟（UI-less）打「價」只有補全提示「格」，0c-ui 的視窗疊在獨佔全螢幕的遊戲上，
+        // #159：英雄聯盟（UI-less）打「價」只有 Tab 提示「價格」，0c-ui 的視窗疊在獨佔全螢幕的遊戲上，
         // 遊戲失去前景並跳回桌面。補全提示、提示訊息、標示說明都沒有 UI 元件可交給宿主，一律不畫。
         let (host, mut elements) = host(false);
         for message in [

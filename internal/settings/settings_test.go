@@ -441,7 +441,7 @@ func TestRetiredKeysAreIgnoredAndDroppedOnSave(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	body := `{"schema":2,"selection":"statistical","input_profile":{"active":"custom","custom":{"tab":"cycle"}},` +
 		`"mixed_input":false,"toneless":true,"left_shift":"cancel","keyboard_layout":"eten","caps_lock_english":"lower",` +
-		`"output_simplified":true,"emoji_shortcut":"off","toggle_key":"left","future":1}`
+		`"output_simplified":true,"emoji_shortcut":"off","toggle_key":"left","tab":"cycle","future":1}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestRetiredKeysAreIgnoredAndDroppedOnSave(t *testing.T) {
 		t.Fatalf("舊檔應可讀可寫、只提到真正不認得的欄位：%+v %v", r, err)
 	}
 	s := r.Settings
-	if s.Selection != Statistical || s.ToggleKey != ToggleLeft || s.Tab != Default().Tab {
+	if s.Selection != Statistical || s.ToggleKey != ToggleLeft {
 		t.Fatalf("其餘設定照讀，舊風格的規則回到預設：%+v", s)
 	}
 	if err := s.Set("personal-learning", "off"); err != nil {
@@ -468,7 +468,7 @@ func TestRetiredKeysAreIgnoredAndDroppedOnSave(t *testing.T) {
 	if !strings.Contains(string(b), `"future": 1`) || !strings.Contains(string(b), `"personal_learning": false`) {
 		t.Fatalf("不認得的欄位保留、改的值寫入：%s", b)
 	}
-	for _, key := range []string{"mixed-input", "toneless", "input-profile", "left-shift", "keyboard-layout"} {
+	for _, key := range []string{"mixed-input", "toneless", "input-profile", "left-shift", "keyboard-layout", "tab"} {
 		var se *SetError
 		if err := s.Set(key, "on"); !errors.As(err, &se) || se.Code != CodeUnknownKey {
 			t.Errorf("%s 已拿掉：%v", key, err)

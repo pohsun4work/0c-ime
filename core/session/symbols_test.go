@@ -191,7 +191,7 @@ func TestSuggestionAndLocksAfterLiteral(t *testing.T) {
 	s.model.LM.(*lm.Mem).SetUni("麻煩", 0.01)
 	key(s, "[")
 	snap := typeSyl(s, "ㄇㄚˊ")
-	if snap.Suggestion != "煩" {
+	if snap.Suggestion != "麻煩" {
 		t.Fatalf("符號後仍應補全：%+v", snap)
 	}
 	if snap = key(s, proto.KeyTab); snap.Text() != "[麻煩" {

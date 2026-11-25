@@ -20,6 +20,9 @@ pub struct Palette {
     pub selected_text: u32,
     /// 一次性提示（#123「已加入詞庫：…」）的字色：一般主題用強調色，高對比用使用者的文字色。
     pub notice: u32,
+    /// Tab 小按鍵的底色與框線（字用 hint）：一般主題是淺灰／深灰底、框線同底色，高對比只畫文字色的框。
+    pub badge: u32,
+    pub badge_border: u32,
     pub color_fonts: bool,
 }
 
@@ -34,6 +37,8 @@ impl Palette {
                 selection: 0xFFCF9B,
                 selected_text: 0x181818,
                 notice: 0xFFCF9B,
+                badge: 0x3A3A3A,
+                badge_border: 0x3A3A3A,
                 color_fonts: true,
             }
         } else {
@@ -45,6 +50,8 @@ impl Palette {
                 selection: 0xB86600,
                 selected_text: 0xFFFFFF,
                 notice: 0xB86600,
+                badge: 0xE5E5E5,
+                badge_border: 0xE5E5E5,
                 color_fonts: true,
             }
         }
@@ -58,6 +65,8 @@ impl Palette {
             selection,
             selected_text,
             notice: text,
+            badge: background,
+            badge_border: text,
             color_fonts: false,
         }
     }
@@ -123,6 +132,7 @@ mod tests {
                 (p.hint, p.background),
                 (p.notice, p.background),
                 (p.selected_text, p.selection),
+                (p.hint, p.badge),
             ] {
                 let a = luminance(foreground);
                 let b = luminance(background);
@@ -141,5 +151,6 @@ mod tests {
             (0x001122, 0xF0FFFF, 0x335500, 0xEECCFF)
         );
         assert_eq!((p.hint, p.border, p.notice), (p.text, p.text, p.text));
+        assert_eq!((p.badge, p.badge_border), (p.background, p.text), "高對比的 Tab 小按鍵只畫文字色的框");
     }
 }

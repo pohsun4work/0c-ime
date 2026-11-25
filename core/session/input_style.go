@@ -6,7 +6,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
@@ -143,17 +142,13 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 		}
 		return s.composing(), "", true
 	}
-	if !s.english && ((k == proto.KeyTab || k == proto.KeyBackTab) && s.InputStyle.Tab == inputstyle.TabCycle || k == proto.KeyUp) {
+	if !s.english && k == proto.KeyUp {
 		if !s.composing() {
 			return false, "", true
 		}
 		s.mark = nil // 跟其他按鍵一樣取消加詞標示（vocabKey 輪不到這一鍵）
 		if s.comp.Empty() {
-			d := 1
-			if k == proto.KeyBackTab {
-				d = -1
-			}
-			s.cycleStyleCandidate(d)
+			s.cycleStyleCandidate()
 		}
 		return true, "", true
 	}
@@ -228,11 +223,11 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	return false, "", false
 }
 
-// cycleStyleCandidate 是 ↑（與設定成輪換的 Tab）：照微軟，游標處的字詞直接換成下一個候選、不開候選窗，連按接著換。
+// cycleStyleCandidate 是 ↑：照微軟，游標處的字詞直接換成下一個候選、不開候選窗，連按接著換。
 // 先換整個詞；詞沒有別的候選時換游標旁那個字（混合清單後段的單字）。原始按鍵與原樣注音不在輪換裡
 // （「我們很好」↑ 不會變回 cp3cl3）。全形符號照 ↓ 清單的順序換下一個全形；半形符號、英數、
 // 還沒定案的混打按鍵與原樣音節不動。
-func (s *Session) cycleStyleCandidate(delta int) {
+func (s *Session) cycleStyleCandidate() {
 	if s.mixed.raw != "" {
 		return // openCandidates 會把結尾是符號的待定按鍵定案（hello<），還沒定案的不動
 	}
@@ -262,7 +257,7 @@ func (s *Session) cycleStyleCandidate(delta int) {
 	if len(ids) == 0 || len(ids) == 1 && at == 0 {
 		return
 	}
-	id := ids[(max(at, 0)+delta+len(ids))%len(ids)]
+	id := ids[(max(at, 0)+1)%len(ids)]
 	c.cursor = id
 	s.cand, s.styleCycle = c, c
 	start, length := c.span(id)

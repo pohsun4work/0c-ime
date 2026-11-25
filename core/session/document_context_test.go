@@ -131,9 +131,9 @@ func TestDocumentContextFeedsCompletionAndExplanation(t *testing.T) {
 			s.Handle(proto.Request{Type: proto.Context, On: true, ContextID: id})
 		}
 		snap := typeSyl(s, "ㄐㄧㄥˇ")
-		want := "點"
+		want := "景點"
 		if confirm {
-			want = "色"
+			want = "景色"
 		}
 		if snap.Suggestion != want {
 			c, ok := s.dec.Complete(s.lattice(), s.path)

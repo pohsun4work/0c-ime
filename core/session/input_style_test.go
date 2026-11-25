@@ -7,12 +7,11 @@ import (
 	"github.com/0c-biggo/0c-ime/core/proto"
 )
 
-func TestTabCycleInSecondWord(t *testing.T) {
+func TestUpCycleInSecondWord(t *testing.T) {
 	s := newSession()
-	s.InputStyle.Tab = inputstyle.TabCycle
 	typeSyl(s, "ㄨㄛˇ")
 	typeSyl(s, "ㄐㄧㄥˇ")
-	if a := key(s, proto.KeyTab); a.Text() != "我井" {
+	if a := key(s, proto.KeyUp); a.Text() != "我井" {
 		t.Fatalf("second word cycle: %+v", a)
 	}
 }
@@ -178,22 +177,22 @@ func TestStyleLiteralPreservesMixedRun(t *testing.T) {
 	}
 }
 
-func TestTabCycleAndShiftSpaceInsertsSpace(t *testing.T) {
+// ↑ 輪換字詞；沒開候選窗時 Shift＋Tab 吃掉不動作（只在候選窗反向切換字詞長度）。
+func TestUpCycleAndShiftSpaceInsertsSpace(t *testing.T) {
 	s := newSession()
-	s.InputStyle.Tab = inputstyle.TabCycle
 	s.InputStyle.ShiftSpace = inputstyle.ShiftSpaceSpace
 	s.EscKeepComposition = true
 	typeSyl(s, "ㄐㄧㄥˇ")
-	if a := key(s, proto.KeyTab); a.Text() != "井" || a.Candidates != nil || a.Cursor.Rune != 1 {
+	if a := key(s, proto.KeyUp); a.Text() != "井" || a.Candidates != nil || a.Cursor.Rune != 1 {
 		t.Fatalf("next: %+v", a)
 	}
-	if a := key(s, proto.KeyBackTab); a.Text() != "景" || a.Candidates != nil {
-		t.Fatalf("previous: %+v", a)
+	if a := key(s, proto.KeyBackTab); !a.Handled || a.Text() != "井" || a.Candidates != nil {
+		t.Fatalf("Shift+Tab: %+v", a)
 	}
-	if a := key(s, proto.KeyEscape); a.Text() != "景" {
+	if a := key(s, proto.KeyEscape); a.Text() != "井" {
 		t.Fatalf("Esc cleared completed word: %+v", a)
 	}
-	if a := key(s, proto.KeyShiftSpace); a.Commit != "景 " || a.FullWidth {
+	if a := key(s, proto.KeyShiftSpace); a.Commit != "井 " || a.FullWidth {
 		t.Fatalf("ShiftSpace: %+v", a)
 	}
 	typeSyl(s, "ㄨㄛˇ")
@@ -204,15 +203,12 @@ func TestTabCycleAndShiftSpaceInsertsSpace(t *testing.T) {
 	}
 }
 
-func TestTabCycleReversesWithManyCandidates(t *testing.T) {
+func TestUpCycleWithManyCandidates(t *testing.T) {
 	s := manySession("1234567890")
-	s.InputStyle.Tab = inputstyle.TabCycle
 	s.CandidateBeforeCursor = true
 	before := typeSyl(s, "ㄕˋ").Text()
-	after := key(s, proto.KeyTab).Text()
-	back := key(s, proto.KeyBackTab).Text()
-	if before == after || before != back {
-		t.Fatalf("before=%q tab=%q backtab=%q", before, after, back)
+	if after := key(s, proto.KeyUp).Text(); before == after {
+		t.Fatalf("before=%q up=%q", before, after)
 	}
 	key(s, proto.KeyLeft)
 	if s.styleCycle != nil {

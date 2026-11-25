@@ -1,10 +1,9 @@
 // Package inputstyle 是按鍵規則：使用者可在設定改的幾個按鍵操作。核心與宿主共用同一份值；不含平台 I/O。
 package inputstyle
 
-// Rules 是按鍵規則，值見下面的常數。零值是各項的第一個值（Shift＋空白不動作、Tab 接受補全…），每頁 10 個候選。
+// Rules 是按鍵規則，值見下面的常數。零值是各項的第一個值（Shift＋空白不動作、候選窗的 Tab 切換字詞長度…），每頁 10 個候選。
 type Rules struct {
 	ShiftSpace          string
-	Tab                 string
 	CandidateTab        string
 	CandidateSpace      string
 	CandidateEnter      string
@@ -19,8 +18,6 @@ const (
 	ShiftSpaceFullWidth  = "fullwidth"  // 切換全半形（含英數）
 	ShiftSpaceSpace      = "space"      // 插入空白
 	ShiftSpaceSingle     = "single"     // 開單字候選
-	TabAccept            = "accept"     // 接受補全與同音建議
-	TabCycle             = "cycle"      // 輪換字詞
 	CandidateTabLength   = "length"     // 切換字詞長度
 	CandidateTabGrid     = "grid"       // 展開多排候選
 	CandidateTabNext     = "next"       // 移到下一個候選

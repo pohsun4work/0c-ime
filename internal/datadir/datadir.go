@@ -50,7 +50,7 @@ func Open(dir string) (*engine.Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("english：%w", err)
 	}
-	eng.English = englishpack.Frequency(d)
+	eng.English = englishpack.Revise(d)
 	eng.EnglishPack = m.Sources[0].Version
 	return eng, nil
 }

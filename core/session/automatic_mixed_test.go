@@ -142,7 +142,7 @@ func TestMixedFirstToneEnglishCollisions(t *testing.T) {
 				return s
 			}
 			s := fresh()
-			if snap := mixedType(s, tc.raw); snap.Text() != tc.reading || snap.SuggestionEdit != nil {
+			if snap := mixedType(s, tc.raw); snap.Text() != tc.reading || snap.Suggestion != tc.raw { // Tab 換成原按鍵
 				t.Fatalf("pending reading: %+v", snap)
 			}
 			key(s, proto.KeyBackspace)

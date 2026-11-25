@@ -4,6 +4,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
@@ -120,6 +121,102 @@ func (s *Session) mixedRepair(raw, key string, tone rune) (int, zhuyin.Syllable,
 		}
 	}
 	return 0, "", false
+}
+
+// repairFor：待定按鍵接 key 時經過冗餘音、打錯鍵修正組成的音節（mixedRepair，其次 mixedRepairSplit），切點前照字面。
+func (s *Session) repairFor(raw, key string, tone rune) (int, zhuyin.Syllable, bool) {
+	if at, done, ok := s.mixedRepair(raw, key, tone); ok {
+		return at, done, true
+	}
+	return s.mixedRepairSplit(raw, key, tone)
+}
+
+// repairedText：待定按鍵經過修正組成的注音在組字區的樣子（png 是 ㄕㄣ、5wu0 是 5ㄊㄧㄢ）。
+func (s *Session) repairedText(raw string) (string, bool) {
+	at, done, ok := s.repairFor(raw, " ", zhuyin.Tone1)
+	return raw[:at] + string(done.Base()), ok
+}
+
+// spaceRepair：沒選過的待定按鍵接空白時，finishMixedTone 會照修正組成中文（gjn␣ 是 蘇、5wu0␣ 是 5天）。
+// 順序同 finishMixedTone：英文詞、英數詞、數字、本身組得成字的都不是修正。
+func (s *Session) spaceRepair(raw string) (int, zhuyin.Syllable, bool) {
+	if s.vocabEnglish(raw) || s.zhuyinKeyHabit(raw) || english.Alnum(raw) == english.AlnumLiteral || s.mixedEnglishWord(raw) ||
+		s.mixedSpaceNumber(raw, zhuyin.Tone1) || s.alnumThenSpace(raw, zhuyin.Tone1) || s.rareAlnumSpace(raw) {
+		return 0, "", false
+	}
+	if _, _, ok := s.mixedPunctSplit(raw, zhuyin.Tone1); ok {
+		return 0, "", false
+	}
+	if _, ok := s.mixedReading(raw, zhuyin.Tone1); ok {
+		return 0, "", false
+	}
+	at, done, ok := s.repairFor(raw, " ", zhuyin.Tone1)
+	if !ok {
+		return 0, "", false
+	}
+	if bat, bdone, bok := s.mixedBoundary(raw, " ", zhuyin.Tone1); !bok || bat != at || bdone != done {
+		return 0, "", false
+	}
+	return at, done, true
+}
+
+// repairMemo 記下 mixedRepairShown 上次的輸入與結果：一次按鍵的組字區、小視窗、定案會問好幾次，修正要比較切法的常用程度。
+type repairMemo struct {
+	raw                       string
+	rev, choice, cursor, syls int
+	at                        int
+	done                      zhuyin.Syllable
+	ok                        bool
+}
+
+// mixedRepairShown：組字區顯示修正讀音時，回傳切點與修正後的音節，切點前照字面。沒選過的（choice 0）照接空白的結果
+// （gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
+func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
+	p := s.mixed
+	if p.raw == "" || p.accepted != "" || s.english || s.englishWord || p.choice == 1 || p.choice == 2 {
+		return 0, "", false
+	}
+	m := &s.repairMemo
+	if m.raw == p.raw && m.rev == s.rev && m.choice == p.choice && m.cursor == s.cursor && m.syls == len(s.syls) {
+		return m.at, m.done, m.ok
+	}
+	var at int
+	var done zhuyin.Syllable
+	var ok bool
+	if p.choice == 3 {
+		at, done, ok = s.repairFor(p.raw, " ", zhuyin.Tone1)
+	} else {
+		at, done, ok = s.spaceRepair(p.raw)
+	}
+	*m = repairMemo{raw: p.raw, rev: s.rev, choice: p.choice, cursor: s.cursor, syls: len(s.syls), at: at, done: done, ok: ok}
+	return at, done, ok
+}
+
+// mixedShowsZhuyin：待定按鍵在組字區顯示成還沒打完的注音（照順序組的 ㄋㄧ，或修正讀音的 ㄙㄨ）。
+func (s *Session) mixedShowsZhuyin() bool {
+	if _, phonetic := s.mixedPending(s.mixedText()); phonetic {
+		return true
+	}
+	_, _, repaired := s.mixedRepairShown()
+	return repaired
+}
+
+// eraseRepaired：顯示修正讀音時退格跟一般注音一樣刪畫面最後一個注音（gjn 的 ㄙㄨ 剩 ㄙ、wu// 的 ㄊㄧㄥ 剩 ㄊㄧ，#309），
+// 留下的注音換回它們的按鍵。沒有顯示修正讀音時回傳 false。
+func (s *Session) eraseRepaired() bool {
+	at, done, ok := s.mixedRepairShown()
+	if !ok {
+		return false
+	}
+	syms := []rune(string(done.Base()))
+	keys := []rune(s.mixed.raw[:at])
+	for _, sym := range syms[:len(syms)-1] {
+		k, _ := layout.Standard.Key(sym)
+		keys = append(keys, k)
+	}
+	s.mixed.raw, s.mixed.choice = string(keys), 0
+	s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, at)
+	return true
 }
 
 // englishHeadBefore：raw 有包含 touched 位置的英文字頭（go83 的 go）。

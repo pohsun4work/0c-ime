@@ -146,7 +146,7 @@ func main() {
 			after := e.Session(id).Handle(proto.Request{Type: proto.Key, Key: proto.KeyTab})
 			if after.Handled {
 				tabKeys++
-				if after.SuggestionEdit != nil {
+				if after.Suggestion != "" && after.Text() == shown { // 第一次 Tab 只預覽同音替換
 					preview = after.Suggestion
 					after = e.Session(id).Handle(proto.Request{Type: proto.Key, Key: proto.KeyTab})
 					tabKeys++

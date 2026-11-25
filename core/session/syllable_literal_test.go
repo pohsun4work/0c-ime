@@ -103,9 +103,9 @@ func TestPrefixOnlySyllableStaysZhuyin(t *testing.T) {
 	}
 	assertNoZhuyinLearned(t, s, "ㄟ")
 
-	// 不按空白直接打聲母：同一個音節照一般注音規則組成 ㄋㄧㄟ（各家注音輸入法相同），不受影響。
+	// 不按空白直接打聲母：同一個音節照一般注音規則組成 ㄋㄟ（各家注音輸入法相同），不受影響。
 	s = prefixOnlySession()
-	if snap = keys(s, "o", "s", "u"); snap.Text() != "ㄋㄧㄟ" {
+	if snap = keys(s, "o", "s"); snap.Text() != "ㄋㄟ" {
 		t.Fatalf("同一音節內的組音規則不變：%q", snap.Text())
 	}
 }

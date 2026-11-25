@@ -12,13 +12,13 @@ use std::rc::Rc;
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
+    BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
     GetMonitorInfoW, GetTextExtentPoint32W, InvalidateRect, MonitorFromPoint, MonitorFromWindow, ReleaseDC,
-    SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+    RoundRect, SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
     DEFAULT_CHARSET, DEFAULT_PITCH, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL, DT_NOPREFIX,
     DT_WORDBREAK, FW_NORMAL,
-    HBRUSH, HDC, HFONT, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS,
-    PAINTSTRUCT, TRANSPARENT,
+    HBRUSH, HDC, HFONT, HGDIOBJ, HPEN, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS,
+    PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::{
@@ -101,6 +101,8 @@ struct Theme {
     bg: HBRUSH,
     border: HBRUSH,
     highlight: HBRUSH,
+    badge: HBRUSH,
+    badge_pen: HPEN,
     pad: i32,
     row: i32,
     small_row: i32,
@@ -189,6 +191,8 @@ fn build_theme(dpi: u32) -> Theme {
             bg: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.background)),
             border: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.border)),
             highlight: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.selection)),
+            badge: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.badge)),
+            badge_pen: CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(colors.badge_border)),
             colors,
             pad: scale(8),
             row: scale(28),
@@ -206,6 +210,8 @@ impl Drop for Theme {
             let _ = DeleteObject(HGDIOBJ(self.bg.0));
             let _ = DeleteObject(HGDIOBJ(self.border.0));
             let _ = DeleteObject(HGDIOBJ(self.highlight.0));
+            let _ = DeleteObject(HGDIOBJ(self.badge.0));
+            let _ = DeleteObject(HGDIOBJ(self.badge_pen.0));
         }
     }
 }
@@ -293,11 +299,38 @@ fn note_text(hdc: HDC, font: HFONT, note: &str, width: i32) -> Vec<u16> {
     wide(&break_note(&words, measure(hdc, font, &wide(" ")), width))
 }
 
-/// 補全提示列開頭的「⇥ 」：用提示色畫，後面的補全內容用一般文字色（#118）。
-const SUGGESTION_MARK: &str = "⇥ ";
+/// Tab 提示列開頭的小按鍵：小字「Tab」畫在圓角底色上，像鍵盤上的鍵，後面接按 Tab 之後的樣子（另外、ㄕㄣ）。
+const TAB_BADGE: &str = "Tab";
+
+/// 小按鍵的寬度：字寬加左右留白。
+fn badge_width(hdc: HDC, t: &Theme) -> i32 {
+    measure(hdc, t.small, &TAB_BADGE.encode_utf16().collect::<Vec<_>>()) + t.pad
+}
+
+/// 小按鍵佔的寬度：再加與後面文字的間距。
+fn badge_advance(hdc: HDC, t: &Theme) -> i32 {
+    badge_width(hdc, t) + t.pad / 2
+}
+
+/// 在列頂 y、列高 row 的這一列從 x 畫小按鍵，回傳後面文字的起點。畫完還原字型，字色要另外設。
+unsafe fn draw_badge(hdc: HDC, t: &Theme, x: i32, y: i32, row: i32) -> i32 {
+    let label: Vec<u16> = TAB_BADGE.encode_utf16().collect();
+    let (width, height) = (badge_width(hdc, t), t.small_row - 2);
+    let top = y + (row - height) / 2;
+    let brush = SelectObject(hdc, HGDIOBJ(t.badge.0));
+    let pen = SelectObject(hdc, HGDIOBJ(t.badge_pen.0));
+    let _ = RoundRect(hdc, x, top, x + width, top + height, t.pad / 2, t.pad / 2);
+    SelectObject(hdc, pen);
+    SelectObject(hdc, brush);
+    let font = SelectObject(hdc, HGDIOBJ(t.small.0));
+    SetTextColor(hdc, windows::Win32::Foundation::COLORREF(t.colors.hint));
+    let _ = TextOutW(hdc, x + t.pad / 2, top + (height - Row::Small.glyph(t)) / 2, &label);
+    SelectObject(hdc, font);
+    x + badge_advance(hdc, t)
+}
 
 /// 直排候選窗的一列是什麼：提示（一般字級、強調色）、讀音提示（一般字級、一般文字色，#162）、
-/// 補全提示（一般字級，⇥ 用提示色、內容一般文字色，#118）、小字（標題、頁碼）、候選。
+/// Tab 提示（一般字級，前面畫 Tab 小按鍵，#118）、小字（標題、頁碼）、候選。
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Row {
     Notice,
@@ -337,15 +370,16 @@ impl Row {
 fn lines(m: &UiMessage) -> Vec<(Vec<u16>, Row)> {
     let mut out = Vec::new();
     for heading in header_lines(m) {
-        if !m.notice.is_empty() && heading == m.notice {
-            out.push((heading.encode_utf16().collect(), Row::Notice));
+        let row = if !m.notice.is_empty() && heading == m.notice {
+            Row::Notice
         } else if !m.reading.is_empty() && heading == m.reading {
-            out.push((heading.encode_utf16().collect(), Row::Reading));
+            Row::Reading
         } else if heading == m.suggestion {
-            out.push((format!("{SUGGESTION_MARK}{heading}").encode_utf16().collect(), Row::Suggestion));
+            Row::Suggestion
         } else {
-            out.push((heading.encode_utf16().collect(), Row::Small));
-        }
+            Row::Small
+        };
+        out.push((heading.encode_utf16().collect(), row));
     }
     for (i, c) in m.candidates.iter().enumerate() {
         out.push((
@@ -426,7 +460,8 @@ fn grid_size(m: &UiMessage, max_width: i32, t: &Theme, hdc: HDC) -> (i32, i32) {
         .iter()
         .map(|h| {
             let font = if large_heading(m, h) { t.font } else { t.small };
-            measure(hdc, font, &h.encode_utf16().collect::<Vec<_>>()) + t.pad * 3
+            let badge = if *h == m.suggestion { badge_advance(hdc, t) } else { 0 };
+            badge + measure(hdc, font, &h.encode_utf16().collect::<Vec<_>>()) + t.pad * 3
         })
         .max()
         .unwrap_or(0);
@@ -452,10 +487,11 @@ unsafe fn draw_grid(m: &UiMessage, hdc: HDC, width: i32, t: &Theme) {
         } else {
             (t.colors.hint, t.small, t.small_row)
         };
+        let x = if heading == m.suggestion { draw_badge(hdc, t, t.pad, heading_y, height) } else { t.pad };
         SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color));
         SelectObject(hdc, HGDIOBJ(font.0));
         let text: Vec<u16> = heading.encode_utf16().collect();
-        let _ = TextOutW(hdc, t.pad, heading_y, &text);
+        let _ = TextOutW(hdc, x, heading_y, &text);
         heading_y += height;
     }
     SelectObject(hdc, small_old);
@@ -663,7 +699,8 @@ pub fn present(hwnd: HWND, m: UiMessage) {
         let mut width = 0;
         let mut height = t.pad;
         for (text, row) in lines(&m) {
-            width = width.max(measure(hdc, row.font(&t), &text));
+            let badge = if row == Row::Suggestion { badge_advance(hdc, &t) } else { 0 };
+            width = width.max(badge + measure(hdc, row.font(&t), &text));
             height += row.height(&t);
         }
         width += t.pad * 3;
@@ -749,16 +786,11 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
             let old = SelectObject(hdc, HGDIOBJ(kind.font(&t).0));
             let top = y + (row - kind.glyph(&t)) / 2;
             let mut x = inner.left + t.pad;
-            let mut body = &text[..];
             if kind == Row::Suggestion {
-                let mark = SUGGESTION_MARK.encode_utf16().count().min(text.len());
-                SetTextColor(hdc, windows::Win32::Foundation::COLORREF(t.colors.hint));
-                let _ = TextOutW(hdc, x, top, &text[..mark]);
-                x += measure(hdc, kind.font(&t), &text[..mark]);
-                body = &text[mark..];
+                x = draw_badge(hdc, &t, x, y, row);
             }
             SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color));
-            let _ = TextOutW(hdc, x, top, body);
+            let _ = TextOutW(hdc, x, top, &text);
             SelectObject(hdc, old);
             y += row;
         }
@@ -957,8 +989,8 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert_eq!(String::from_utf16(&rows[0].0).unwrap(), m.notice);
         assert_eq!(rows[0].1, Row::Notice);
-        assert_eq!(String::from_utf16(&rows[1].0).unwrap(), "⇥ 補全");
-        assert_eq!(rows[1].1, Row::Suggestion, "補全提示跟候選同字級（#118）");
+        assert_eq!(String::from_utf16(&rows[1].0).unwrap(), "補全", "Tab 小按鍵另外畫，不在文字裡");
+        assert_eq!(rows[1].1, Row::Suggestion, "Tab 提示跟候選同字級（#118）");
         assert_eq!(rows[2].1, Row::Candidate { highlighted: true });
         // 收起提示後標題回來。
         let rows = lines(&without_notice(m.clone()));

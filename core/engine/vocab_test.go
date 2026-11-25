@@ -202,7 +202,7 @@ func TestVocabPhrasesAndSnapshot(t *testing.T) {
 	}
 }
 
-// 長自訂詞走 Tab 補全：打兩個音節起淡色顯示後半，按 Tab 收下；解碼把「新阿姆」切成「新｜阿姆…」時
+// 長自訂詞走 Tab 補全：打兩個音節起小視窗提示整個詞，按 Tab 收下；解碼把「新阿姆」切成「新｜阿姆…」時
 // 尾端只看得到系統詞「阿姆斯特丹」，自訂詞要從「新」那一段找起。只打一個字不建議。
 func TestVocabTabCompletion(t *testing.T) {
 	e := vocabEngine()
@@ -218,7 +218,7 @@ func TestVocabTabCompletion(t *testing.T) {
 	id := e.OpenSession()
 	snap := typeReading(e, id, zhuyin.Key(syls[:3]))
 	if snap.SuggestedText() != armstrong {
-		t.Fatalf("補全：%q＋%q", snap.Text(), snap.Suggestion)
+		t.Fatalf("補全：%q 提示 %q", snap.Text(), snap.Suggestion)
 	}
 	snap, _ = e.Do(id, proto.Request{Type: proto.Key, Key: proto.KeyTab})
 	if snap.Text() != armstrong {

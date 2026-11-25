@@ -361,11 +361,9 @@ type pendingStash struct {
 // 中英混打的暫存按鍵只有畫面顯示成注音時才清，顯示成英數的照舊留成字面文字。
 func (s *Session) clearPendingZhuyin() *pendingStash {
 	var stash pendingStash
-	if s.mixed.raw != "" {
-		if _, phonetic := s.mixedPending(s.mixedText()); phonetic {
-			stash.mixed = s.mixed
-			s.clearMixed()
-		}
+	if s.mixed.raw != "" && s.mixedShowsZhuyin() {
+		stash.mixed = s.mixed
+		s.clearMixed()
 	}
 	if !s.comp.Empty() {
 		stash.comp = s.comp

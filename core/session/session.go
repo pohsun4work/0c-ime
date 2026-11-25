@@ -119,6 +119,7 @@ type Session struct {
 	symbolPending       bool                                  // 未打完的注音來自注音鍵（symbol 請求）；接著的實體按鍵要先把它完成（finishSymbolPending）
 	sylPrior            map[zhuyin.Syllable]float64           // 簡拼保留讀音用的單音節常用程度（syllablePrior）
 	missedMemo          map[zhuyin.Syllable][]zhuyin.Syllable // 打的音節補上一鍵的讀音（missedFor，#335）
+	repairMemo          repairMemo                            // 待定按鍵顯示的修正讀音（mixedRepairShown）
 	EnglishAutocomplete bool
 	// KeepRedundantKeys：「重複按的注音當成一次」關閉時由宿主設定（P6）。混打時重複的注音不合併，照官方（wuuuu/6 是 wuuu營）。
 	KeepRedundantKeys bool
@@ -263,7 +264,7 @@ func (s *Session) ForgetLearning() {
 
 // Handle 處理一個請求並回傳完整快照。
 func (s *Session) Handle(r proto.Request) proto.Snapshot {
-	cycleKey := r.Type == proto.Key && ((s.InputStyle.Tab == inputstyle.TabCycle && (r.Key == proto.KeyTab || r.Key == proto.KeyBackTab)) || r.Key == proto.KeyUp)
+	cycleKey := r.Type == proto.Key && r.Key == proto.KeyUp
 	if !cycleKey && r.Type != proto.Context && r.Type != proto.Display {
 		s.styleCycle = nil
 	}
@@ -329,7 +330,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.finishSymbolPending()
 		handled, commit = s.key(r.Key)
 	case proto.Symbol:
-		s.settleMixed(true) // 顯示成注音的待定按鍵交給注音接著組（nm 再點 ㄅ 是 ㄅㄩ）
+		s.settleMixed(true) // 顯示成注音的待定按鍵交給注音接著組（nj 再點 ㄅ 是 ㄅㄨ）
 		for _, sym := range r.Symbol {
 			handled = s.symbolNear(sym, r.Near) && handled
 		}
@@ -951,13 +952,13 @@ func (s *Session) backspace() bool {
 	if s.mixed.raw != "" {
 		if s.mixed.accepted != "" {
 			s.mixed.accepted = ""
-		} else {
+		} else if asTyped || !s.eraseRepaired() {
 			at := s.mixedEraseAt(asTyped)
 			s.mixed.raw = s.mixed.raw[:at] + s.mixed.raw[at+1:]
 			s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, at)
-			if s.mixed.raw == "" {
-				s.clearMixed()
-			}
+		}
+		if s.mixed.raw == "" {
+			s.clearMixed()
 		}
 		return true
 	}
@@ -1663,7 +1664,8 @@ func (s *Session) commitComposed() string {
 
 func (s *Session) commit() string {
 	// Resolve pending English exactly as displayed; never accept a suggestion on Enter.
-	s.settleMixed(s.mixedKeepsZhuyin(s.mixed.raw))
+	_, _, repaired := s.mixedRepairShown() // 顯示修正讀音的（gjn 的 ㄙㄨ）照畫面留下注音
+	s.settleMixed(repaired || s.mixedKeepsZhuyin(s.mixed.raw))
 	s.finishUntoned() // 聲調選填：最後一個沒打聲調的音節也照解碼結果送出（#150）
 	if s.Rerank.Scorer == nil {
 		s.refresh()
@@ -1841,23 +1843,19 @@ func (s *Session) snapshot() proto.Snapshot {
 		length := len([]rune(pending)) - hintAt
 		snap.ReadingHint = &proto.ReadingHint{Start: snap.Cursor.Rune - length, Length: length, Text: string(hintSyl)}
 	}
+	// 小視窗的 Tab 提示是按了之後組字區結尾變成的樣子（另 → 另外、png → ㄕㄣ），SuggestionEdit 是被換掉的範圍。
+	// 前方可能含多字元原樣注音，不能直接把音節位置當顯示字元位置，一律從結尾往回算。
+	tail := func(n int, text string) { snap.SetSuggestion(len(runes)-n, n, text) }
 	if h := s.phonetic; h != nil {
-		start := len([]rune(snap.Text())) - len([]rune(h.replace))
-		snap.Suggestion = h.replace + " → " + h.entry.Surface
-		snap.SuggestionEdit = &proto.SuggestionEdit{Start: start, Length: len([]rune(h.replace)), Text: h.entry.Surface}
-	} else if s.sug != nil {
-		snap.Suggestion = s.sug.Rest
-		if s.sug.Replace != "" {
-			// 前方可能含多字元原樣注音，不能直接把音節位置當顯示字元位置。
-			start := len([]rune(snap.Text())) - len([]rune(s.sug.Replace))
-			snap.Suggestion = s.sug.Replace + " → " + s.sug.Word
-			snap.SuggestionEdit = &proto.SuggestionEdit{Start: start, Length: len([]rune(s.sug.Replace)), Text: s.sug.Word}
+		tail(len([]rune(h.replace)), h.entry.Surface)
+	} else if g := s.sug; g != nil {
+		if g.Replace != "" {
+			tail(len([]rune(g.Replace)), g.Word)
+		} else {
+			tail(len([]rune(g.Word))-len([]rune(g.Rest)), g.Word)
 		}
 	} else if h := s.hint; h != nil && s.mixed.raw == "" && s.cursor == len(s.syls) && s.comp.Empty() && s.cand == nil {
-		// 神經次佳候選：與既有同音替換提示相同的呈現，按 Tab 才接受。
-		start := len([]rune(snap.Text())) - len([]rune(h.replace))
-		snap.Suggestion = h.replace + " → " + h.text
-		snap.SuggestionEdit = &proto.SuggestionEdit{Start: start, Length: len([]rune(h.replace)), Text: h.text}
+		tail(len([]rune(h.replace)), h.text) // 神經次佳候選，按 Tab 才接受
 	}
 	if s.cand != nil {
 		// 範圍跟著反白：混合清單反白單字時，外殼標示與標題都只指游標那個字（#161）。

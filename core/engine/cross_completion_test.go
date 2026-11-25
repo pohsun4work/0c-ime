@@ -16,7 +16,6 @@ const (
 	idiom          = "天下沒有不散的筵席"
 	idiomReading   = "ㄊㄧㄢ ㄒㄧㄚˋ ㄇㄟˊ ㄧㄡˇ ㄅㄨˋ ㄙㄢˋ ㄉㄜ˙ ㄧㄢˊ ㄒㄧˊ"
 	idiomTyped     = "ㄊㄧㄢ ㄒㄧㄚˋ ㄇㄟˊ ㄧㄡˇ ㄅㄨˋ"
-	idiomRest      = "散的筵席"
 	idiomTail      = "不散的筵席"
 	idiomOther     = "沒有不透風的牆"
 	idiomOtherRead = "ㄇㄟˊ ㄧㄡˇ ㄅㄨˋ ㄊㄡˋ ㄈㄥ ㄉㄜ˙ ㄑㄧㄤˊ"
@@ -78,7 +77,7 @@ func TestCrossSegmentIdiomCompletion(t *testing.T) {
 		if split := len(snap.Preedit) > 1; split != learned {
 			t.Fatalf("學過切法=%v：組字 %+v", learned, snap.Preedit)
 		}
-		if snap.Suggestion != idiomRest || snap.SuggestedText() != idiom {
+		if snap.Suggestion != idiom || snap.SuggestedText() != idiom {
 			t.Errorf("學過切法=%v：%q 的提示 %q（%q）", learned, snap.Text(), snap.Suggestion, snap.SuggestedText())
 			continue
 		}

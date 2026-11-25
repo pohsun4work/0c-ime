@@ -80,7 +80,6 @@ type Settings struct {
 	RedundantKeys bool
 	// 以下是按鍵規則（原本官方「輸入習慣」風格的規則，fork 拿掉風格後是一般設定），值見 inputstyle.Rules。
 	ShiftSpace          string
-	Tab                 string
 	CandidateTab        string
 	CandidateSpace      string
 	CandidateEnter      string
@@ -225,7 +224,7 @@ func (s Settings) FuzzyConfig() fuzzy.Config {
 
 // Rules 是引擎用的按鍵規則。
 func (s Settings) Rules() inputstyle.Rules {
-	return inputstyle.Rules{ShiftSpace: s.ShiftSpace, Tab: s.Tab, CandidateTab: s.CandidateTab, CandidateSpace: s.CandidateSpace,
+	return inputstyle.Rules{ShiftSpace: s.ShiftSpace, CandidateTab: s.CandidateTab, CandidateSpace: s.CandidateSpace,
 		CandidateEnter: s.CandidateEnter, CandidatePageSize: s.PageSize, ShiftDelete: s.ShiftDelete, CandidateNavigation: s.CandidateNavigation}
 }
 
@@ -383,10 +382,6 @@ func fields() []field {
 			inputstyle.ShiftSpaceDisabled, []string{inputstyle.ShiftSpaceDisabled, inputstyle.ShiftSpaceFullWidth, inputstyle.ShiftSpaceSpace, inputstyle.ShiftSpaceSingle},
 			map[string]string{inputstyle.ShiftSpaceDisabled: "不使用", inputstyle.ShiftSpaceFullWidth: "切換全半形", inputstyle.ShiftSpaceSpace: "插入空白", inputstyle.ShiftSpaceSingle: "開單字候選"},
 			func(s *Settings) *string { return &s.ShiftSpace }),
-		choiceField("tab", "組字時的 Tab", "沒開候選窗時的 Tab：接受補全與同音建議，或輪換字詞（Shift＋Tab 反向）",
-			inputstyle.TabAccept, []string{inputstyle.TabAccept, inputstyle.TabCycle},
-			map[string]string{inputstyle.TabAccept: "接受補全與建議", inputstyle.TabCycle: "輪換字詞"},
-			func(s *Settings) *string { return &s.Tab }),
 		choiceField("candidate-tab", "候選窗的 Tab", "已顯示候選字時的 Tab 操作",
 			inputstyle.CandidateTabLength, []string{inputstyle.CandidateTabLength, inputstyle.CandidateTabGrid, inputstyle.CandidateTabNext},
 			map[string]string{inputstyle.CandidateTabLength: "切換字詞長度", inputstyle.CandidateTabGrid: "展開多排候選", inputstyle.CandidateTabNext: "移到下一個候選"},
@@ -477,10 +472,10 @@ func (f field) encode(value string) json.RawMessage {
 
 // retiredKeys 是已拿掉的設定檔欄位：讀檔時忽略，存檔時不寫回。
 // preview_0_2 是 0.2.0 開發期間的內部開關（#128）；其餘是 fork 只留一套行為時拿掉的設定（官方的輸入習慣風格 input_profile、
-// 寫死成固定行為的中英混打、標點寬度、Ctrl＋標點、鍵盤排列、Emoji 選單，以及拿掉的功能）。
+// 寫死成固定行為的中英混打、標點寬度、Ctrl＋標點、鍵盤排列、Emoji 選單、組字時的 Tab（固定換成小視窗那一個，↑ 輪換字詞），以及拿掉的功能）。
 var retiredKeys = []string{"preview_0_2", "input_profile", "left_shift", "mixed_input", "space_selects", "emoji_shortcut", "emoji_equals_first",
 	"keyboard_layout", "output_simplified", "simplified_hotkey", "ctrl_punctuation", "shift_symbol_halfwidth", "all_symbols_halfwidth",
-	"cjk_latin_space", "zhuyin_error_hint", "caps_lock_english", "toneless"}
+	"cjk_latin_space", "zhuyin_error_hint", "caps_lock_english", "toneless", "tab"}
 
 // UnmarshalJSON 逐欄位解讀：讀不懂的欄位退回預設，原文放進 extra 等存檔時寫回。
 func (s *Settings) UnmarshalJSON(b []byte) error {
