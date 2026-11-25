@@ -14,7 +14,7 @@ use windows::Win32::UI::TextServices::{
 };
 use windows_core::{implement, ComObject, Interface, HRESULT};
 
-use crate::displayattr::{style_ranges, StyledRange, KINDS};
+use crate::displayattr::{style_ranges, Attr, Line, StyledRange, ATTRS};
 use crate::log::{zdebug, zlog};
 use crate::session::Snapshot;
 
@@ -36,8 +36,10 @@ pub struct Apply {
     preedit: Vec<u16>,
     cursor: usize, // UTF-16 單位
     anchor: usize, // 小視窗對齊的位置（UTF-16，見 Snapshot::anchor_utf16）
-    attr_atoms: [u32; KINDS.len()],
+    attr_atoms: [u32; ATTRS.len()],
     styles: Vec<StyledRange>,
+    /// 組字、已選字、自動修正的底線顏色（背景深淺判斷好了沒，tone.rs）。
+    line: Line,
     caret: RefCell<Located>, // 游標的螢幕矩形（給候選窗定位）與查不到的原因
     /// 沒有組字時也要查游標矩形（這一鍵要顯示候選窗或提示）。
     want_caret: bool,
@@ -288,7 +290,8 @@ pub fn apply(
     composition: Option<ITfComposition>,
     sink: ITfCompositionSink,
     snapshot: &Snapshot,
-    attr_atoms: [u32; KINDS.len()],
+    attr_atoms: [u32; ATTRS.len()],
+    line: Line,
     cookie: Option<u32>,
     ending: Rc<Cell<bool>>,
     want_caret: bool,
@@ -304,6 +307,7 @@ pub fn apply(
         anchor: snapshot.anchor_utf16(),
         attr_atoms,
         styles: style_ranges(&snapshot.preedit).unwrap_or_default(),
+        line,
         caret: RefCell::new(Err(Miss::NotRun)),
         want_caret,
         ending,
@@ -508,30 +512,7 @@ impl Apply {
             let comp = self.ensure(ec)?;
             let range = comp.GetRange()?;
             range.SetText(ec, 0, &self.preedit)?;
-            if let Ok(prop) = self.ctx.GetProperty(&GUID_PROP_ATTRIBUTE) {
-                // 先清掉上次組字的屬性，避免縮短或換樣式後殘留粗線。
-                let _ = prop.Clear(ec, &range);
-                for style in &self.styles {
-                    let atom = self.attr_atoms[style.kind.index()];
-                    if atom == 0 {
-                        continue;
-                    }
-                    let part = range.Clone()?;
-                    part.Collapse(ec, TF_ANCHOR_START)?;
-                    let mut moved = 0;
-                    part.ShiftEnd(ec, style.end, &mut moved, std::ptr::null())?;
-                    if moved != style.end {
-                        continue;
-                    }
-                    part.ShiftStart(ec, style.start, &mut moved, std::ptr::null())?;
-                    if moved != style.start {
-                        continue;
-                    }
-                    if let Err(e) = prop.SetValue(ec, &part, &variant_i4(atom as i32)) {
-                        zlog!("顯示屬性設定失敗：{}", e);
-                    }
-                }
-            }
+            paint(&self.ctx, ec, &range, &self.styles, &self.attr_atoms, self.line)?;
             let caret = composition_caret(ec, &comp, self.cursor)?;
             self.select(ec, &caret)?;
             // 游標的螢幕座標：候選窗定位用，直接用剛放好的插入點。拿不到就記下原因，由外殼退回其他來源
@@ -554,6 +535,42 @@ impl Apply {
     }
 }
 
+
+/// 依分段樣式設定組字範圍的顯示屬性（底線）。先清掉上次的屬性，避免縮短或換樣式後殘留粗線。
+pub unsafe fn paint(
+    ctx: &ITfContext,
+    ec: u32,
+    range: &ITfRange,
+    styles: &[StyledRange],
+    attr_atoms: &[u32; ATTRS.len()],
+    line: Line,
+) -> windows_core::Result<()> {
+    let Ok(prop) = ctx.GetProperty(&GUID_PROP_ATTRIBUTE) else {
+        return Ok(());
+    };
+    let _ = prop.Clear(ec, range);
+    for style in styles {
+        let atom = attr_atoms[Attr::new(style.kind, line).index()];
+        if atom == 0 {
+            continue;
+        }
+        let part = range.Clone()?;
+        part.Collapse(ec, TF_ANCHOR_START)?;
+        let mut moved = 0;
+        part.ShiftEnd(ec, style.end, &mut moved, std::ptr::null())?;
+        if moved != style.end {
+            continue;
+        }
+        part.ShiftStart(ec, style.start, &mut moved, std::ptr::null())?;
+        if moved != style.start {
+            continue;
+        }
+        if let Err(e) = prop.SetValue(ec, &part, &variant_i4(atom as i32)) {
+            zlog!("顯示屬性設定失敗：{}", e);
+        }
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1060,7 +1077,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let sink: ITfCompositionSink = ComObject::new(NullSink).into_interface();
-        apply(ctx, 1, None, sink, &snapshot, [0; KINDS.len()], cookie, Rc::new(Cell::new(false)), want_caret)
+        apply(ctx, 1, None, sink, &snapshot, [0; ATTRS.len()], Line::Host, cookie, Rc::new(Cell::new(false)), want_caret)
     }
 
     /// 執行排隊的非同步 edit session（宿主稍後才給寫入權限）。
@@ -1090,7 +1107,8 @@ pub(crate) mod tests {
             started.composition,
             sink,
             &cleared,
-            [0; KINDS.len()],
+            [0; ATTRS.len()],
+            Line::Host,
             None,
             Rc::new(Cell::new(false)),
             false,
@@ -1210,7 +1228,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let sink: ITfCompositionSink = ComObject::new(NullSink).into_interface();
-        let applied = apply(&ctx, 1, None, sink, &snapshot, [0; KINDS.len()], None, Rc::new(Cell::new(false)), false);
+        let applied = apply(&ctx, 1, None, sink, &snapshot, [0; ATTRS.len()], Line::Host, None, Rc::new(Cell::new(false)), false);
         drain(&doc);
         assert_eq!(text(&doc), "前你好ㄇ");
         assert!(applied.composition.is_some());
@@ -1226,7 +1244,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let sink: ITfCompositionSink = ComObject::new(NullSink).into_interface();
-        apply(ctx, 1, None, sink, &snapshot, [0; KINDS.len()], None, Rc::new(Cell::new(false)), false)
+        apply(ctx, 1, None, sink, &snapshot, [0; ATTRS.len()], Line::Host, None, Rc::new(Cell::new(false)), false)
     }
 
     #[test]
@@ -1256,7 +1274,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let sink: ITfCompositionSink = ComObject::new(NullSink).into_interface();
-        let applied = apply(&ctx, 1, None, sink, &snapshot, [0; KINDS.len()], None, Rc::new(Cell::new(false)), true);
+        let applied = apply(&ctx, 1, None, sink, &snapshot, [0; ATTRS.len()], Line::Host, None, Rc::new(Cell::new(false)), true);
         assert_eq!(applied.caret, Ok(RECT { left: caret_at(2).left, ..caret_at(3) }));
     }
 

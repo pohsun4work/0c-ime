@@ -15,6 +15,13 @@ pub const GUID_DISPLAY_ATTR_CORRECTED: GUID =
 pub const GUID_DISPLAY_ATTR_MARKED: GUID = GUID::from_u128(0x7f850af6_4e7a_4b41_a24f_baeca02ce683);
 /// 中英混打時按空白會組成中文的數字（#162）。
 pub const GUID_DISPLAY_ATTR_READING: GUID = GUID::from_u128(0xcbedd798_5d14_4f4d_9917_26b934dfa003);
+/// 組字、已選字、自動修正在深色背景的白線版與淺色背景的黑線版（tone.rs）。
+pub const GUID_DISPLAY_ATTR_INPUT_WHITE: GUID = GUID::from_u128(0x4f9db93a_373d_4a1c_be43_4a59ea6697fa);
+pub const GUID_DISPLAY_ATTR_LOCKED_WHITE: GUID = GUID::from_u128(0xf285fdde_9513_4648_94ad_9ad16396d2d5);
+pub const GUID_DISPLAY_ATTR_CORRECTED_WHITE: GUID = GUID::from_u128(0x1e280916_e250_41fa_b957_43cb432f77d3);
+pub const GUID_DISPLAY_ATTR_INPUT_BLACK: GUID = GUID::from_u128(0x5a642554_36f5_4153_8c3d_dc35625cd1ad);
+pub const GUID_DISPLAY_ATTR_LOCKED_BLACK: GUID = GUID::from_u128(0x056b3a61_6c57_4d57_aeaa_d66925021c89);
+pub const GUID_DISPLAY_ATTR_CORRECTED_BLACK: GUID = GUID::from_u128(0x6ecddd9e_a3ab_4c84_9989_98be01768ac9);
 
 /// zh-TW。
 pub const LANGID: u16 = 0x0404;

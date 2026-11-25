@@ -41,6 +41,9 @@ impl CandidateWindow {
     pub fn handle(&self) -> u64 {
         self.0 .0 as usize as u64
     }
+    pub fn hwnd(&self) -> HWND {
+        self.0
+    }
     /// 稍後（訊息佇列空下來時）再確認一次組字所在的文件還有沒有焦點（#189）。
     pub fn settle_focus_later(&self) {
         unsafe {
@@ -73,6 +76,15 @@ unsafe extern "system" fn callback(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const TextService_Impl;
             if let Some(service) = ptr.as_ref() {
                 service.select_candidate(wp.0 as u32, lp.0 as i64);
+            }
+            Ok(())
+        });
+        LRESULT(0)
+    } else if msg == crate::tone::WM_TONE_READY {
+        let _ = crate::guarded("ToneReady", || {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const TextService_Impl;
+            if let Some(service) = ptr.as_ref() {
+                service.tone_ready();
             }
             Ok(())
         });

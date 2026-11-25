@@ -26,7 +26,7 @@ use zuin_win_common::{has_content, notice_expires, UiCandidate, UiMessage, NOTIC
 
 use crate::candidate::CandidateWindow;
 use crate::cuas::{Cuas, Win32Cuas};
-use crate::displayattr::{AttributeEnum, InputAttribute, KINDS};
+use crate::displayattr::{style_ranges, AttributeEnum, InputAttribute, Line, StyledRange, ATTRS};
 use crate::log::{zdebug, zlog};
 use crate::session::{Session, Snapshot};
 use crate::ui::UiClient;
@@ -128,7 +128,11 @@ struct State {
     /// 攔下重排的快捷鍵，等它從訊息佇列回來（#66）。
     pending_repost: Option<PendingRepost>,
     composing: bool,
-    attr_atoms: [u32; KINDS.len()],
+    attr_atoms: [u32; ATTRS.len()],
+    /// 這次組字的背景深淺判斷（tone.rs）；組字結束或換了組字就換掉。
+    tone: Option<crate::tone::Probe>,
+    /// 組字區目前的分段樣式：背景深淺判斷好時，用它重設底線。
+    styled: Vec<StyledRange>,
     eaten: HashSet<u32>, // 吃掉了 key-down 的虛擬鍵，key-up 也要吃掉
     ui: UiClient,
     right_shift: keys::ShiftTap,
@@ -323,6 +327,42 @@ impl State {
         self.right_shift = keys::ShiftTap::default();
         self.left_shift = keys::ShiftTap::default();
     }
+
+    /// 目前這次組字的底線顏色：背景深淺判斷好了就是白線或黑線，否則沿用宿主色。
+    fn tone_line(&self) -> Line {
+        match (&self.tone, &self.composition) {
+            (Some(p), Some(c)) if p.composition == *c => p.line(),
+            _ => Line::Host,
+        }
+    }
+
+    /// 背景深淺已經判斷出白線或黑線、組字還是同一個，卻還沒用結果畫過底線：要重畫的組字與顏色。
+    fn tone_to_paint(&self) -> Option<(ITfComposition, Line)> {
+        let p = self.tone.as_ref().filter(|p| !p.painted && self.composition.as_ref() == Some(&p.composition))?;
+        Some((p.composition.clone(), p.line())).filter(|(_, line)| *line != Line::Host)
+    }
+
+    /// 正在組字，卻還沒開始判斷背景深淺（拿不到組字位置：Chromium 剛打的字還沒排版）。
+    fn tone_waiting(&self) -> bool {
+        self.composing && self.composition.is_some() && self.tone.is_none() && self.callback.is_some()
+    }
+
+    /// 套用完一鍵之後：新的組字第一次拿到位置（`caret`）就開始在背景判斷深淺；同一個組字已經用結果
+    /// （`painted_with`）畫過底線，讀完的通知就不必再重畫。沒在組字就丟掉。
+    fn follow_tone(&mut self, caret: Option<RECT>, painted_with: Line) {
+        let Some(composition) = self.composition.clone().filter(|_| self.composing) else {
+            self.tone = None;
+            return;
+        };
+        match self.tone.as_mut() {
+            Some(p) if p.composition == composition => p.painted |= painted_with != Line::Host,
+            _ => {
+                self.tone = caret
+                    .zip(self.callback.as_ref())
+                    .map(|(rect, window)| crate::tone::Probe::start(composition, rect, window.hwnd()));
+            }
+        }
+    }
 }
 
 impl TextService {
@@ -340,7 +380,9 @@ impl TextService {
                 completing: None,
                 pending_repost: None,
                 composing: false,
-                attr_atoms: [0; KINDS.len()],
+                attr_atoms: [0; ATTRS.len()],
+                tone: None,
+                styled: Vec::new(),
                 eaten: HashSet::new(),
                 ui: UiClient::new(),
                 right_shift: keys::ShiftTap::default(),
@@ -475,12 +517,13 @@ impl TextService_Impl {
         if !snapshot.ok {
             return false;
         }
-        let (composition, client_id, atom, ending, ui_less) = {
+        let (composition, client_id, atom, line, ending, ui_less) = {
             let st = self.state.borrow();
             (
                 st.composition.clone(),
                 st.client_id,
                 st.attr_atoms,
+                st.tone_line(),
                 st.ending_composition.clone(),
                 st.ui_less,
             )
@@ -503,6 +546,7 @@ impl TextService_Impl {
                     self.composition_sink(),
                     snapshot,
                     atom,
+                    line,
                     cookie,
                     ending,
                     show,
@@ -582,6 +626,8 @@ impl TextService_Impl {
             // 核心已經是快照的狀態；文件端沒套用成功時（只是更新組字）保留原組字物件，下一鍵再同步。
             st.composing = snapshot.composing();
             st.composition = applied.composition;
+            st.styled = if st.composing { style_ranges(&snapshot.preedit).unwrap_or_default() } else { Vec::new() };
+            st.follow_tone(applied.caret.ok(), line);
             st.ui.present(&message, owner, document.clone());
             if !st.composing {
                 st.anchor = None;
@@ -602,8 +648,9 @@ impl TextService_Impl {
                 None => None,
             };
         }
-        // 版面晚到（Chromium）時由 OnLayoutChange 補上位置；沒有候選就不必收通知。
-        self.watch_layout(if show { ctx } else { None });
+        // 版面晚到（Chromium）時由 OnLayoutChange 補上位置：候選窗要用，組字還沒拿到位置、不能判斷背景深淺時也要。
+        let tone_waiting = self.state.borrow().tone_waiting();
+        self.watch_layout(if show || tone_waiting { ctx } else { None });
         // Chromium 的視窗組字時，滑鼠按下先送出組字（#322，見 click.rs）。經系統相容層的 IMM32 程式不在此列。
         let composing_in = {
             let st = self.state.borrow();
@@ -613,8 +660,13 @@ impl TextService_Impl {
         self.state.borrow_mut().click_context = composing_in.filter(|_| click::watching_for(self)).cloned();
         // 套用期間略過的版面通知：現在 shown 與 revision 已是這一鍵的，位置不是準確的就補查一次。
         let exact = placed.is_some_and(|(_, source)| source == caret::Source::Exact);
-        if self.layout_missed.take() && show && !exact && self.applying.get() == 0 {
-            self.requery(ctx);
+        if self.layout_missed.take() && self.applying.get() == 0 {
+            if show && !exact {
+                self.requery(ctx);
+            }
+            if tone_waiting {
+                self.locate_tone(ctx);
+            }
         }
         snapshot.handled
     }
@@ -746,6 +798,40 @@ impl TextService_Impl {
         }
     }
 
+    /// 版面變了，組字還在等位置判斷背景深淺：另開唯讀 edit session 查組字開頭的位置，查到就開始判斷。
+    fn locate_tone(&self, ctx: Option<&ITfContext>) {
+        let request = {
+            let Ok(st) = self.state.try_borrow() else { return };
+            if !st.tone_waiting() {
+                return;
+            }
+            (st.client_id, st.composition.clone())
+        };
+        let (Some(ctx), (client, Some(composition))) = (ctx, request) else { return };
+        let service = self.to_object();
+        let target = composition.clone();
+        let requested = edit::request_locate(
+            ctx,
+            client,
+            Some(composition),
+            0,
+            0,
+            Box::new(move |located| service.tone_located(&target, located)),
+        );
+        if let Err(e) = requested {
+            zdebug!("tone locate {}", e.code());
+        }
+    }
+
+    fn tone_located(&self, composition: &ITfComposition, located: edit::Located) {
+        let Ok(mut st) = self.state.try_borrow_mut() else { return };
+        if st.composition.as_ref() != Some(composition) || !st.tone_waiting() {
+            return;
+        }
+        // 不在這裡取消版面通知（可能正在 OnLayoutChange 裡）：下一鍵 present_in_edit 會重新決定要不要收。
+        st.follow_tone(located.ok(), Line::Host);
+    }
+
     /// OnLayoutChange 之後的唯讀 edit session 查到的位置：還是同一個畫面版本、位置變了才補送。
     fn relocated(&self, revision: u32, located: edit::Located) {
         if self.applying.get() > 0 {
@@ -799,6 +885,41 @@ impl TextService_Impl {
         };
         if let Some((ctx, client)) = target {
             crate::candidate::request(self, &ctx, client, revision, id);
+        }
+    }
+
+    /// 背景深淺讀完（tone.rs 的 WM_TONE_READY）：組字還是同一個、還沒用結果畫過底線，就馬上重設，不等下一鍵。
+    pub(crate) fn tone_ready(&self) {
+        let (target, client) = {
+            let st = self.state.borrow();
+            (st.tone_to_paint(), st.client_id)
+        };
+        if let Some(ctx) = target.and_then(|(c, _)| unsafe { c.GetRange().and_then(|r| r.GetContext()) }.ok()) {
+            crate::tone::restyle(self, &ctx, client);
+        }
+    }
+
+    pub(crate) fn restyle_in_edit(&self, ec: u32) {
+        let target = {
+            let st = self.state.borrow();
+            st.tone_to_paint().map(|(c, line)| (c, line, st.styled.clone(), st.attr_atoms))
+        };
+        let Some((composition, line, styles, atoms)) = target else {
+            return;
+        };
+        let painted = unsafe {
+            composition.GetRange().and_then(|range| {
+                let ctx = range.GetContext()?;
+                edit::paint(&ctx, ec, &range, &styles, &atoms, line)
+            })
+        };
+        match painted {
+            Ok(()) => {
+                if let Some(p) = self.state.borrow_mut().tone.as_mut().filter(|p| p.composition == composition) {
+                    p.painted = true;
+                }
+            }
+            Err(e) => zlog!("重設底線顏色失敗：{}", e.code()),
         }
     }
 
@@ -1108,6 +1229,7 @@ impl TextService_Impl {
         st.session.reset();
         st.composing = false;
         st.composition = None;
+        st.tone = None;
         st.left_from = None;
         false
     }
@@ -1386,10 +1508,10 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                     .unwrap_or(0);
                 // 不用 CoCreateInstance：COM-less 啟用（TF_TMAE_COMLESS，#157）的宿主可能沒有初始化 COM。
                 let category = crate::msctf::create_category_mgr().ok();
-                let atom = KINDS.map(|kind| {
+                let atom = ATTRS.map(|attr| {
                     category
                         .as_ref()
-                        .and_then(|c| c.RegisterGUID(&kind.guid()).ok())
+                        .and_then(|c| c.RegisterGUID(&attr.guid()).ok())
                         .unwrap_or(0)
                 });
                 let mut st = self.state.borrow_mut();
@@ -1452,6 +1574,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
                 st.click_context = None;
                 st.callback = None;
                 st.composition = None;
+                st.tone = None;
                 st.composing = false;
                 st.left_from = None;
                 st.eaten.clear();
@@ -1755,6 +1878,7 @@ impl ITfCompositionSink_Impl for TextService_Impl {
             {
                 let mut st = self.state.borrow_mut();
                 st.composition = None;
+                st.tone = None;
                 st.composing = false;
                 st.left_from = None;
                 st.ui.hide();
@@ -1843,7 +1967,7 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
 
 impl ITfTextLayoutSink_Impl for TextService_Impl {
     /// 宿主的版面變了（Chromium：renderer 送回剛打的字的位置）。有候選窗時另開唯讀 edit session 重查游標，
-    /// 位置不同或之前沒有位置才補送給候選窗（#144）。
+    /// 位置不同或之前沒有位置才補送給候選窗（#144）；組字還沒拿到位置時，查到就開始判斷背景深淺（tone.rs）。
     fn OnLayoutChange(
         &self,
         pic: Ref<'_, ITfContext>,
@@ -1861,6 +1985,7 @@ impl ITfTextLayoutSink_Impl for TextService_Impl {
                 return Ok(());
             }
             self.requery(pic.as_ref());
+            self.locate_tone(pic.as_ref());
             Ok(())
         })
     }
@@ -1912,11 +2037,11 @@ impl ITfDisplayAttributeProvider_Impl for TextService_Impl {
         guid: *const GUID,
     ) -> windows_core::Result<ITfDisplayAttributeInfo> {
         crate::guarded("GetDisplayAttributeInfo", || {
-            if let Some(kind) = KINDS
+            if let Some(attr) = ATTRS
                 .into_iter()
-                .find(|kind| !guid.is_null() && unsafe { *guid } == kind.guid())
+                .find(|attr| !guid.is_null() && unsafe { *guid } == attr.guid())
             {
-                Ok(ComObject::new(InputAttribute::new(kind)).into_interface())
+                Ok(ComObject::new(InputAttribute::new(attr)).into_interface())
             } else {
                 Err(E_INVALIDARG.into())
             }

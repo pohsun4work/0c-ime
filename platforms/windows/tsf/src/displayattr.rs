@@ -1,7 +1,8 @@
 //! 組字區五種顯示屬性：一般細實線、使用者選字粗實線、自動修正點線、加詞標示（#123）的反白粗線，
 //! 以及中英混打時按空白會組成中文的數字（#162）的灰字灰點線。
-//! 前三種沿用宿主文字與背景色；標示用系統的選取色（COLOR_HIGHLIGHT／COLOR_HIGHLIGHTTEXT），
-//! 讀音數字用系統的灰字色（COLOR_GRAYTEXT），適應深色與高對比主題。
+//! 前三種的底線先沿用宿主文字色，背景深淺判斷好後換成白線或黑線版（見 Line、tone.rs）；
+//! 標示用系統的選取色（COLOR_HIGHLIGHT／COLOR_HIGHLIGHTTEXT），讀音數字用系統的灰字色（COLOR_GRAYTEXT），
+//! 適應深色與高對比主題。
 use std::cell::Cell;
 
 use windows::Win32::Foundation::COLORREF;
@@ -14,8 +15,9 @@ use windows::Win32::UI::TextServices::{
 use windows_core::{implement, ComObject, BSTR, GUID};
 
 use crate::guids::{
-    GUID_DISPLAY_ATTR_CORRECTED, GUID_DISPLAY_ATTR_INPUT, GUID_DISPLAY_ATTR_LOCKED,
-    GUID_DISPLAY_ATTR_MARKED, GUID_DISPLAY_ATTR_READING,
+    GUID_DISPLAY_ATTR_CORRECTED, GUID_DISPLAY_ATTR_CORRECTED_BLACK, GUID_DISPLAY_ATTR_CORRECTED_WHITE,
+    GUID_DISPLAY_ATTR_INPUT, GUID_DISPLAY_ATTR_INPUT_BLACK, GUID_DISPLAY_ATTR_INPUT_WHITE, GUID_DISPLAY_ATTR_LOCKED,
+    GUID_DISPLAY_ATTR_LOCKED_BLACK, GUID_DISPLAY_ATTR_LOCKED_WHITE, GUID_DISPLAY_ATTR_MARKED, GUID_DISPLAY_ATTR_READING,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,29 +30,7 @@ pub enum Kind {
     /// 中英混打時照字面顯示、按空白會組成中文的數字（核心樣式 reading，#162）。
     Reading,
 }
-pub const KINDS: [Kind; 5] = [Kind::Input, Kind::Locked, Kind::Corrected, Kind::Marked, Kind::Reading];
 impl Kind {
-    pub fn guid(self) -> GUID {
-        match self {
-            Self::Input => GUID_DISPLAY_ATTR_INPUT,
-            Self::Locked => GUID_DISPLAY_ATTR_LOCKED,
-            Self::Corrected => GUID_DISPLAY_ATTR_CORRECTED,
-            Self::Marked => GUID_DISPLAY_ATTR_MARKED,
-            Self::Reading => GUID_DISPLAY_ATTR_READING,
-        }
-    }
-    pub fn index(self) -> usize {
-        self as usize
-    }
-    fn description(self) -> &'static str {
-        match self {
-            Self::Input => "靈犀注音：組字",
-            Self::Locked => "靈犀注音：已選字",
-            Self::Corrected => "靈犀注音：自動修正",
-            Self::Marked => "靈犀注音：加入詞庫的範圍",
-            Self::Reading => "靈犀注音：按空白會變成中文的數字",
-        }
-    }
     fn attributes(self) -> TF_DISPLAYATTRIBUTE {
         let color = |index| TF_DA_COLOR {
             r#type: TF_CT_COLORREF,
@@ -102,7 +82,104 @@ impl Kind {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// 組字、已選字、自動修正的底線顏色（P6.5）。沒指定顏色時宿主沿用文字色，文字畫成透明、另一層才畫字的
+/// 輸入框（VS Code 的 Claude Code）就看不到底線；判斷出背景深淺後，深底用白線、淺底用黑線。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Line {
+    /// 還沒判斷好（或判斷不了）：沿用宿主文字色。
+    #[default]
+    Host,
+    White,
+    Black,
+}
+
+/// 一種顯示屬性：樣式加上底線顏色。加詞標示與讀音數字已有自己的顏色，一律是 Host。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Attr {
+    kind: Kind,
+    line: Line,
+}
+pub const ATTRS: [Attr; 11] = {
+    use Kind::*;
+    use Line::*;
+    const fn a(kind: Kind, line: Line) -> Attr {
+        Attr { kind, line }
+    }
+    [
+        a(Input, Host),
+        a(Locked, Host),
+        a(Corrected, Host),
+        a(Marked, Host),
+        a(Reading, Host),
+        a(Input, White),
+        a(Locked, White),
+        a(Corrected, White),
+        a(Input, Black),
+        a(Locked, Black),
+        a(Corrected, Black),
+    ]
+};
+impl Attr {
+    pub fn new(kind: Kind, line: Line) -> Attr {
+        let line = if matches!(kind, Kind::Marked | Kind::Reading) { Line::Host } else { line };
+        Attr { kind, line }
+    }
+    /// 在 ATTRS 的位置（atom 陣列依此存取）。
+    pub fn index(self) -> usize {
+        self.kind as usize
+            + match self.line {
+                Line::Host => 0,
+                Line::White => 5,
+                Line::Black => 8,
+            }
+    }
+    pub fn guid(self) -> GUID {
+        use Kind::*;
+        use Line::*;
+        match (self.kind, self.line) {
+            (Input, Host) => GUID_DISPLAY_ATTR_INPUT,
+            (Locked, Host) => GUID_DISPLAY_ATTR_LOCKED,
+            (Corrected, Host) => GUID_DISPLAY_ATTR_CORRECTED,
+            (Input, White) => GUID_DISPLAY_ATTR_INPUT_WHITE,
+            (Locked, White) => GUID_DISPLAY_ATTR_LOCKED_WHITE,
+            (Corrected, White) => GUID_DISPLAY_ATTR_CORRECTED_WHITE,
+            (Input, Black) => GUID_DISPLAY_ATTR_INPUT_BLACK,
+            (Locked, Black) => GUID_DISPLAY_ATTR_LOCKED_BLACK,
+            (Corrected, Black) => GUID_DISPLAY_ATTR_CORRECTED_BLACK,
+            (Marked, _) => GUID_DISPLAY_ATTR_MARKED,
+            (Reading, _) => GUID_DISPLAY_ATTR_READING,
+        }
+    }
+    fn description(self) -> &'static str {
+        use Kind::*;
+        use Line::*;
+        match (self.kind, self.line) {
+            (Input, Host) => "靈犀注音：組字",
+            (Locked, Host) => "靈犀注音：已選字",
+            (Corrected, Host) => "靈犀注音：自動修正",
+            (Input, White) => "靈犀注音：組字（深色背景）",
+            (Locked, White) => "靈犀注音：已選字（深色背景）",
+            (Corrected, White) => "靈犀注音：自動修正（深色背景）",
+            (Input, Black) => "靈犀注音：組字（淺色背景）",
+            (Locked, Black) => "靈犀注音：已選字（淺色背景）",
+            (Corrected, Black) => "靈犀注音：自動修正（淺色背景）",
+            (Marked, _) => "靈犀注音：加入詞庫的範圍",
+            (Reading, _) => "靈犀注音：按空白會變成中文的數字",
+        }
+    }
+    fn attributes(self) -> TF_DISPLAYATTRIBUTE {
+        let mut da = self.kind.attributes();
+        let rgb = match self.line {
+            Line::Host => return da,
+            Line::White => 0x00FF_FFFF,
+            Line::Black => 0,
+        };
+        da.crLine = TF_DA_COLOR { r#type: TF_CT_COLORREF, Anonymous: TF_DA_COLOR_0 { cr: COLORREF(rgb) } };
+        da
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StyledRange {
     pub start: i32,
     pub end: i32,
@@ -132,13 +209,13 @@ pub fn style_ranges(segments: &[crate::session::Segment]) -> Option<Vec<StyledRa
 
 #[implement(ITfDisplayAttributeInfo)]
 pub struct InputAttribute {
-    kind: Kind,
+    attr: Attr,
 }
 
 impl InputAttribute {
-    pub fn new(kind: Kind) -> InputAttribute {
+    pub fn new(attr: Attr) -> InputAttribute {
         crate::object_created();
-        InputAttribute { kind }
+        InputAttribute { attr }
     }
 }
 
@@ -150,17 +227,17 @@ impl Drop for InputAttribute {
 
 impl ITfDisplayAttributeInfo_Impl for InputAttribute_Impl {
     fn GetGUID(&self) -> windows_core::Result<GUID> {
-        crate::guarded("GetGUID", || Ok(self.kind.guid()))
+        crate::guarded("GetGUID", || Ok(self.attr.guid()))
     }
     fn GetDescription(&self) -> windows_core::Result<BSTR> {
-        crate::guarded("GetDescription", || Ok(BSTR::from(self.kind.description())))
+        crate::guarded("GetDescription", || Ok(BSTR::from(self.attr.description())))
     }
     fn GetAttributeInfo(&self, pda: *mut TF_DISPLAYATTRIBUTE) -> windows_core::Result<()> {
         crate::guarded("GetAttributeInfo", || {
             if pda.is_null() {
                 return Err(windows::Win32::Foundation::E_POINTER.into());
             }
-            let da = self.kind.attributes();
+            let da = self.attr.attributes();
             unsafe { pda.write(da) };
             Ok(())
         })
@@ -214,10 +291,10 @@ impl IEnumTfDisplayAttributeInfo_Impl for AttributeEnum_Impl {
                 return Err(windows::Win32::Foundation::E_POINTER.into());
             }
             let mut n = 0u32;
-            while n < count && (self.index.get() as usize) < KINDS.len() {
-                let kind = KINDS[self.index.get() as usize];
+            while n < count && (self.index.get() as usize) < ATTRS.len() {
+                let attr = ATTRS[self.index.get() as usize];
                 let info: ITfDisplayAttributeInfo =
-                    ComObject::new(InputAttribute::new(kind)).into_interface();
+                    ComObject::new(InputAttribute::new(attr)).into_interface();
                 // [out] 陣列在呼叫端通常沒有初始化（#89）：只能 write，不能用 `*p = …`，
                 // 後者會先把垃圾值當成舊的介面 Release，宿主（Outlook）當場崩潰。
                 unsafe { rginfo.add(n as usize).write(Some(info)) };
@@ -242,12 +319,12 @@ impl IEnumTfDisplayAttributeInfo_Impl for AttributeEnum_Impl {
     }
     fn Skip(&self, count: u32) -> windows_core::Result<()> {
         crate::guarded("Skip", || {
-            let remaining = KINDS.len() as u32 - self.index.get();
+            let remaining = ATTRS.len() as u32 - self.index.get();
             self.index.set(
                 self.index
                     .get()
                     .saturating_add(count)
-                    .min(KINDS.len() as u32),
+                    .min(ATTRS.len() as u32),
             );
             if count <= remaining {
                 Ok(())
@@ -264,6 +341,7 @@ mod tests {
     use crate::session::Segment;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use windows::Win32::UI::TextServices::TF_CT_NONE;
     use windows_core::Interface;
     #[test]
     fn utf16_styles_cover_surrogates_empty_and_unknown_segments() {
@@ -317,14 +395,35 @@ mod tests {
         assert_eq!(reading.crText.r#type, TF_CT_COLORREF);
         assert_eq!(unsafe { reading.crText.Anonymous.cr.0 }, unsafe { GetSysColor(COLOR_GRAYTEXT) });
         assert_eq!(unsafe { reading.crLine.Anonymous.cr.0 }, unsafe { GetSysColor(COLOR_GRAYTEXT) });
-        // 各種屬性的 GUID 各不相同，索引就是在 KINDS 的位置（atom 陣列依此存取）。
-        for (i, kind) in KINDS.into_iter().enumerate() {
-            assert_eq!(kind.index(), i);
-            assert!(KINDS.iter().filter(|k| k.guid() == kind.guid()).count() == 1);
+        // 各種屬性的 GUID 各不相同，索引就是在 ATTRS 的位置（atom 陣列依此存取）。
+        for (i, attr) in ATTRS.into_iter().enumerate() {
+            assert_eq!(attr.index(), i);
+            assert_eq!(Attr::new(attr.kind, attr.line), attr);
+            assert!(ATTRS.iter().filter(|a| a.guid() == attr.guid()).count() == 1);
         }
         assert!(Kind::Locked.attributes().fBoldLine.as_bool());
         assert_eq!(Kind::Corrected.attributes().lsStyle, TF_LS_DOT);
         assert_eq!(Kind::Input.attributes().lsStyle, TF_LS_SOLID);
+    }
+    #[test]
+    fn white_and_black_lines_only_change_the_line_color() {
+        // P6.5：組字、已選字、自動修正的白線／黑線版只換底線顏色，樣式不變；沿用宿主色的版本不指定底線顏色。
+        for kind in [Kind::Input, Kind::Locked, Kind::Corrected] {
+            let host = Attr::new(kind, Line::Host).attributes();
+            assert_eq!(host.crLine.r#type, TF_CT_NONE);
+            for (line, rgb) in [(Line::White, 0x00FF_FFFF), (Line::Black, 0)] {
+                let da = Attr::new(kind, line).attributes();
+                assert_eq!(da.crLine.r#type, TF_CT_COLORREF);
+                assert_eq!(unsafe { da.crLine.Anonymous.cr.0 }, rgb);
+                assert_eq!((da.lsStyle, da.fBoldLine, da.bAttr), (host.lsStyle, host.fBoldLine, host.bAttr));
+                assert_eq!(da.crText.r#type, TF_CT_NONE);
+            }
+        }
+        // 加詞標示與讀音數字已有自己的顏色：不分深淺。
+        for kind in [Kind::Marked, Kind::Reading] {
+            assert_eq!(Attr::new(kind, Line::White), Attr::new(kind, Line::Host));
+            assert_eq!(Attr::new(kind, Line::Black), Attr::new(kind, Line::Host));
+        }
     }
     #[test]
     fn attribute_enumerator_batches_clones_and_reports_end() {
@@ -337,35 +436,39 @@ mod tests {
             assert_eq!(fetched, 1);
             assert_eq!(
                 first[0].as_ref().unwrap().GetGUID().unwrap(),
-                Kind::Input.guid()
+                Attr::new(Kind::Input, Line::Host).guid()
             );
             let clone = list.Clone().unwrap();
             let mut rest = [None, None, None, None, None];
-            let _ = clone.Next(&mut rest, &mut fetched);
-            assert_eq!(fetched, 4);
+            clone.Next(&mut rest, &mut fetched).unwrap();
+            assert_eq!(fetched, 5);
             assert_eq!(
                 rest[0].as_ref().unwrap().GetGUID().unwrap(),
-                Kind::Locked.guid()
+                Attr::new(Kind::Locked, Line::Host).guid()
             );
             assert_eq!(
                 rest[1].as_ref().unwrap().GetGUID().unwrap(),
-                Kind::Corrected.guid()
+                Attr::new(Kind::Corrected, Line::Host).guid()
             );
             assert_eq!(
                 rest[2].as_ref().unwrap().GetGUID().unwrap(),
-                Kind::Marked.guid()
+                Attr::new(Kind::Marked, Line::Host).guid()
             );
             assert_eq!(
                 rest[3].as_ref().unwrap().GetGUID().unwrap(),
-                Kind::Reading.guid()
+                Attr::new(Kind::Reading, Line::Host).guid()
+            );
+            assert_eq!(
+                rest[4].as_ref().unwrap().GetGUID().unwrap(),
+                Attr::new(Kind::Input, Line::White).guid()
             );
             list.Next(&mut first, &mut fetched).unwrap();
             assert_eq!(
                 first[0].as_ref().unwrap().GetGUID().unwrap(),
-                Kind::Locked.guid()
+                Attr::new(Kind::Locked, Line::Host).guid()
             );
             list.Reset().unwrap();
-            let _ = list.Skip(6);
+            let _ = list.Skip(ATTRS.len() as u32 + 1);
             let _ = list.Next(&mut first, &mut fetched);
             assert_eq!(fetched, 0);
         }
@@ -425,12 +528,13 @@ mod tests {
             "Next 把呼叫端的垃圾值當成介面 Release 了"
         );
         assert_eq!(out[5], poison, "count 以外的格子不能動");
-        for (slot, kind) in out[..5].iter().zip(KINDS) {
+        for (slot, attr) in out[..5].iter().zip(ATTRS) {
             assert_ne!(*slot, garbage);
             let info = unsafe { ITfDisplayAttributeInfo::from_raw(*slot) };
-            assert_eq!(unsafe { info.GetGUID() }.unwrap(), kind.guid());
+            assert_eq!(unsafe { info.GetGUID() }.unwrap(), attr.guid());
         }
         // 已到結尾：再要一個時回 S_FALSE、fetched 為 0，輸出格同樣不讀不放。
+        unsafe { list.Skip(ATTRS.len() as u32 - 5) }.unwrap();
         let mut tail = [garbage];
         let hr = unsafe {
             (Interface::vtable(&list).Next)(Interface::as_raw(&list), 1, tail.as_mut_ptr(), &mut fetched)
