@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{
-    CloseHandle, FreeLibrary, ERROR_FILE_NOT_FOUND, E_INVALIDARG, E_POINTER, E_UNEXPECTED, HANDLE, HMODULE, POINT, RECT,
+    CloseHandle, ERROR_FILE_NOT_FOUND, E_INVALIDARG, E_POINTER, E_UNEXPECTED, HANDLE, POINT, RECT,
 };
 use windows::Win32::Graphics::Gdi::{
     CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, SelectObject,
@@ -20,12 +20,8 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_MODE, OPEN_EXISTING,
     FILE_FLAGS_AND_ATTRIBUTES,
 };
-use windows::Win32::System::LibraryLoader::{
-    FreeLibraryAndExitThread, GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-};
 use windows::Win32::System::Pipes::GetNamedPipeServerProcessId;
 use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
-use windows::Win32::System::Threading::{CreateThread, THREAD_CREATION_FLAGS};
 use windows::Win32::UI::TextServices::{
     ITfLangBarItem, ITfLangBarItemButton, ITfLangBarItemButton_Impl, ITfLangBarItemSink, ITfLangBarItem_Impl,
     ITfMenu, ITfSource, ITfSource_Impl, TfLBIClick, GUID_LBI_INPUTMODE, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT,
@@ -187,59 +183,10 @@ fn lock(status: &Mutex<UpdateStatus>) -> MutexGuard<'_, UpdateStatus> {
     status.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// 背景執行緒的工作與它持有的 DLL 模組參考。
-struct Job {
-    module: HMODULE,
-    work: Box<dyn FnOnce() + Send>,
-}
-
-/// 在背景執行。期間計入 DLL 物件數，另外由呼叫端先取得一份模組參考交給執行緒，
-/// 執行緒以 FreeLibraryAndExitThread 放開（#89）：減完物件數到執行緒真正結束之間仍在跑本 DLL 的程式碼，
-/// 只靠物件數時宿主可能在這段時間卸載 DLL（CoFreeUnusedLibraries），執行緒就跑進已卸載的位址。
-fn background(f: impl FnOnce() + Send + 'static) {
-    let mut module = HMODULE::default();
-    let locked = unsafe {
-        GetModuleHandleExW(
-            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-            PCWSTR::from_raw(background_main as *const () as *const u16), // FROM_ADDRESS：以本 DLL 內的位址找模組
-            &mut module,
-        )
-    };
-    if locked.is_err() {
-        zlog!("langbar: 取得模組參考失敗，略過背景工作");
-        return;
-    }
-    crate::object_created();
-    let job = Box::into_raw(Box::new(Job { module, work: Box::new(f) }));
-    let started =
-        unsafe { CreateThread(None, 0, Some(background_main), Some(job as *const c_void), THREAD_CREATION_FLAGS(0), None) };
-    match started {
-        Ok(thread) => unsafe {
-            let _ = CloseHandle(thread);
-        },
-        Err(e) => unsafe {
-            zlog!("langbar: 建立背景執行緒失敗 {}", e);
-            drop(Box::from_raw(job));
-            crate::object_destroyed();
-            let _ = FreeLibrary(module);
-        },
-    }
-}
-
-unsafe extern "system" fn background_main(param: *mut c_void) -> u32 {
-    let job = Box::from_raw(param as *mut Job);
-    let Job { module, work } = *job;
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).is_err() {
-        crate::log::log("panic 已攔截：langbar 背景工作");
-    }
-    crate::object_destroyed();
-    FreeLibraryAndExitThread(module, 0)
-}
-
 /// 重新讀狀態；讀完（或讀不到）時回傳的 channel 會收到通知或斷線。
 fn refresh(status: Arc<Mutex<UpdateStatus>>, user_asked: bool) -> Receiver<()> {
     let (done, finished) = channel();
-    background(move || {
+    crate::background(move || {
         if let Some(json) = ask(&MenuRequest { op: "status".into(), args: vec![] }, user_asked) {
             *lock(&status) = parse_status(&json);
         }
@@ -249,7 +196,7 @@ fn refresh(status: Arc<Mutex<UpdateStatus>>, user_asked: bool) -> Receiver<()> {
 }
 
 fn run(status: Arc<Mutex<UpdateStatus>>, args: Vec<String>) {
-    background(move || {
+    crate::background(move || {
         let _ = ask(&MenuRequest { op: "run".into(), args }, true);
         // 設定與模式會立刻改變；更新在背景進行，稍後再讀一次。
         for wait in [2u64, 20] {

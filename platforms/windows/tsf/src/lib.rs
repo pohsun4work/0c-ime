@@ -2,17 +2,22 @@
 //!
 //! 這個 DLL 會被載入每一個有文字輸入的應用程式，是全專案出錯代價最高的程式。它只做三件事：
 //! 實作 TSF 要求的 COM 介面、把按鍵送進 named pipe、依快照更新組字區與提交文字。
-//! 不含繪圖、不含非同步執行環境。每個 COM 入口都以 catch_unwind 攔 panic：攔到就回傳錯誤碼
+//! 不含非同步執行環境；少數不能卡住宿主執行緒的工作（語言列狀態、組字區背景深淺）丟給 `background`。每個 COM 入口都以 catch_unwind 攔 panic：攔到就回傳錯誤碼
 //! 並退回放行按鍵，未攔截的 panic 會終止宿主應用程式。
 #![allow(non_snake_case)]
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 
-use windows::Win32::Foundation::{CLASS_E_CLASSNOTAVAILABLE, E_FAIL, E_POINTER, HMODULE, S_FALSE, S_OK};
-use windows::Win32::System::LibraryLoader::DisableThreadLibraryCalls;
+use windows::Win32::Foundation::{
+    CloseHandle, FreeLibrary, CLASS_E_CLASSNOTAVAILABLE, E_FAIL, E_POINTER, HMODULE, S_FALSE, S_OK,
+};
+use windows::Win32::System::LibraryLoader::{
+    DisableThreadLibraryCalls, FreeLibraryAndExitThread, GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+};
+use windows::Win32::System::Threading::{CreateThread, THREAD_CREATION_FLAGS};
 use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
-use windows_core::{ComObject, Interface, BOOL, GUID, HRESULT};
+use windows_core::{ComObject, Interface, BOOL, GUID, HRESULT, PCWSTR};
 
 mod candidate;
 mod caret;
@@ -33,6 +38,7 @@ mod privacy;
 mod register;
 mod service;
 mod session;
+mod tone;
 mod ui;
 mod uielement;
 
@@ -51,6 +57,55 @@ pub(crate) fn object_created() {
 
 pub(crate) fn object_destroyed() {
     LIVE_OBJECTS.fetch_sub(1, Ordering::Relaxed);
+}
+
+/// 背景執行緒的工作與它持有的 DLL 模組參考。
+struct Job {
+    module: HMODULE,
+    work: Box<dyn FnOnce() + Send>,
+}
+
+/// 在背景執行。期間計入 DLL 物件數，另外由呼叫端先取得一份模組參考交給執行緒，
+/// 執行緒以 FreeLibraryAndExitThread 放開（#89）：減完物件數到執行緒真正結束之間仍在跑本 DLL 的程式碼，
+/// 只靠物件數時宿主可能在這段時間卸載 DLL（CoFreeUnusedLibraries），執行緒就跑進已卸載的位址。
+pub(crate) fn background(f: impl FnOnce() + Send + 'static) {
+    let mut module = HMODULE::default();
+    let locked = unsafe {
+        GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            PCWSTR::from_raw(background_main as *const () as *const u16), // FROM_ADDRESS：以本 DLL 內的位址找模組
+            &mut module,
+        )
+    };
+    if locked.is_err() {
+        log::log("取得模組參考失敗，略過背景工作");
+        return;
+    }
+    crate::object_created();
+    let job = Box::into_raw(Box::new(Job { module, work: Box::new(f) }));
+    let started =
+        unsafe { CreateThread(None, 0, Some(background_main), Some(job as *const c_void), THREAD_CREATION_FLAGS(0), None) };
+    match started {
+        Ok(thread) => unsafe {
+            let _ = CloseHandle(thread);
+        },
+        Err(e) => unsafe {
+            log::log(&format!("建立背景執行緒失敗 {}", e));
+            drop(Box::from_raw(job));
+            crate::object_destroyed();
+            let _ = FreeLibrary(module);
+        },
+    }
+}
+
+unsafe extern "system" fn background_main(param: *mut c_void) -> u32 {
+    let job = Box::from_raw(param as *mut Job);
+    let Job { module, work } = *job;
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).is_err() {
+        log::log("panic 已攔截：背景工作");
+    }
+    crate::object_destroyed();
+    FreeLibraryAndExitThread(module, 0)
 }
 
 /// 攔截 panic：COM 邊界不得 unwind。給 `#[implement]` 的介面方法用（回傳 Result）。
