@@ -10,15 +10,18 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL,
+};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
-    GetMonitorInfoW, GetTextExtentPoint32W, InvalidateRect, MonitorFromPoint, MonitorFromWindow, ReleaseDC,
-    RoundRect, SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
-    DEFAULT_CHARSET, DEFAULT_PITCH, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL, DT_NOPREFIX,
-    DT_WORDBREAK, FW_NORMAL,
-    HBRUSH, HDC, HFONT, HGDIOBJ, HPEN, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS,
-    PAINTSTRUCT, PS_SOLID, TRANSPARENT,
+    GetGlyphOutlineW, GetMonitorInfoW, GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, MonitorFromPoint,
+    MonitorFromWindow, ReleaseDC, RoundRect, SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL,
+    DT_NOPREFIX, DT_WORDBREAK, FIXED, FW_NORMAL, GDI_ERROR, GGO_METRICS, GLYPHMETRICS, HBRUSH, HDC, HFONT,
+    HGDIOBJ, HPEN, MAT2, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID,
+    TEXTMETRICW, TRANSPARENT,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::{
@@ -78,6 +81,14 @@ pub fn create(instance: HINSTANCE, class: PCWSTR, owner: Option<HWND>) -> window
             Some(instance),
             None,
         )?;
+        // Windows 11 由系統畫小圓角（跟著螢幕縮放）；Windows 10 沒有這個屬性，照舊是自己畫的方角 1 px 框。
+        let corner = DWMWCP_ROUNDSMALL;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const _ as *const c_void,
+            std::mem::size_of_val(&corner) as u32,
+        );
         let state: Box<State> = Box::new(RefCell::new(None));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as _); // `as _`：32 位元版是 SetWindowLongW（i32）
         Ok(hwnd)
@@ -108,6 +119,14 @@ struct Theme {
     small_row: i32,
     /// 提示、讀音提示、Tab 提示的列高；一般版面同 common::notice_row，命中測試才對得上。
     heading_row: i32,
+    badge_height: i32,
+    /// 小按鍵圓角的直徑（RoundRect 的 ellipse）。
+    badge_round: i32,
+    /// 小視窗與游標上下的間距。
+    gap: i32,
+    /// 字、小字的墨水中線離字格頂端多遠：文字照這個對齊列的中線（ink_middle）。
+    font_middle: i32,
+    small_middle: i32,
     colors: Palette,
 }
 
@@ -139,11 +158,44 @@ fn compact(m: &UiMessage) -> bool {
     m.candidates.is_empty()
 }
 
+/// 目前字型下這段字的墨水中線離字格頂端多遠（各字墨水外框的聯集）。TextOutW 從字格頂端畫，字格上下的
+/// 留白依字型而不同，照字格置中字會偏低。量不到時用字格的一半。
+unsafe fn ink_middle(hdc: HDC, text: &str) -> i32 {
+    const ONE: FIXED = FIXED { fract: 0, value: 1 };
+    const ZERO: FIXED = FIXED { fract: 0, value: 0 };
+    const IDENTITY: MAT2 = MAT2 { eM11: ONE, eM12: ZERO, eM21: ZERO, eM22: ONE };
+    let mut tm = TEXTMETRICW::default();
+    let _ = GetTextMetricsW(hdc, &mut tm);
+    let (mut top, mut bottom) = (i32::MAX, i32::MIN);
+    for c in text.chars() {
+        let mut gm = GLYPHMETRICS::default();
+        if GetGlyphOutlineW(hdc, c as u32, GGO_METRICS, &mut gm, 0, None, &IDENTITY) == GDI_ERROR as u32 {
+            return tm.tmHeight / 2;
+        }
+        let ink = tm.tmAscent - gm.gmptGlyphOrigin.y;
+        top = top.min(ink);
+        bottom = bottom.max(ink + gm.gmBlackBoxY as i32);
+    }
+    if top < bottom { (top + bottom) / 2 } else { tm.tmHeight / 2 }
+}
+
+/// 一般文字對齊列中線的基準：「中」的墨水中線，英文、數字照同一條基線排。
+unsafe fn font_middle(font: HFONT) -> i32 {
+    let hdc = GetDC(None);
+    let old = SelectObject(hdc, HGDIOBJ(font.0));
+    let middle = ink_middle(hdc, "中");
+    SelectObject(hdc, old);
+    ReleaseDC(None, hdc);
+    middle
+}
+
 fn build_theme(dpi: u32, compact: bool) -> Theme {
     let scale = |px: i32| (px * dpi as i32 + 48) / 96;
     let colors = palette::system_palette();
-    // 一般：字 18、小字 13、留白 8、列高 28、小字列高 20；精簡：字 15、小字 12、留白 5、列高 22、小字列高 18。
-    let (font_px, small_px, pad, row, small_row) = if compact { (15, 12, 5, 22, 18) } else { (18, 13, 8, 28, 20) };
+    // 一般：字 18、小字 13、留白 8、列高 28、小字列高 20、小按鍵高 18；
+    // 精簡（使用者 11-25 選的）：字 14、小字 10、留白 2、列高 16、小按鍵高 13。
+    let (font_px, small_px, pad, row, small_row, badge_height) =
+        if compact { (14, 10, 2, 16, 18, 13) } else { (18, 13, 8, 28, 20, 18) };
     unsafe {
         let font = CreateFontW(
             -scale(font_px),
@@ -211,6 +263,11 @@ fn build_theme(dpi: u32, compact: bool) -> Theme {
             row: scale(row),
             small_row: scale(small_row),
             heading_row: if compact { scale(row) } else { notice_row(scale(small_row)) },
+            badge_height: scale(badge_height),
+            badge_round: scale(2) * 2,
+            gap: scale(1),
+            font_middle: font_middle(font),
+            small_middle: font_middle(small),
         }
     }
 }
@@ -333,17 +390,18 @@ fn row_badge_advance(hdc: HDC, t: &Theme, row: Row) -> i32 {
 
 /// 在列頂 y、列高 row 的這一列從 x 畫小按鍵，回傳後面文字的起點。畫完還原字型，字色要另外設。
 unsafe fn draw_badge(hdc: HDC, t: &Theme, label: &str, x: i32, y: i32, row: i32) -> i32 {
-    let (width, height) = (badge_width(hdc, t, label), t.small_row - 2);
+    let (width, height) = (badge_width(hdc, t, label), t.badge_height);
     let text = wide(label);
     let top = y + (row - height) / 2;
     let brush = SelectObject(hdc, HGDIOBJ(t.badge.0));
     let pen = SelectObject(hdc, HGDIOBJ(t.badge_pen.0));
-    let _ = RoundRect(hdc, x, top, x + width, top + height, t.pad / 2, t.pad / 2);
+    let _ = RoundRect(hdc, x, top, x + width, top + height, t.badge_round, t.badge_round);
     SelectObject(hdc, pen);
     SelectObject(hdc, brush);
     let font = SelectObject(hdc, HGDIOBJ(t.small.0));
     SetTextColor(hdc, windows::Win32::Foundation::COLORREF(t.colors.hint));
-    let _ = TextOutW(hdc, x + t.pad / 2, top + (height - Row::Small.glyph(t)) / 2, &text);
+    // 小按鍵裡的字照它自己的墨水置中：「Tab」的大寫在字身上半部，照「中」對齊會偏高。
+    let _ = TextOutW(hdc, x + t.pad / 2, top + height / 2 - ink_middle(hdc, label), &text);
     SelectObject(hdc, font);
     x + badge_advance(hdc, t, label)
 }
@@ -384,12 +442,12 @@ impl Row {
             t.font
         }
     }
-    /// 字的高度（垂直置中用）。
-    fn glyph(self, t: &Theme) -> i32 {
+    /// 字的墨水中線離字格頂端多遠（垂直置中用）。
+    fn middle(self, t: &Theme) -> i32 {
         if self == Row::Small {
-            t.small_row - 4
+            t.small_middle
         } else {
-            t.row - 6
+            t.font_middle
         }
     }
 }
@@ -746,7 +804,7 @@ pub fn present(hwnd: HWND, m: UiMessage) {
             (width, height) = grid_size(&m, info.rcWork.right - info.rcWork.left, &t, hdc);
         }
         ReleaseDC(Some(hwnd), hdc);
-        let bounds = placement::place(m.x, m.y, m.h, width, height, info.rcWork);
+        let bounds = placement::place(m.x, m.y, m.h, t.gap, width, height, info.rcWork);
         // 提示幾秒後自動收起（WM_TIMER）；每次新的提示重新計時，沒有提示或標示中的說明就不計時。
         if notice_expires(&m) {
             SetTimer(Some(hwnd), NOTICE_TIMER, NOTICE_MS, None);
@@ -783,6 +841,14 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
     let t = theme(dpi, message.as_ref().is_some_and(compact));
     let mut rc = RECT::default();
     let _ = GetClientRect(hwnd, &mut rc);
+    // 系統畫的圓角外框跟自己畫的 1 px 框同色（Windows 10 沒有這個屬性，失敗無妨）。
+    let border = COLORREF(t.colors.border);
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_BORDER_COLOR,
+        &border as *const _ as *const c_void,
+        std::mem::size_of_val(&border) as u32,
+    );
     FillRect(hdc, &rc, t.border);
     let inner = RECT {
         left: rc.left + 1,
@@ -820,7 +886,7 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
                 t.colors.text
             };
             let old = SelectObject(hdc, HGDIOBJ(kind.font(&t).0));
-            let top = y + (row - kind.glyph(&t)) / 2;
+            let top = y + row / 2 - kind.middle(&t);
             let mut x = inner.left + t.pad;
             if let Some(label) = kind.badge() {
                 x = draw_badge(hdc, &t, label, x, y, row);

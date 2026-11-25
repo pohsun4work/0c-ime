@@ -1,7 +1,7 @@
 //! 螢幕座標可為負數；候選窗在縮放後也必須留在工作區。
 use windows::Win32::Foundation::RECT;
 
-pub fn place(x: i32, y: i32, caret_height: i32, width: i32, height: i32, work: RECT) -> RECT {
+pub fn place(x: i32, y: i32, caret_height: i32, gap: i32, width: i32, height: i32, work: RECT) -> RECT {
     let width = width
         .max(1)
         .min(work.right.saturating_sub(work.left).max(1));
@@ -9,11 +9,11 @@ pub fn place(x: i32, y: i32, caret_height: i32, width: i32, height: i32, work: R
         .max(1)
         .min(work.bottom.saturating_sub(work.top).max(1));
     let left = x.clamp(work.left, work.right.saturating_sub(width).max(work.left));
-    let below = y.saturating_add(caret_height).saturating_add(2);
+    let below = y.saturating_add(caret_height).saturating_add(gap);
     let top = if below.saturating_add(height) <= work.bottom {
         below
     } else {
-        y.saturating_sub(height).saturating_sub(2)
+        y.saturating_sub(height).saturating_sub(gap)
     }
     .clamp(work.top, work.bottom.saturating_sub(height).max(work.top));
     RECT {
@@ -50,7 +50,7 @@ mod tests {
                 (i32::MAX, i32::MAX),
             ] {
                 for dpi in [96, 120, 144, 192, 288, 384] {
-                    let r = place(x, y, 20 * dpi / 96, 400 * dpi / 96, 600 * dpi / 96, work);
+                    let r = place(x, y, 20 * dpi / 96, dpi as i32 / 96, 400 * dpi / 96, 600 * dpi / 96, work);
                     assert!(
                         r.left >= work.left
                             && r.top >= work.top

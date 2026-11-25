@@ -172,6 +172,7 @@ struct State {
 struct Shown {
     ctx: ITfContext,
     cursor: usize,
+    anchor: usize,
     message: UiMessage,
     owner: Option<HWND>,
     document: Option<ITfDocumentMgr>,
@@ -590,6 +591,7 @@ impl TextService_Impl {
                 Some(ctx) => Some(Shown {
                     ctx: ctx.clone(),
                     cursor: snapshot.cursor_utf16,
+                    anchor: snapshot.anchor_utf16(),
                     message,
                     owner,
                     document,
@@ -725,15 +727,16 @@ impl TextService_Impl {
                 return;
             }
             shown.requeries += 1;
-            (shown.ctx.clone(), st.client_id, st.composition.clone(), shown.cursor, st.revision)
+            (shown.ctx.clone(), st.client_id, st.composition.clone(), shown.cursor, shown.anchor, st.revision)
         };
-        let (ctx, client, composition, cursor, revision) = request;
+        let (ctx, client, composition, cursor, anchor, revision) = request;
         let service = self.to_object();
         let requested = edit::request_locate(
             &ctx,
             client,
             composition,
             cursor,
+            anchor,
             Box::new(move |located| service.relocated(revision, located)),
         );
         if let Err(e) = requested {
