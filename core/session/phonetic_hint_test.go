@@ -13,7 +13,7 @@ import (
 
 func requirePhoneticPreview(t *testing.T, snap proto.Snapshot, original, target string, start int) {
 	t.Helper()
-	if snap.Text() != original || snap.Candidates != nil || snap.SuggestionEdit == nil || snap.SuggestionEdit.Start != start || snap.SuggestionEdit.Text != target || snap.Suggestion != string([]rune(original)[start:])+" → "+target {
+	if snap.Text() != original || snap.Candidates != nil || snap.SuggestionEdit == nil || snap.SuggestionEdit.Start != start || snap.SuggestionEdit.Text != target || snap.Suggestion != target {
 		t.Fatalf("unexpected preview: %+v", snap)
 	}
 }

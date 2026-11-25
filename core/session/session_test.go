@@ -330,7 +330,7 @@ func TestEnglishClearsPendingZhuyin(t *testing.T) {
 func TestEnglishHidesChineseSuggestions(t *testing.T) {
 	s := newSession()
 	s.model.LM.(*lm.Mem).SetUni("麻煩", 0.01)
-	if snap := typeSyl(s, "ㄇㄚˊ"); snap.Suggestion != "煩" {
+	if snap := typeSyl(s, "ㄇㄚˊ"); snap.Suggestion != "麻煩" {
 		t.Fatalf("需有中文補全：%+v", snap)
 	}
 	if snap := s.Handle(proto.Request{Type: proto.Toggle}); snap.Suggestion != "" {
@@ -339,7 +339,7 @@ func TestEnglishHidesChineseSuggestions(t *testing.T) {
 	if snap := key(s, proto.KeyTab); !snap.Handled || snap.Commit != "" || snap.Text() != "麻" { // 組字中吃掉不動作（#106）
 		t.Fatalf("英文 Tab 不應接受中文補全：%+v", snap)
 	}
-	if snap := s.Handle(proto.Request{Type: proto.Toggle}); snap.Suggestion != "煩" {
+	if snap := s.Handle(proto.Request{Type: proto.Toggle}); snap.Suggestion != "麻煩" {
 		t.Fatalf("切回注音應恢復補全：%+v", snap)
 	}
 }

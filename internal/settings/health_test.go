@@ -7,7 +7,7 @@ import "testing"
 func TestHealthInfoRoundTripsEveryItem(t *testing.T) {
 	s := Default()
 	for _, kv := range [][2]string{{"selection", Statistical}, {"punctuation", "on"}, {"document-context", "off"}, {"toggle-key", ToggleLeft},
-		{"shift-tap-ms", "500"}, {"start-mode", StartEnglish}, {"selection-keys", SelectQwer}, {"tab", "cycle"}, {"page-size", "10"}, {"fuzzy-s-sh", "off"}, {"fuzzy-z-zh", "auto"}} {
+		{"shift-tap-ms", "500"}, {"start-mode", StartEnglish}, {"selection-keys", SelectQwer}, {"page-size", "10"}, {"fuzzy-s-sh", "off"}, {"fuzzy-z-zh", "auto"}} {
 		if err := s.Set(kv[0], kv[1]); err != nil {
 			t.Fatal(err)
 		}

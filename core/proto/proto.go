@@ -207,8 +207,7 @@ type CandidateList struct {
 	StepKeys bool `json:"step_keys,omitempty"`
 }
 
-// SuggestionEdit 描述按 Tab 後替換的組字範圍，位置單位是顯示字元（rune）。
-// 有此欄位時 suggestion 是「原文 → 完整詞」提示，不能當尾綴串接。
+// SuggestionEdit 描述按 Tab 後替換的組字範圍，位置單位是顯示字元（rune）；Text 同 suggestion。
 type SuggestionEdit struct {
 	Start  int    `json:"start"`
 	Length int    `json:"length"`
@@ -238,7 +237,7 @@ type Snapshot struct {
 	Commit              string          `json:"commit,omitempty"`     // 至多一次
 	Preedit             []Segment       `json:"preedit,omitempty"`    //
 	Cursor              CursorPos       `json:"cursor"`               //
-	Suggestion          string          `json:"suggestion,omitempty"` // 一般為補全後半；有 SuggestionEdit 時為替換提示
+	Suggestion          string          `json:"suggestion,omitempty"` // 小視窗的 Tab 提示：按 Tab 後那段變成的樣子（另 → 另外、png → ㄕㄣ）
 	SuggestionEdit      *SuggestionEdit `json:"suggestion_edit,omitempty"`
 	Candidates          *CandidateList  `json:"candidates,omitempty"` //
 	Notices             []string        `json:"notices,omitempty"`    //
@@ -246,19 +245,19 @@ type Snapshot struct {
 	ReadingHint         *ReadingHint    `json:"reading_hint,omitempty"`
 }
 
+// SetSuggestion 設定 Tab 提示：組字區從 start 起 length 個字元按 Tab 後換成 text。
+func (s *Snapshot) SetSuggestion(start, length int, text string) {
+	s.Suggestion = text
+	s.SuggestionEdit = &SuggestionEdit{Start: start, Length: length, Text: text}
+}
+
 // SuggestedText 回傳按 Tab 接受後預覽的完整組字；無建議或範圍不合法時為空。
 func (s Snapshot) SuggestedText() string {
-	if s.Suggestion == "" {
+	e, r := s.SuggestionEdit, []rune(s.Text())
+	if s.Suggestion == "" || e == nil || e.Start < 0 || e.Length < 0 || e.Start > len(r) || e.Length > len(r)-e.Start {
 		return ""
 	}
-	if e := s.SuggestionEdit; e != nil {
-		r := []rune(s.Text())
-		if e.Start < 0 || e.Length < 0 || e.Start > len(r) || e.Length > len(r)-e.Start {
-			return ""
-		}
-		return string(r[:e.Start]) + e.Text + string(r[e.Start+e.Length:])
-	}
-	return s.Text() + s.Suggestion
+	return string(r[:e.Start]) + e.Text + string(r[e.Start+e.Length:])
 }
 
 // Text 回傳組字區的完整文字。

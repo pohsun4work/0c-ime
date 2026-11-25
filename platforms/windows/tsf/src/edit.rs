@@ -35,6 +35,7 @@ pub struct Apply {
     commit: Vec<u16>,
     preedit: Vec<u16>,
     cursor: usize, // UTF-16 單位
+    anchor: usize, // 小視窗對齊的位置（UTF-16，見 Snapshot::anchor_utf16）
     attr_atoms: [u32; KINDS.len()],
     styles: Vec<StyledRange>,
     caret: RefCell<Located>, // 游標的螢幕矩形（給候選窗定位）與查不到的原因
@@ -198,11 +199,25 @@ unsafe fn selection_rect(ctx: &ITfContext, ec: u32) -> Located {
     text_ext(ctx, ec, &range)
 }
 
-/// 游標的螢幕矩形（OnLayoutChange 重查用）：有組字就用組字裡的游標位置；組不出這個範圍（組字已結束）
-/// 才改用目前選取的插入點。GetTextExt 失敗不再查選取：組字中選取就是我們放的同一個插入點，結果相同。
-pub(crate) unsafe fn locate(ctx: &ITfContext, ec: u32, comp: Option<&ITfComposition>, cursor: usize) -> Located {
-    match comp.map(|comp| composition_caret(ec, comp, cursor)) {
-        Some(Ok(range)) => text_ext(ctx, ec, &range),
+/// 小視窗左緣對齊 Tab、空白要換的那段開頭（anchor）：只把游標矩形的左邊移過去。那段開頭跟游標
+/// 不在同一行（組字換行）或查不到時照游標，小視窗才不會蓋住游標那一行。
+unsafe fn align(ctx: &ITfContext, ec: u32, comp: &ITfComposition, caret: Located, anchor: usize, cursor: usize) -> Located {
+    let rect = caret?;
+    if anchor >= cursor {
+        return Ok(rect);
+    }
+    let start = composition_caret(ec, comp, anchor).ok().and_then(|range| text_ext(ctx, ec, &range).ok());
+    Ok(match start {
+        Some(s) if s.top < rect.bottom && s.bottom > rect.top && s.left <= rect.left => RECT { left: s.left, ..rect },
+        _ => rect,
+    })
+}
+
+/// 游標的螢幕矩形（OnLayoutChange 重查用）：有組字就用組字裡的游標位置（左邊對齊 anchor）；組不出這個範圍
+/// （組字已結束）才改用目前選取的插入點。GetTextExt 失敗不再查選取：組字中選取就是我們放的同一個插入點，結果相同。
+pub(crate) unsafe fn locate(ctx: &ITfContext, ec: u32, comp: Option<&ITfComposition>, cursor: usize, anchor: usize) -> Located {
+    match comp.map(|comp| composition_caret(ec, comp, cursor).map(|range| (comp, range))) {
+        Some(Ok((comp, range))) => align(ctx, ec, comp, text_ext(ctx, ec, &range), anchor, cursor),
         _ => selection_rect(ctx, ec),
     }
 }
@@ -213,6 +228,7 @@ pub struct Locate {
     ctx: ITfContext,
     composition: Option<ITfComposition>,
     cursor: usize,
+    anchor: usize,
     done: Box<dyn Fn(Located)>,
 }
 
@@ -225,7 +241,7 @@ impl Drop for Locate {
 impl ITfEditSession_Impl for Locate_Impl {
     fn DoEditSession(&self, ec: u32) -> windows_core::Result<()> {
         crate::guarded("Locate", || {
-            let located = unsafe { locate(&self.ctx, ec, self.composition.as_ref(), self.cursor) };
+            let located = unsafe { locate(&self.ctx, ec, self.composition.as_ref(), self.cursor, self.anchor) };
             (self.done)(located);
             Ok(())
         })
@@ -238,6 +254,7 @@ pub(crate) fn request_locate(
     client_id: u32,
     composition: Option<ITfComposition>,
     cursor: usize,
+    anchor: usize,
     done: Box<dyn Fn(Located)>,
 ) -> windows_core::Result<()> {
     crate::object_created();
@@ -245,6 +262,7 @@ pub(crate) fn request_locate(
         ctx: ctx.clone(),
         composition,
         cursor,
+        anchor,
         done,
     })
     .into_interface();
@@ -283,6 +301,7 @@ pub fn apply(
         commit: snapshot.commit.encode_utf16().collect(),
         preedit: snapshot.text().encode_utf16().collect(),
         cursor: snapshot.cursor_utf16,
+        anchor: snapshot.anchor_utf16(),
         attr_atoms,
         styles: style_ranges(&snapshot.preedit).unwrap_or_default(),
         caret: RefCell::new(Err(Miss::NotRun)),
@@ -517,7 +536,7 @@ impl Apply {
             self.select(ec, &caret)?;
             // 游標的螢幕座標：候選窗定位用，直接用剛放好的插入點。拿不到就記下原因，由外殼退回其他來源
             // 或等 OnLayoutChange。
-            *self.caret.borrow_mut() = text_ext(&self.ctx, ec, &caret);
+            *self.caret.borrow_mut() = align(&self.ctx, ec, &comp, text_ext(&self.ctx, ec, &caret), self.anchor, self.cursor);
         } else {
             self.step.set("clear");
             let existing = self.composition.borrow().clone();
@@ -1223,6 +1242,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn popup_left_edge_follows_the_part_tab_replaces() {
+        let (doc, ctx) = host(Sync::Run);
+        doc.layout.set(Layout::Ready);
+        // 「前」之後組字「ㄋㄧ」、游標在最後，Tab 換的是第 2 個字：左邊對齊文件位置 2，上下照游標。
+        let snapshot = Snapshot {
+            ok: true,
+            handled: true,
+            preedit: vec![crate::session::Segment { text: "ㄋㄧ".into(), style: "normal".into() }],
+            cursor_utf16: 2,
+            suggestion: "ㄧㄣ".into(),
+            suggestion_start: Some(1),
+            ..Default::default()
+        };
+        let sink: ITfCompositionSink = ComObject::new(NullSink).into_interface();
+        let applied = apply(&ctx, 1, None, sink, &snapshot, [0; KINDS.len()], None, Rc::new(Cell::new(false)), true);
+        assert_eq!(applied.caret, Ok(RECT { left: caret_at(2).left, ..caret_at(3) }));
+    }
+
+    #[test]
     fn commit_without_composition_queries_the_caret_only_when_something_is_shown() {
         // 修正前：每一個只提交、不顯示任何東西的按鍵都多做一次 GetSelection 與 GetTextExt。
         let (doc, ctx) = host(Sync::Run);
@@ -1276,7 +1314,7 @@ pub(crate) mod tests {
         doc.layout.set(Layout::Ready);
         let found: Rc<Cell<Option<Located>>> = Rc::new(Cell::new(None));
         let sink = found.clone();
-        request_locate(&ctx, 1, applied.composition.clone(), 2, Box::new(move |l| sink.set(Some(l)))).unwrap();
+        request_locate(&ctx, 1, applied.composition.clone(), 2, 2, Box::new(move |l| sink.set(Some(l)))).unwrap();
         assert_eq!(found.get(), None, "唯讀 session 由宿主排程（非同步）");
         drain(&doc);
         assert_eq!(found.get(), Some(Ok(caret_at(3))));
@@ -1290,7 +1328,7 @@ pub(crate) mod tests {
         doc.layout.set(Layout::Ready);
         let found: Rc<Cell<Option<Located>>> = Rc::new(Cell::new(None));
         let sink = found.clone();
-        request_locate(&ctx, 1, None, 0, Box::new(move |l| sink.set(Some(l)))).unwrap();
+        request_locate(&ctx, 1, None, 0, 0, Box::new(move |l| sink.set(Some(l)))).unwrap();
         drain(&doc);
         assert_eq!(found.get(), Some(Err(Miss::Range(E_NOTIMPL))));
     }

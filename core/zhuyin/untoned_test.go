@@ -45,6 +45,19 @@ func TestLegalPrefix(t *testing.T) {
 	}
 }
 
+func TestCompletable(t *testing.T) {
+	for _, s := range []Syllable{"ㄏㄣ", "ㄌㄣ", "ㄒㄣ", "ㄋ", "ㄧㄣ", "ㄕㄨㄣ", "ㄦ"} {
+		if !Completable(s) {
+			t.Errorf("%q 補上缺的符號組得成音節", s)
+		}
+	}
+	for _, s := range []Syllable{"ㄏㄧㄣ", "ㄙㄩ", "ㄙㄩㄣ", "ㄈㄩ", ""} {
+		if Completable(s) {
+			t.Errorf("%q 怎麼補都組不成音節", s)
+		}
+	}
+}
+
 func TestAbbreviation(t *testing.T) {
 	y := Abbreviate("ㄋ", 0)
 	if !y.Abbreviated() || !y.Untoned() || y.Valid() || y.Legal() || y.ToneOf() != 0 || y.Base() != "ㄋ" || y.Text() != "ㄋ" {

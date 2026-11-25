@@ -166,3 +166,25 @@ var legalPrefixes = func() map[string]bool {
 // LegalPrefix 回報不帶聲調的 s 是否為音節表內某個音節的開頭（含完整音節本身），
 // 例如 ㄒㄧ、ㄒㄧㄢ 是，ㄉㄧㄤ、ㄅㄩ 不是。不打聲調時用它判斷下一個注音要接在目前的音節後面還是開新的音節。
 func LegalPrefix(s Syllable) bool { return legalPrefixes[string(s)] }
+
+// legalParts 是音節表內每個音節留下任意幾個符號（照聲母、介音、韻母的順序）的組合，不帶聲調。
+var legalParts = func() map[string]bool {
+	m := map[string]bool{}
+	for b := range legalBases {
+		r := []rune(b)
+		for mask := 1; mask < 1<<len(r); mask++ {
+			var part []rune
+			for i, x := range r {
+				if mask&(1<<i) != 0 {
+					part = append(part, x)
+				}
+			}
+			m[string(part)] = true
+		}
+	}
+	return m
+}()
+
+// Completable 回報不帶聲調的 s 補上缺的聲母、介音或韻母後，能不能成為音節表內的音節：
+// ㄏㄣ、ㄌㄣ（ㄌㄧㄣ）能，ㄏㄧㄣ、ㄙㄩ 不能。
+func Completable(s Syllable) bool { return legalParts[string(s)] }

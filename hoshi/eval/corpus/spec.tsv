@@ -18,6 +18,7 @@ mix-13	nm{Enter}	nm	P5；官方送出 ㄙㄩ
 mix-14	url␣	交	保留官方：反過來打的英文字
 mix-15	e(	e(	P5；官方 ㄍ（
 mix-16	e{KP2}e	e2e	P5；官方 ㄍ2e
+mix-17	go␣up␣and␣down	go␣up␣and␣down	P7：看後面打的英文換回英數，up␣ 用掉的空白要還回來（華碩打到 an 換回 up）；官方 go␣音and␣down
 sel-01	w8␣{Down}{pick:它}2k7t/6ru␣	它的成績	P8：手選過就固定
 red-01	wuuuu/6	停	P6；官方 wuuu營
 red-02	wu//6	停	P6
@@ -26,7 +27,7 @@ red-04	ggggk6	什	P6
 red-05	ji3wuuuu/6su3	我停你	P6
 red-06	hellowu//6	hello停	P6
 red-07	wu//␣	聽	P6：結尾是空白也合併
-red-08	ssl␣	孬	P6：英文字典沒收的會變字
+red-08	ssl␣	ssl␣	P6：字典收的縮寫照英文（P6 起字典加了常用縮寫）
 red-09	ru8884	架	P6：有介音時數字鍵＋聲調 4 個以內合併
 red-10	a8883	a8883	P6：沒有介音時 4 個照字面
 red-11	gkgk6	什	P6；華碩 gkg額，不照抄
@@ -45,6 +46,15 @@ typo-12	kg6	什	保留官方：按鍵順序打錯
 typo-13	/uw6	停	保留官方
 typo-14	5jiy6	昨	P6
 typo-15	gjn␣	蘇	P6
+tab-01	ul4m/4␣png␣a87	要用␣png␣嗎	P6：字典收的縮寫照英文，空白照打；官方 png 是 pig
+tab-02	png{Tab}␣	身	P6：Tab 換成修正讀音 ㄕㄣ
+tab-03	ssl{Tab}␣	孬	P6：Tab 換成合併冗餘音的 ㄋㄠ
+tab-04	20␣	單	保留官方（#162）
+tab-05	20{Tab}␣	20␣	P6：Tab 換成原按鍵，空白就是空白
+tab-06	gjn{Enter}	ㄙㄨ	P6：組字區顯示空白的結果 ㄙㄨ，Enter 照畫面送出
+tab-07	gjn{Tab}␣	gjn␣	P6：Tab 換成原按鍵
+tab-08	up{Tab}␣	up␣	P6：照順序組得成字的英文詞，Tab 換成原按鍵
+tab-09	cpu{Enter}	cpu	P6：怎麼補都組不成音節的照英文顯示；官方 ㄏㄧㄣ
 sym-01	<	<	P4：Shift+, 打半形
 sym-02	[	[	P4；官方預設「
 sym-03	]	]	P4；官方預設」

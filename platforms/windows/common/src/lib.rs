@@ -141,7 +141,7 @@ pub struct UiMessage {
     pub kind: String,
     #[serde(default)]
     pub title: String,
-    /// Tab 補全提示（一般為後半；同音替換時為「原文 → 完整詞」）。
+    /// Tab 提示：按 Tab 之後組字區結尾變成的樣子（另 → 另外、png → ㄕㄣ）。
     pub suggestion: String,
     /// 核心的一次性提示（例如「已加入詞庫：世傑」，#123），畫在最上面；幾秒後或下一鍵後消失。
     /// 舊 DLL 沒送時為空字串。
@@ -184,8 +184,8 @@ pub fn notice_row(small_row: i32) -> i32 {
     small_row * 7 / 5
 }
 
-/// 這一列是不是用一般字級畫（提示、讀音提示、補全提示），標題是小字。
-/// 補全提示（Tab 接受）跟候選同字級，小字看不清楚（#118）。
+/// 這一列是不是用一般字級畫（提示、讀音提示、Tab 提示），標題是小字。
+/// Tab 提示跟候選同字級，小字看不清楚（#118）。
 pub fn large_heading(m: &UiMessage, heading: &str) -> bool {
     !m.notice.is_empty() && heading == m.notice
         || !m.reading.is_empty() && heading == m.reading

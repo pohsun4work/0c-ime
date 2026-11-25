@@ -45,7 +45,7 @@ func testSavedEnglishAutocomplete(t *testing.T, full bool) {
 		if err := englishpack.Compile("../../data/english", filepath.Join(target, "english")); err != nil {
 			t.Fatal(err)
 		}
-		data, words = target, 82015
+		data, words = target, 82039 // 含 internal/englishpack/revise.tsv 加的縮寫、拿掉的 ck
 	}
 	sock := testPipe("autocomplete")
 	config := settings.Default()

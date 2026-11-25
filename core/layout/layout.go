@@ -26,6 +26,12 @@ func (l *Layout) Symbol(key rune) (rune, bool) {
 	return r, ok
 }
 
+// Key 回傳打出注音符號 sym 的按鍵，Symbol 的反查。
+func (l *Layout) Key(sym rune) (rune, bool) {
+	k, ok := l.key[sym]
+	return k, ok
+}
+
 // Press 在組音狀態 c 按下一鍵，回傳按下後的組音狀態與這一鍵打出的符號；不是注音鍵時 ok 為 false。
 // 一般符號已經加進回傳的狀態；聲調（含空白的一聲）不加，由呼叫端加上聲調完成音節。c 不會被修改。
 func (l *Layout) Press(c zhuyin.Composer, key rune) (next zhuyin.Composer, sym rune, ok bool) {

@@ -108,8 +108,8 @@ func TestMixedBackspaceFollowsDisplayOrder(t *testing.T) {
 		{"ix", []string{"ㄌ", ""}},
 		{"ulv", []string{"ㄒㄧ", "ㄒ", ""}},
 		{"hello", []string{"hell"}},
-		// 移動游標照原按鍵留下（畫面 mn），退格回到後面時刪畫面最後的 n，剩下的 m 收回成 ㄩ
-		{"mn\tLeft\t\tRight\t", []string{"ㄩ", ""}},
+		// 移動游標照原按鍵留下（畫面 nj），退格回到後面時刪畫面最後的 j，剩下的 n 收回成 ㄙ
+		{"nj\tLeft\t\tRight\t", []string{"ㄙ", ""}},
 	} {
 		s := newSession()
 		for _, k := range splitProbeKeys(tc.keys) {

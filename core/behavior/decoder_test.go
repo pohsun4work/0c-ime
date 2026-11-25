@@ -114,8 +114,8 @@ func TestOneUseDoesNotTriggerSuggestion(t *testing.T) {
 		t.Error("用過 8 次仍不建議：常用的詞最終應該要能補全")
 	}
 	// 系統本來就有把握的建議不受影響
-	if s := u.typeAll("ㄇㄚˊ ㄆㄛˊ"); s.Suggestion != "豆腐" {
-		t.Errorf("打到 麻婆 應建議「豆腐」，實際 %q", s.Suggestion)
+	if s := u.typeAll("ㄇㄚˊ ㄆㄛˊ"); s.Suggestion != "麻婆豆腐" {
+		t.Errorf("打到 麻婆 應建議「麻婆豆腐」，實際 %q", s.Suggestion)
 	}
 }
 
@@ -148,7 +148,7 @@ func TestTabCompletion(t *testing.T) {
 	// 第一次修正後其餘皆為被動提交，現在權重較低；不能再沿用 raw Uses 的 8 次上限。
 	for n := 1; n <= 24 && learnedAt == 0; n++ {
 		u.typeAndFix(QZJ, "親子丼")
-		if u.typeAll(QZ).Suggestion == "丼" {
+		if u.typeAll(QZ).Suggestion == "親子丼" {
 			learnedAt = n
 		}
 		u.do(proto.Request{Type: proto.Cancel})
@@ -156,7 +156,7 @@ func TestTabCompletion(t *testing.T) {
 	if learnedAt == 0 {
 		t.Fatal("一次修正後持續被動使用 24 次仍未建議個人片語")
 	}
-	t.Logf("打過 %d 次後，打 ㄑㄧㄣ ㄗˇ 即建議「丼」", learnedAt)
+	t.Logf("打過 %d 次後，打 ㄑㄧㄣ ㄗˇ 即建議「親子丼」", learnedAt)
 	// 用得夠多之後，打到「親」就可能直接建議「子丼」，比 7 鍵更少
 	if keys, log := walk(u, "親子丼", QZJ); keys > 7 {
 		t.Errorf("親子丼：按鍵 %d 應不多於 7（%v）", keys, log)

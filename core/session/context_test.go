@@ -38,7 +38,7 @@ func TestHomophoneTabPreviewsThenAccepts(t *testing.T) {
 		t.Fatalf("原組字不應被改寫：%+v", snap)
 	}
 	snap = key(s, proto.KeyTab)
-	if !snap.Handled || snap.Text() != "小龍" || snap.Commit != "" || snap.Suggestion != "小龍 → 小籠包" || snap.SuggestedText() != "小籠包" {
+	if !snap.Handled || snap.Text() != "小龍" || snap.Commit != "" || snap.Suggestion != "小籠包" || snap.SuggestedText() != "小籠包" {
 		t.Fatalf("先預覽而不替換：%+v", snap)
 	}
 	snap = key(s, proto.KeyTab)
@@ -74,7 +74,7 @@ func TestHomophonePreviewDoesNotChangeEnterOrIgnoredTyping(t *testing.T) {
 		typeXiaolong(baseline)
 		key(s, proto.KeyTab)
 		a, b := key(s, action), key(baseline, action)
-		if a.Text() != b.Text() || a.SuggestionEdit != nil {
+		if a.Text() != b.Text() || a.Suggestion != b.Suggestion {
 			t.Fatalf("忽略預覽後 %s: %+v != %+v", action, a, b)
 		}
 	}

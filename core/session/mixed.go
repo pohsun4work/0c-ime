@@ -27,8 +27,9 @@ const mixedJoinSymbols = `:\'"<>?&`
 // Neither a repeated phonetic slot nor a proposed correction overwrites keys.
 type pendingKeys struct {
 	raw, accepted  string
-	choice         int // 0: infer, 1: literal, 2: phonetic (explicit selection)
-	assistedPrefix int // raw 的前段保留了已接受補字；後續追加字元仍是自行輸入
+	choice         int  // 0: infer, 1: literal, 2: phonetic (explicit selection), 3: repaired reading (Tab or ↓)
+	assistedPrefix int  // raw 的前段保留了已接受補字；後續追加字元仍是自行輸入
+	swapped        bool // Tab 換來的樣子，再按 Tab 換回原樣；↓ 選的不算（mixedSwap）
 }
 
 // mixedComposer rejects lossy same-slot replacement while both languages compete.
@@ -55,6 +56,11 @@ func (s *Session) mixedText() string {
 	}
 	if s.englishWord {
 		return p.raw
+	}
+	// 接空白會經過冗餘音、打錯鍵修正組成中文的（gjn、5wu0），或按 Tab 換成修正讀音的（png）：直接顯示修正後的注音
+	// （ㄙㄨ、5ㄊㄧㄢ、ㄕㄣ），組字區是什麼按空白就出什麼。
+	if at, done, ok := s.mixedRepairShown(); ok {
+		return p.raw[:at] + string(done.Base())
 	}
 	// 使用者加的英文詞（ls、rm、kubectl，#146）：完全相同（大小寫照字面）就照字面，優先於一聲讀音與注音解釋。
 	// ↓ 選了注音解釋（choice 2）照舊顯示注音。
@@ -85,7 +91,8 @@ func (s *Session) mixedText() string {
 	if phonetic && englishPrior && !mixedLetterWord(p.raw) && p.choice == 0 {
 		_, firstTone = s.mixedReading(p.raw, zhuyin.Tone1)
 	}
-	if phonetic && p.choice != 1 && (p.choice == 2 || !englishPrior || firstTone) {
+	// 怎麼補都組不成音節的（cpu 的 ㄏㄧㄣ、mn 的 ㄙㄩ）照英文顯示：按空白本來就照原按鍵留下。
+	if phonetic && (p.choice == 2 || p.choice != 1 && (!englishPrior || firstTone) && zhuyin.Completable(zhuyin.Syllable(c.String()))) {
 		return c.String()
 	}
 	return p.raw
@@ -121,13 +128,18 @@ func (s *Session) insertMixedTyped(syl zhuyin.Syllable, keys string) {
 	s.insertMixedReading(syl, keys)
 	if s.refresh(); decodable && len(s.path) > 0 && !s.completeDecodable() {
 		s.restoreSyllables(saved)
-		var comp zhuyin.Composer
-		for _, r := range string(syl.Base()) {
-			comp.Add(r)
-		}
-		s.insertSyllableLiteral(comp, syl)
+		s.insertSyllableLiteral(baseComposer(syl), syl)
 		s.pendingLiterals[len(s.pendingLiterals)-1].prefix = true
 	}
+}
+
+// baseComposer 回傳 syl 不帶聲調的組音狀態。
+func baseComposer(syl zhuyin.Syllable) zhuyin.Composer {
+	var c zhuyin.Composer
+	for _, r := range string(syl.Base()) {
+		c.Add(r)
+	}
+	return c
 }
 
 func (s *Session) shiftMixedKeys(at, delta int) {
@@ -152,7 +164,7 @@ func (s *Session) mixedPending(text string) (zhuyin.Composer, bool) {
 }
 
 // mixedEraseAt 回傳退格要刪的待定按鍵位置。顯示成注音時跟一般注音一樣照畫面順序刪最後一個符號（#309：
-// i j 畫面 ㄨㄛ，退格剩 ㄨ），照字面顯示時刪最後按的。asTyped：這次退格才收回、畫面上還是原按鍵（mn ← → 退格剩 m）。
+// i j 畫面 ㄨㄛ，退格剩 ㄨ），照字面顯示時刪最後按的。asTyped：這次退格才收回、畫面上還是原按鍵（nj ← → 退格剩 n）。
 func (s *Session) mixedEraseAt(asTyped bool) int {
 	raw := s.mixed.raw
 	at := len(raw) - 1
@@ -176,15 +188,20 @@ func (s *Session) mixedEraseAt(asTyped bool) int {
 func (s *Session) flushMixed() { s.settleMixed(false) }
 
 // settleMixed：keepZhuyin 時顯示成還沒打完的注音照注音留下（Enter 照畫面送出、點注音鍵接著組）。
+// 顯示修正讀音的（gjn 的 ㄙㄨ）同樣照注音留下；符號、移動游標等其他定案照原按鍵，Tab 換成的（png 的 ㄕㄣ）照選的。
 func (s *Session) settleMixed(keepZhuyin bool) {
 	if s.mixed.raw == "" {
 		return
 	}
 	s.settleTokenAn()
 	raw, text := s.mixed.raw, s.mixedText()
+	cut, done, repaired := s.mixedRepairShown()
+	if repaired && !keepZhuyin && s.mixed.choice == 0 {
+		repaired, text = false, raw
+	}
 	c, phonetic := s.mixedPending(text)
 	zhuyinText := phonetic && (keepZhuyin || s.mixed.choice == 2)
-	if !phonetic {
+	if !phonetic && !repaired {
 		s.reviseLetterI(text)
 	}
 	previous, at := slices.Clone(s.path), s.cursor
@@ -193,6 +210,10 @@ func (s *Session) settleMixed(keepZhuyin bool) {
 	assistedPrefix := s.mixed.assistedPrefix
 	s.clearMixed()
 	switch {
+	case repaired:
+		s.insertMixedPrefix(raw[:cut], false, false)
+		s.comp = baseComposer(done)
+		s.insertPendingLiteral()
 	case zhuyinText:
 		s.comp = c
 		s.insertPendingLiteral()
@@ -298,32 +319,93 @@ func (s *Session) keepMixedDisplay(previous []decode.Seg, at, delta int) {
 	}
 }
 
-func (s *Session) mixedSuggestion() string {
+// mixedSwap：待定按鍵按 Tab 換成的另一個樣子，也就是小視窗顯示的那一個；回傳換過去的狀態與它在組字區的文字。
+//   - 顯示修正讀音的（gjn 的 ㄙㄨ）、照順序組得成字的英文詞（up 的 ㄧㄣ）、按空白會組成中文的數字（20）：
+//     換成原按鍵（choice 1），之後的空白就是空白。
+//   - 照英文顯示的、↓ 選了原按鍵的：英文補全（hel → helped、↓ 選 up → upon）優先，其次是照順序的注音（20 → ㄉㄢ）、
+//     修正讀音（字典收的 png → ㄕㄣ，choice 3），最後是拼字修正。
+//   - Tab 換來的再按 Tab 換回原樣（ㄧㄣ → up → ㄧㄣ）；原樣看起來跟現在一樣時（20 換成的原按鍵）照上一條往下換。
+//   - 英文補全、拼字修正收下就定了，不再換（hi → high）。
+func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 	p := s.mixed
-	if p.raw == "" || p.accepted != "" || p.choice == 2 || s.mixedText() != p.raw || len(p.raw) < 2 || s.vocabEnglish(p.raw) {
-		return ""
+	if p.raw == "" || p.accepted != "" || s.cand != nil || s.english || s.englishWord {
+		return p, "", false
 	}
-	for _, c := range s.englishPrefix(p.raw, 5) {
-		if len(c.Text) >= len(p.raw)+2 {
-			return c.Text
+	if p.swapped && (p.choice == 1 || p.choice == 3) {
+		back := p.with(0)
+		if text := s.mixedTextOf(back); text != s.mixedText() {
+			return back, text, true
 		}
 	}
-	if cs := s.englishCorrections(p.raw, 1); len(cs) > 0 {
-		return cs[0].Text
+	switch p.choice {
+	case 2, 3:
+		return p.with(1), p.raw, true
+	case 0:
+		if s.mixedText() != p.raw {
+			if _, _, ok := s.mixedRepairShown(); ok || s.mixedEnglishWord(p.raw) {
+				return p.with(1), p.raw, true
+			}
+			return p, "", false
+		}
+		if _, _, ok := s.mixedSpaceReading(); ok {
+			return p.with(1), p.raw, true
+		}
 	}
-	return ""
+	word := p
+	english := len(p.raw) >= 2 && !s.vocabEnglish(p.raw) // 補全與拼字修正至少兩個字母，使用者加的英文詞不換
+	if english {
+		for _, c := range s.englishPrefix(p.raw, 5) {
+			if len(c.Text) >= len(p.raw)+2 { // 補全至少多兩個字母
+				word.accepted = c.Text
+				return word, c.Text, true
+			}
+		}
+	}
+	if c, ok := s.mixedComposer(p.raw); ok && p.choice == 1 && zhuyin.Completable(zhuyin.Syllable(c.String())) {
+		return p.with(2), c.String(), true
+	}
+	if text, ok := s.repairedText(p.raw); ok {
+		return p.with(3), text, true
+	}
+	if english {
+		if cs := s.englishCorrections(p.raw, 1); len(cs) > 0 {
+			word.accepted = cs[0].Text
+			return word, cs[0].Text, true
+		}
+	}
+	return p, "", false
+}
+
+// with：Tab 換成 choice 的樣子；換回原樣（choice 0）以外都記下是 Tab 換來的。
+func (p pendingKeys) with(choice int) pendingKeys {
+	p.choice, p.swapped = choice, choice != 0
+	return p
+}
+
+// mixedTextOf：待定按鍵換成 p 時組字區的樣子。
+func (s *Session) mixedTextOf(p pendingKeys) string {
+	saved := s.mixed
+	s.mixed = p
+	text := s.mixedText()
+	s.mixed = saved
+	return text
+}
+
+// mixedSuggestion：Tab 換成的英文詞（補全或拼字修正），不是英文時是空字串。
+func (s *Session) mixedSuggestion() string {
+	next, _, ok := s.mixedSwap()
+	if !ok {
+		return ""
+	}
+	return next.accepted
 }
 
 func (s *Session) acceptMixed() bool {
-	if s.cand != nil {
-		return false
+	next, _, ok := s.mixedSwap()
+	if ok {
+		s.mixed = next
 	}
-	word := s.mixedSuggestion()
-	if word == "" {
-		return false
-	}
-	s.mixed.accepted = word
-	return true
+	return ok
 }
 
 func (s *Session) openMixedCandidates() {
@@ -352,6 +434,9 @@ func (s *Session) openMixedCandidates() {
 	}
 	if comp, ok := s.mixedComposer(s.mixed.raw); ok {
 		add(comp.String())
+	}
+	if text, ok := s.repairedText(s.mixed.raw); ok {
+		add(text)
 	}
 	// 結尾是聲調鍵、但組不成中文而照字面顯示的按鍵（co6）：混打照舊顯示原按鍵，↓ 另給帶聲調的
 	// 原樣注音（ㄏㄟˊ），與一般模式原樣留下的音節相同（#109）。
@@ -391,11 +476,12 @@ func (s *Session) selectMixed(id int) bool {
 		return true
 	}
 	text := s.cand.items[id].Entry.Surface
-	s.mixed.accepted = ""
-	s.mixed.choice = 1
+	s.mixed.accepted, s.mixed.choice, s.mixed.swapped = "", 1, false
 	if text != s.mixed.raw {
 		if comp, ok := s.mixedComposer(s.mixed.raw); ok && text == comp.String() {
 			s.mixed.choice = 2
+		} else if repaired, ok := s.repairedText(s.mixed.raw); ok && text == repaired {
+			s.mixed.choice = 3
 		} else {
 			s.mixed.accepted = text
 		}
@@ -513,6 +599,16 @@ func (s *Session) finishMixedTone(key string) bool {
 		return false
 	}
 	raw := s.mixed.raw
+	// Tab 換成修正讀音的（png → ㄕㄣ）：空白、聲調鍵照修正組字（身、審）；這個聲調組不成時照沒選過的判斷。
+	if s.mixed.choice == 3 {
+		if at, done, ok := s.repairFor(raw, key, sym); ok {
+			s.clearMixed()
+			s.insertMixedPrefix(raw[:at], false, false)
+			s.insertMixedTyped(done, raw[at:]+key)
+			return true
+		}
+		s.mixed.choice = 0
+	}
 	// 使用者加的英文詞接空白照字面送出（ls␣ 不是「孬」）；英文詞裡的聲調鍵（ipv6 的 6）打到一半時也不當聲調。
 	// 英文詞以外的聲調鍵（ls3）照舊組成中文，↓ 選了注音解釋後空白也照舊完成一聲。
 	if s.mixed.choice != 2 && (key == " " && s.vocabEnglish(raw) || key != " " && s.vocabEnglishPrefix(raw+key)) {
@@ -710,6 +806,9 @@ func (s *Session) mixedBoundary(raw, key string, tone rune) (int, zhuyin.Syllabl
 	if best > 0 {
 		return best, bestSyl, true
 	}
+	if at, done, ok := s.mixedRepair(raw, key, tone); ok {
+		return at, done, true
+	}
 	// 打錯一鍵的注音（#203）：後段以數字鍵結尾（qji3wu0 的 ㄉㄧㄢ 天）也要切開，但切出來的後段要有字母，
 	// 只用數字鍵的後段照舊交給下面「帳號、編號」的判斷。接空白的單一鍵只認聲母（ㄗ 資、ㄙ 思）：型號、版本後面的
 	// 單一字母（gpt4o、ps4u、win7u）不是 ㄟ、ㄧ 一聲。
@@ -724,6 +823,9 @@ func (s *Session) mixedBoundary(raw, key string, tone rune) (int, zhuyin.Syllabl
 		return at, done, true
 	}
 	if at, done, ok := s.mixedAfterToken(raw, key, tone); ok {
+		return at, done, true
+	}
+	if at, done, ok := s.mixedRepairSplit(raw, key, tone); ok {
 		return at, done, true
 	}
 	// 聲調前一鍵是數字（lisa03、nina87）像帳號或編號，不切。
@@ -1571,7 +1673,7 @@ func (s *Session) mixedReachable(raw string) bool {
 }
 
 // mixedKeepsZhuyin：顯示成注音的待定按鍵在空白、Enter 時照官方留下注音：單鍵（c 是 ㄏ，#190），
-// 或加某個聲調組得成字的（ㄋㄩ）。多鍵又怎樣都組不成字的（npm 的 ㄙㄩㄣ）照原按鍵。
+// 或加某個聲調組得成字的（ㄋㄩ）。多鍵又怎樣都組不成字的照原按鍵。
 func (s *Session) mixedKeepsZhuyin(raw string) bool { return len(raw) == 1 || s.mixedReachable(raw) }
 
 // mixedAfterChinese：待定按鍵要插入的位置前面是中文音節（不是字面的英文、數字、空白或標點）。
@@ -1622,8 +1724,8 @@ func (s *Session) mixedKey(k string) bool {
 	if k == " " && s.mixed.raw == "" {
 		return false
 	}
-	if s.mixed.accepted != "" {
-		s.flushMixed()
+	if s.mixed.accepted != "" || s.mixed.choice == 1 {
+		s.flushMixed() // Tab、↓ 換成的英文詞與原按鍵已經定了，接著打的另起一串（up Tab su3 是 up你）
 	}
 	if len(s.mixed.raw) >= maxMixedPending {
 		s.flushMixed()
@@ -1677,6 +1779,9 @@ func (s *Session) mixedKey(k string) bool {
 	if s.mixed.raw == "" && (s.explicitSymbol(k) || s.digitAfterExplicitSymbol(k)) {
 		s.insertLiteral(k) // 明確打的符號不參與組字，後面的按鍵另起一串（我$天）；緊接的數字照數字留（$20）。見 hoshi_symbols.go
 		return true
+	}
+	if s.mixed.choice == 3 {
+		s.mixed.choice = 0 // 修正讀音只對 Tab 時的按鍵，接著打的照沒選過的判斷
 	}
 	s.mixed.raw += k
 	return true
@@ -1838,12 +1943,11 @@ func (s *Session) mixedEnglishCommits() []personal.EnglishCommit {
 }
 
 func (s *Session) mixedSnapshot(snap *proto.Snapshot) {
-	if s.mixed.raw == "" || s.cand != nil || s.english {
-		return
-	}
-	if text := s.mixedSuggestion(); text != "" {
-		start := snap.Cursor.Rune - len([]rune(s.mixedText()))
-		snap.Suggestion = s.mixed.raw + " → " + text
-		snap.SuggestionEdit = &proto.SuggestionEdit{Start: start, Length: len([]rune(s.mixedText())), Text: text}
+	if _, text, ok := s.mixedSwap(); ok {
+		if s.fullWidth {
+			text = s.fullWidthText(text) // 換上去的按鍵、英文詞照全形顯示（insertMixedLiteral）
+		}
+		n := len([]rune(s.mixedText()))
+		snap.SetSuggestion(snap.Cursor.Rune-n, n, text)
 	}
 }

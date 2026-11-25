@@ -10,15 +10,18 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL,
+};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
-    GetMonitorInfoW, GetTextExtentPoint32W, InvalidateRect, MonitorFromPoint, MonitorFromWindow, ReleaseDC,
-    SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
-    DEFAULT_CHARSET, DEFAULT_PITCH, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL, DT_NOPREFIX,
-    DT_WORDBREAK, FW_NORMAL,
-    HBRUSH, HDC, HFONT, HGDIOBJ, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS,
-    PAINTSTRUCT, TRANSPARENT,
+    BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
+    GetGlyphOutlineW, GetMonitorInfoW, GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, MonitorFromPoint,
+    MonitorFromWindow, ReleaseDC, RoundRect, SelectObject, SetBkMode, SetTextColor, TextOutW, CLEARTYPE_QUALITY,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DRAW_TEXT_FORMAT, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL,
+    DT_NOPREFIX, DT_WORDBREAK, FIXED, FW_NORMAL, GDI_ERROR, GGO_METRICS, GLYPHMETRICS, HBRUSH, HDC, HFONT,
+    HGDIOBJ, HPEN, MAT2, MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID,
+    TEXTMETRICW, TRANSPARENT,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::{
@@ -78,6 +81,14 @@ pub fn create(instance: HINSTANCE, class: PCWSTR, owner: Option<HWND>) -> window
             Some(instance),
             None,
         )?;
+        // Windows 11 由系統畫小圓角（跟著螢幕縮放）；Windows 10 沒有這個屬性，照舊是自己畫的方角 1 px 框。
+        let corner = DWMWCP_ROUNDSMALL;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const _ as *const c_void,
+            std::mem::size_of_val(&corner) as u32,
+        );
         let state: Box<State> = Box::new(RefCell::new(None));
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as _); // `as _`：32 位元版是 SetWindowLongW（i32）
         Ok(hwnd)
@@ -101,37 +112,93 @@ struct Theme {
     bg: HBRUSH,
     border: HBRUSH,
     highlight: HBRUSH,
+    badge: HBRUSH,
+    badge_pen: HPEN,
     pad: i32,
     row: i32,
     small_row: i32,
+    /// 提示、讀音提示、Tab 提示的列高；一般版面同 common::notice_row，命中測試才對得上。
+    heading_row: i32,
+    badge_height: i32,
+    /// 小按鍵圓角的直徑（RoundRect 的 ellipse）。
+    badge_round: i32,
+    /// 小視窗與游標上下的間距。
+    gap: i32,
+    /// 字、小字的墨水中線離字格頂端多遠：文字照這個對齊列的中線（ink_middle）。
+    font_middle: i32,
+    small_middle: i32,
     colors: Palette,
 }
 
 thread_local! {
-    static THEME: RefCell<Option<(u32, Rc<Theme>)>> = const { RefCell::new(None) };
+    static THEMES: RefCell<Option<(u32, [Option<Rc<Theme>>; 2])>> = const { RefCell::new(None) };
 }
 
-/// 字型與筆刷依 DPI 與系統主題快取；系統變更訊息會清除快取。
-fn theme(dpi: u32) -> Rc<Theme> {
-    THEME.with(|cell| {
+/// 字型與筆刷依 DPI、是否精簡與系統主題快取；系統變更訊息會清除快取。
+fn theme(dpi: u32, compact: bool) -> Rc<Theme> {
+    THEMES.with(|cell| {
         let mut cached = cell.borrow_mut();
-        if let Some((d, t)) = cached.as_ref() {
-            if *d == dpi {
-                return t.clone();
-            }
+        if !matches!(cached.as_ref(), Some((d, _)) if *d == dpi) {
+            *cached = Some((dpi, [None, None]));
         }
-        let t = Rc::new(build_theme(dpi));
-        *cached = Some((dpi, t.clone()));
-        t
+        let (_, themes) = cached.as_mut().unwrap();
+        themes[compact as usize]
+            .get_or_insert_with(|| Rc::new(build_theme(dpi, compact)))
+            .clone()
     })
 }
 
-fn build_theme(dpi: u32) -> Theme {
+fn clear_themes() {
+    THEMES.with(|cell| *cell.borrow_mut() = None);
+}
+
+/// 只有提示、沒有候選時用精簡版面：字小一號、留白與列高較小（使用者 11-25 要求）。
+/// 有候選時照原本的大小，Tab 提示跟候選同字級（#118）。
+fn compact(m: &UiMessage) -> bool {
+    m.candidates.is_empty()
+}
+
+/// 目前字型下這段字的墨水中線離字格頂端多遠（各字墨水外框的聯集）。TextOutW 從字格頂端畫，字格上下的
+/// 留白依字型而不同，照字格置中字會偏低。量不到時用字格的一半。
+unsafe fn ink_middle(hdc: HDC, text: &str) -> i32 {
+    const ONE: FIXED = FIXED { fract: 0, value: 1 };
+    const ZERO: FIXED = FIXED { fract: 0, value: 0 };
+    const IDENTITY: MAT2 = MAT2 { eM11: ONE, eM12: ZERO, eM21: ZERO, eM22: ONE };
+    let mut tm = TEXTMETRICW::default();
+    let _ = GetTextMetricsW(hdc, &mut tm);
+    let (mut top, mut bottom) = (i32::MAX, i32::MIN);
+    for c in text.chars() {
+        let mut gm = GLYPHMETRICS::default();
+        if GetGlyphOutlineW(hdc, c as u32, GGO_METRICS, &mut gm, 0, None, &IDENTITY) == GDI_ERROR as u32 {
+            return tm.tmHeight / 2;
+        }
+        let ink = tm.tmAscent - gm.gmptGlyphOrigin.y;
+        top = top.min(ink);
+        bottom = bottom.max(ink + gm.gmBlackBoxY as i32);
+    }
+    if top < bottom { (top + bottom) / 2 } else { tm.tmHeight / 2 }
+}
+
+/// 一般文字對齊列中線的基準：「中」的墨水中線，英文、數字照同一條基線排。
+unsafe fn font_middle(font: HFONT) -> i32 {
+    let hdc = GetDC(None);
+    let old = SelectObject(hdc, HGDIOBJ(font.0));
+    let middle = ink_middle(hdc, "中");
+    SelectObject(hdc, old);
+    ReleaseDC(None, hdc);
+    middle
+}
+
+fn build_theme(dpi: u32, compact: bool) -> Theme {
     let scale = |px: i32| (px * dpi as i32 + 48) / 96;
     let colors = palette::system_palette();
+    // 一般：字 18、小字 13、留白 8、列高 28、小字列高 20、小按鍵高 18；
+    // 精簡（使用者 11-25 選的）：字 14、小字 12、留白 3、列高 17、小按鍵高 14。
+    let (font_px, small_px, pad, row, small_row, badge_height) =
+        if compact { (14, 12, 3, 17, 18, 14) } else { (18, 13, 8, 28, 20, 18) };
     unsafe {
         let font = CreateFontW(
-            -scale(18),
+            -scale(font_px),
             0,
             0,
             0,
@@ -147,7 +214,7 @@ fn build_theme(dpi: u32) -> Theme {
             w!("Microsoft JhengHei UI"),
         );
         let small = CreateFontW(
-            -scale(13),
+            -scale(small_px),
             0,
             0,
             0,
@@ -189,10 +256,18 @@ fn build_theme(dpi: u32) -> Theme {
             bg: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.background)),
             border: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.border)),
             highlight: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.selection)),
+            badge: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.badge)),
+            badge_pen: CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(colors.badge_border)),
             colors,
-            pad: scale(8),
-            row: scale(28),
-            small_row: scale(20),
+            pad: scale(pad),
+            row: scale(row),
+            small_row: scale(small_row),
+            heading_row: if compact { scale(row) } else { notice_row(scale(small_row)) },
+            badge_height: scale(badge_height),
+            badge_round: scale(2) * 2,
+            gap: scale(2),
+            font_middle: font_middle(font),
+            small_middle: font_middle(small),
         }
     }
 }
@@ -206,6 +281,8 @@ impl Drop for Theme {
             let _ = DeleteObject(HGDIOBJ(self.bg.0));
             let _ = DeleteObject(HGDIOBJ(self.border.0));
             let _ = DeleteObject(HGDIOBJ(self.highlight.0));
+            let _ = DeleteObject(HGDIOBJ(self.badge.0));
+            let _ = DeleteObject(HGDIOBJ(self.badge_pen.0));
         }
     }
 }
@@ -283,8 +360,11 @@ fn break_note(words: &[(&str, i32)], space: i32, width: i32) -> String {
     out
 }
 
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
+}
+
 fn note_text(hdc: HDC, font: HFONT, note: &str, width: i32) -> Vec<u16> {
-    let wide = |s: &str| s.encode_utf16().collect::<Vec<_>>();
     let words: Vec<(&str, i32)> = note
         .split(' ')
         .filter(|w| !w.is_empty())
@@ -293,11 +373,41 @@ fn note_text(hdc: HDC, font: HFONT, note: &str, width: i32) -> Vec<u16> {
     wide(&break_note(&words, measure(hdc, font, &wide(" ")), width))
 }
 
-/// 補全提示列開頭的「⇥ 」：用提示色畫，後面的補全內容用一般文字色（#118）。
-const SUGGESTION_MARK: &str = "⇥ ";
+/// 小按鍵的寬度：字寬加左右留白。
+fn badge_width(hdc: HDC, t: &Theme, label: &str) -> i32 {
+    measure(hdc, t.small, &wide(label)) + t.pad
+}
 
-/// 直排候選窗的一列是什麼：提示（一般字級、強調色）、讀音提示（一般字級、一般文字色，#162）、
-/// 補全提示（一般字級，⇥ 用提示色、內容一般文字色，#118）、小字（標題、頁碼）、候選。
+/// 小按鍵佔的寬度：再加與後面文字的間距。
+fn badge_advance(hdc: HDC, t: &Theme, label: &str) -> i32 {
+    badge_width(hdc, t, label) + t.pad / 2
+}
+
+/// 這一列開頭要畫的小按鍵；沒有就是 0 寬。
+fn row_badge_advance(hdc: HDC, t: &Theme, row: Row) -> i32 {
+    row.badge().map_or(0, |label| badge_advance(hdc, t, label))
+}
+
+/// 在列頂 y、列高 row 的這一列從 x 畫小按鍵，回傳後面文字的起點。畫完還原字型，字色要另外設。
+unsafe fn draw_badge(hdc: HDC, t: &Theme, label: &str, x: i32, y: i32, row: i32) -> i32 {
+    let (width, height) = (badge_width(hdc, t, label), t.badge_height);
+    let text = wide(label);
+    let top = y + (row - height) / 2;
+    let brush = SelectObject(hdc, HGDIOBJ(t.badge.0));
+    let pen = SelectObject(hdc, HGDIOBJ(t.badge_pen.0));
+    let _ = RoundRect(hdc, x, top, x + width, top + height, t.badge_round, t.badge_round);
+    SelectObject(hdc, pen);
+    SelectObject(hdc, brush);
+    let font = SelectObject(hdc, HGDIOBJ(t.small.0));
+    SetTextColor(hdc, windows::Win32::Foundation::COLORREF(t.colors.hint));
+    // 小按鍵裡的字照它自己的墨水置中：「Tab」的大寫在字身上半部，照「中」對齊會偏高。
+    let _ = TextOutW(hdc, x + t.pad / 2, top + height / 2 - ink_middle(hdc, label), &text);
+    SelectObject(hdc, font);
+    x + badge_advance(hdc, t, label)
+}
+
+/// 直排候選窗的一列是什麼：提示（一般字級、強調色）、讀音提示（一般字級、一般文字色，前面畫「空白」小按鍵，#162）、
+/// Tab 提示（一般字級，前面畫「Tab」小按鍵，#118）、小字（標題、頁碼）、候選。
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Row {
     Notice,
@@ -311,9 +421,18 @@ impl Row {
     /// 列高；提示列與 common::header_height 用同一個值，命中測試才對得上。
     fn height(self, t: &Theme) -> i32 {
         match self {
-            Row::Notice | Row::Reading | Row::Suggestion => notice_row(t.small_row),
+            Row::Notice | Row::Reading | Row::Suggestion => t.heading_row,
             Row::Small => t.small_row,
             Row::Candidate { .. } => t.row,
+        }
+    }
+    /// 列開頭的小按鍵：小字畫在圓角底色上，像鍵盤上的鍵。讀音提示後面是按空白之後的讀音（20 的 ㄉㄢ），
+    /// Tab 提示後面是按 Tab 之後的樣子（另外、ㄕㄣ）。
+    fn badge(self) -> Option<&'static str> {
+        match self {
+            Row::Reading => Some("空白"),
+            Row::Suggestion => Some("Tab"),
+            _ => None,
         }
     }
     fn font(self, t: &Theme) -> HFONT {
@@ -323,13 +442,26 @@ impl Row {
             t.font
         }
     }
-    /// 字的高度（垂直置中用）。
-    fn glyph(self, t: &Theme) -> i32 {
+    /// 字的墨水中線離字格頂端多遠（垂直置中用）。
+    fn middle(self, t: &Theme) -> i32 {
         if self == Row::Small {
-            t.small_row - 4
+            t.small_middle
         } else {
-            t.row - 6
+            t.font_middle
         }
+    }
+}
+
+/// 候選之前的一列是哪一種。
+fn heading_row(m: &UiMessage, heading: &str) -> Row {
+    if !m.notice.is_empty() && heading == m.notice {
+        Row::Notice
+    } else if !m.reading.is_empty() && heading == m.reading {
+        Row::Reading
+    } else if heading == m.suggestion {
+        Row::Suggestion
+    } else {
+        Row::Small
     }
 }
 
@@ -337,15 +469,7 @@ impl Row {
 fn lines(m: &UiMessage) -> Vec<(Vec<u16>, Row)> {
     let mut out = Vec::new();
     for heading in header_lines(m) {
-        if !m.notice.is_empty() && heading == m.notice {
-            out.push((heading.encode_utf16().collect(), Row::Notice));
-        } else if !m.reading.is_empty() && heading == m.reading {
-            out.push((heading.encode_utf16().collect(), Row::Reading));
-        } else if heading == m.suggestion {
-            out.push((format!("{SUGGESTION_MARK}{heading}").encode_utf16().collect(), Row::Suggestion));
-        } else {
-            out.push((heading.encode_utf16().collect(), Row::Small));
-        }
+        out.push((heading.encode_utf16().collect(), heading_row(m, heading)));
     }
     for (i, c) in m.candidates.iter().enumerate() {
         out.push((
@@ -426,7 +550,8 @@ fn grid_size(m: &UiMessage, max_width: i32, t: &Theme, hdc: HDC) -> (i32, i32) {
         .iter()
         .map(|h| {
             let font = if large_heading(m, h) { t.font } else { t.small };
-            measure(hdc, font, &h.encode_utf16().collect::<Vec<_>>()) + t.pad * 3
+            let badge = row_badge_advance(hdc, t, heading_row(m, h));
+            badge + measure(hdc, font, &h.encode_utf16().collect::<Vec<_>>()) + t.pad * 3
         })
         .max()
         .unwrap_or(0);
@@ -452,10 +577,14 @@ unsafe fn draw_grid(m: &UiMessage, hdc: HDC, width: i32, t: &Theme) {
         } else {
             (t.colors.hint, t.small, t.small_row)
         };
+        let x = match heading_row(m, heading).badge() {
+            Some(label) => draw_badge(hdc, t, label, t.pad, heading_y, height),
+            None => t.pad,
+        };
         SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color));
         SelectObject(hdc, HGDIOBJ(font.0));
         let text: Vec<u16> = heading.encode_utf16().collect();
-        let _ = TextOutW(hdc, t.pad, heading_y, &text);
+        let _ = TextOutW(hdc, x, heading_y, &text);
         heading_y += height;
     }
     SelectObject(hdc, small_old);
@@ -648,7 +777,7 @@ pub fn present(hwnd: HWND, m: UiMessage) {
             return;
         }
         let dpi = GetDpiForWindow(hwnd);
-        let t = theme(dpi);
+        let t = theme(dpi, compact(&m));
         // 位置：游標下方；放不下就放上方；不超出該螢幕的工作區。
         let monitor = MonitorFromPoint(POINT { x: m.x, y: m.y }, MONITOR_DEFAULTTONEAREST);
         let mut info = MONITORINFO {
@@ -663,7 +792,8 @@ pub fn present(hwnd: HWND, m: UiMessage) {
         let mut width = 0;
         let mut height = t.pad;
         for (text, row) in lines(&m) {
-            width = width.max(measure(hdc, row.font(&t), &text));
+            let badge = row_badge_advance(hdc, &t, row);
+            width = width.max(badge + measure(hdc, row.font(&t), &text));
             height += row.height(&t);
         }
         width += t.pad * 3;
@@ -674,7 +804,7 @@ pub fn present(hwnd: HWND, m: UiMessage) {
             (width, height) = grid_size(&m, info.rcWork.right - info.rcWork.left, &t, hdc);
         }
         ReleaseDC(Some(hwnd), hdc);
-        let bounds = placement::place(m.x, m.y, m.h, width, height, info.rcWork);
+        let bounds = placement::place(m.x, m.y, m.h, t.gap, width, height, info.rcWork);
         // 提示幾秒後自動收起（WM_TIMER）；每次新的提示重新計時，沒有提示或標示中的說明就不計時。
         if notice_expires(&m) {
             SetTimer(Some(hwnd), NOTICE_TIMER, NOTICE_MS, None);
@@ -707,9 +837,18 @@ fn paint(hwnd: HWND) {
 /// WM_PAINT 與 WM_PRINTCLIENT 共用繪製，截圖不必讀取整個桌面。
 unsafe fn draw(hwnd: HWND, hdc: HDC) {
     let dpi = GetDpiForWindow(hwnd);
-    let t = theme(dpi);
+    let message = current(hwnd);
+    let t = theme(dpi, message.as_ref().is_some_and(compact));
     let mut rc = RECT::default();
     let _ = GetClientRect(hwnd, &mut rc);
+    // 系統畫的圓角外框跟自己畫的 1 px 框同色（Windows 10 沒有這個屬性，失敗無妨）。
+    let border = COLORREF(t.colors.border);
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_BORDER_COLOR,
+        &border as *const _ as *const c_void,
+        std::mem::size_of_val(&border) as u32,
+    );
     FillRect(hdc, &rc, t.border);
     let inner = RECT {
         left: rc.left + 1,
@@ -719,7 +858,7 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
     };
     FillRect(hdc, &inner, t.bg);
     SetBkMode(hdc, TRANSPARENT);
-    if let Some(m) = current(hwnd) {
+    if let Some(m) = message {
         if uses_grid(&m) {
             draw_grid(&m, hdc, rc.right - rc.left, &t);
             return;
@@ -747,18 +886,13 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
                 t.colors.text
             };
             let old = SelectObject(hdc, HGDIOBJ(kind.font(&t).0));
-            let top = y + (row - kind.glyph(&t)) / 2;
+            let top = y + row / 2 - kind.middle(&t);
             let mut x = inner.left + t.pad;
-            let mut body = &text[..];
-            if kind == Row::Suggestion {
-                let mark = SUGGESTION_MARK.encode_utf16().count().min(text.len());
-                SetTextColor(hdc, windows::Win32::Foundation::COLORREF(t.colors.hint));
-                let _ = TextOutW(hdc, x, top, &text[..mark]);
-                x += measure(hdc, kind.font(&t), &text[..mark]);
-                body = &text[mark..];
+            if let Some(label) = kind.badge() {
+                x = draw_badge(hdc, &t, label, x, y, row);
             }
             SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color));
-            let _ = TextOutW(hdc, x, top, body);
+            let _ = TextOutW(hdc, x, top, &text);
             SelectObject(hdc, old);
             y += row;
         }
@@ -770,13 +904,13 @@ pub fn handle(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LR
     unsafe {
         match msg {
             WM_SETTINGCHANGE | WM_SYSCOLORCHANGE | WM_THEMECHANGED => {
-                THEME.with(|cell| *cell.borrow_mut() = None);
+                clear_themes();
                 let _ = InvalidateRect(Some(hwnd), None, true);
                 Some(LRESULT(0))
             }
             WM_DPICHANGED => {
                 // SetWindowPos 可同步觸發此訊息；排程重新量測，避免遞迴。
-                THEME.with(|cell| *cell.borrow_mut() = None);
+                clear_themes();
                 let _ = PostMessageW(Some(hwnd), WM_ZUIN_REFLOW, WPARAM(0), LPARAM(0));
                 Some(LRESULT(0))
             }
@@ -832,7 +966,7 @@ fn without_notice(mut m: UiMessage) -> UiMessage {
 }
 
 unsafe fn click(hwnd: HWND, m: &UiMessage, lparam: LPARAM) {
-    let t = theme(GetDpiForWindow(hwnd));
+    let t = theme(GetDpiForWindow(hwnd), compact(m));
     let y = ((lparam.0 >> 16) as u16) as i16 as i32;
     let target = HWND(m.target as usize as *mut c_void);
     let mut target_pid = 0;
@@ -957,8 +1091,8 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert_eq!(String::from_utf16(&rows[0].0).unwrap(), m.notice);
         assert_eq!(rows[0].1, Row::Notice);
-        assert_eq!(String::from_utf16(&rows[1].0).unwrap(), "⇥ 補全");
-        assert_eq!(rows[1].1, Row::Suggestion, "補全提示跟候選同字級（#118）");
+        assert_eq!(String::from_utf16(&rows[1].0).unwrap(), "補全", "Tab 小按鍵另外畫，不在文字裡");
+        assert_eq!(rows[1].1, Row::Suggestion, "Tab 提示跟候選同字級（#118）");
         assert_eq!(rows[2].1, Row::Candidate { highlighted: true });
         // 收起提示後標題回來。
         let rows = lines(&without_notice(m.clone()));
@@ -987,6 +1121,21 @@ mod tests {
         assert_eq!(String::from_utf16(&rows[0].0).unwrap(), "ㄉㄢ");
         assert_eq!(rows[0].1, Row::Reading);
         assert!(without_notice(m).show, "提示收起不影響讀音提示");
+    }
+
+    #[test]
+    fn reading_and_tab_rows_start_with_key_badges() {
+        // 20：〔空白〕ㄉㄢ／〔Tab〕20；只有提示、沒有候選時用精簡版面。
+        let m = UiMessage {
+            show: true,
+            reading: "ㄉㄢ".into(),
+            suggestion: "20".into(),
+            ..Default::default()
+        };
+        let badges: Vec<_> = lines(&m).iter().map(|(_, row)| row.badge()).collect();
+        assert_eq!(badges, [Some("空白"), Some("Tab")]);
+        assert!(compact(&m));
+        assert_eq!(Row::Notice.badge(), None);
     }
 
     #[test]

@@ -181,7 +181,7 @@ func TestServerOverUnixSocket(t *testing.T) {
 		}
 		snap = r.Snapshot
 	}
-	if snap.Text() != "麻婆" || snap.Suggestion != "豆腐" {
+	if snap.Text() != "麻婆" || snap.Suggestion != "麻婆豆腐" {
 		t.Errorf("%q %q", snap.Text(), snap.Suggestion)
 	}
 	r := call(Envelope{Op: OpHandle, Session: open.Session, Req: &proto.Request{Type: proto.Key, Key: proto.KeyEnter}})

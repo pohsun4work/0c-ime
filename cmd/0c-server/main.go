@@ -130,6 +130,7 @@ func main() {
 	eng.Fuzzy = config.FuzzyConfig()
 	eng.InputStyle = config.Rules()
 	eng.EnglishAutocomplete = config.EnglishAutocomplete
+	eng.KeepRedundantKeys = !config.RedundantKeys
 	eng.CandidateBeforeCursor = config.CandidateCursor == "before"
 	eng.EscKeepComposition = !config.EscClear
 	eng.AdvanceAfterSelect = config.AdvanceAfterSelect

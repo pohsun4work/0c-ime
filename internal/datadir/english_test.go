@@ -101,7 +101,7 @@ func TestFullEnglishPackKeepsFirstToneChinese(t *testing.T) {
 		return snap
 	}
 	do(proto.Request{Type: proto.Key, Key: "u"})
-	if snap := do(proto.Request{Type: proto.Key, Key: "p"}); snap.Text() != "ㄧㄣ" || snap.SuggestionEdit != nil {
+	if snap := do(proto.Request{Type: proto.Key, Key: "p"}); snap.Text() != "ㄧㄣ" || snap.Suggestion != "up" { // Tab 換成原按鍵
 		t.Fatalf("pending: %+v", snap)
 	}
 	do(proto.Request{Type: proto.Key, Key: " "})

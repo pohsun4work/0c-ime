@@ -16,7 +16,7 @@ func learningSession() *Session {
 func TestCompletionLearningKeepsSourceUntilCommit(t *testing.T) {
 	s := learningSession()
 	s.Opt.Suggest.AttentionCost = 0
-	if snap := typeSyl(s, "ㄇㄚˊ"); snap.Suggestion != "煩" {
+	if snap := typeSyl(s, "ㄇㄚˊ"); snap.Suggestion != "麻煩" {
 		t.Fatalf("測試需要麻煩的補全：%+v", snap)
 	}
 	key(s, proto.KeyTab)

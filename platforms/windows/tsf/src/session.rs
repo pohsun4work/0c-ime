@@ -46,6 +46,9 @@ pub struct Snapshot {
     pub notices: Vec<String>,
     /// 讀音提示（#162）：中英混打時照字面顯示的數字按空白會組成的注音（20 → ㄉㄢ）；沒有時為空字串。
     pub reading_hint: String,
+    /// Tab 提示、讀音提示要換的那段從組字的第幾個字開始（顯示字元）；小視窗對齊那段開頭（anchor_utf16）。
+    pub suggestion_start: Option<usize>,
+    pub reading_start: Option<usize>,
 }
 
 impl Snapshot {
@@ -56,6 +59,18 @@ impl Snapshot {
 
     pub fn text(&self) -> String {
         self.preedit.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    /// 小視窗左緣對齊的位置（UTF-16）：Tab、空白要換的那段開頭，打長句時小視窗不會一直往右跑；
+    /// 沒有這種提示（只有候選或一次性提示）就是游標。
+    pub fn anchor_utf16(&self) -> usize {
+        let suggestion = self.suggestion_start.filter(|_| !self.suggestion.is_empty());
+        let reading = self.reading_start.filter(|_| !self.reading_hint.is_empty());
+        let Some(start) = suggestion.into_iter().chain(reading).min() else {
+            return self.cursor_utf16;
+        };
+        let utf16: usize = self.text().chars().take(start).map(char::len_utf16).sum();
+        utf16.min(self.cursor_utf16)
     }
 
     /// 字寬是每個 session 的狀態；這些字元在半形可直接交給宿主，不能只看靜態 idle_keys。
@@ -547,6 +562,9 @@ fn parse(reply: &Value) -> Snapshot {
     s.english_pending = j["english_pending"].as_bool().unwrap_or(false);
     s.english_can_start = j["english_can_start"].as_bool().unwrap_or(false);
     s.reading_hint = j["reading_hint"]["text"].as_str().unwrap_or("").to_string();
+    let start = |v: &Value| v["start"].as_u64().map(|n| n as usize);
+    s.suggestion_start = start(&j["suggestion_edit"]);
+    s.reading_start = start(&j["reading_hint"]);
     if let Some(notices) = j["notices"].as_array() {
         s.notices = notices
             .iter()
@@ -720,6 +738,27 @@ mod parse_tests {
         assert_eq!(s.preedit[0].style, "reading");
         let old = parse(&json!({"snapshot": {"handled": true}}));
         assert!(old.reading_hint.is_empty());
+    }
+
+    #[test]
+    fn popup_anchors_at_the_start_of_the_replaced_part() {
+        // 「今天ㄙㄨ」游標在最後，Tab 換的是 ㄙㄨ：小視窗對齊第 3 個字。
+        let s = parse(&json!({"snapshot": {"preedit": [{"text": "今天ㄙㄨ"}], "cursor": {"rune": 4, "utf16": 4},
+            "suggestion": "gjn", "suggestion_edit": {"start": 2, "length": 2, "text": "gjn"}}}));
+        assert_eq!(s.anchor_utf16(), 2);
+        // 讀音提示與 Tab 提示換同一段（20）；前面的 Emoji 佔兩個 UTF-16 單位。
+        let s = parse(&json!({"snapshot": {"preedit": [{"text": "😀20"}], "cursor": {"rune": 3, "utf16": 4},
+            "suggestion": "20", "suggestion_edit": {"start": 1, "length": 2, "text": "20"},
+            "reading_hint": {"start": 1, "length": 2, "text": "ㄉㄢ"}}}));
+        assert_eq!(s.anchor_utf16(), 2);
+        // 沒有提示（只有候選）或舊引擎沒有範圍：照游標。
+        let s = parse(&json!({"snapshot": {"preedit": [{"text": "今天"}], "cursor": {"rune": 2, "utf16": 2}, "suggestion": "今天的"}}));
+        assert_eq!(s.anchor_utf16(), 2);
+        let mut s = parse(&json!({"snapshot": {"preedit": [{"text": "今天另"}], "cursor": {"rune": 3, "utf16": 3},
+            "suggestion": "另外", "suggestion_edit": {"start": 2, "length": 1, "text": "另外"}}}));
+        assert_eq!(s.anchor_utf16(), 2);
+        s.suggestion.clear();
+        assert_eq!(s.anchor_utf16(), 3, "提示清掉後照游標");
     }
 
     #[test]

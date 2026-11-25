@@ -107,8 +107,8 @@ func TestPickedZhuyinSettlesAsZhuyin(t *testing.T) {
 	}
 }
 
-// 點注音鍵（proto.Symbol）接在顯示成注音的待定按鍵後面：交給注音接著組（nm 再點 ㄅ 是 ㄅㄩ）；
-// 照原按鍵留下的不被注音鍵收回（nm ← → 再點 ㄅ 是 nmㄅ）。
+// 點注音鍵（proto.Symbol）接在顯示成注音的待定按鍵後面：交給注音接著組（nj 再點 ㄅ 是 ㄅㄨ）；
+// 照原按鍵留下的不被注音鍵收回（nj ← → 再點 ㄅ 是 njㄅ）。
 func TestSymbolAfterPendingKeys(t *testing.T) {
 	tap := func(s *Session, syms string) proto.Snapshot {
 		var snap proto.Snapshot
@@ -118,7 +118,7 @@ func TestSymbolAfterPendingKeys(t *testing.T) {
 		return snap
 	}
 	for _, tc := range []struct{ keys, syms, want string }{
-		{"nm", "ㄅ", "ㄅㄩ"},
+		{"nj", "ㄅ", "ㄅㄨ"},
 		{"ji", "ˇ", "我"},
 		{"e", "ㄅㄚ", "ㄅㄚ"},
 	} {
@@ -129,11 +129,11 @@ func TestSymbolAfterPendingKeys(t *testing.T) {
 		}
 	}
 	s := newSession()
-	mixedType(s, "nm")
+	mixedType(s, "nj")
 	key(s, proto.KeyLeft)
 	key(s, proto.KeyRight)
-	if got := tap(s, "ㄅ").Text(); got != "nmㄅ" {
-		t.Errorf("nm ← → 再點 ㄅ：%q", got)
+	if got := tap(s, "ㄅ").Text(); got != "njㄅ" {
+		t.Errorf("nj ← → 再點 ㄅ：%q", got)
 	}
 }
 
