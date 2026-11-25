@@ -342,6 +342,11 @@ impl State {
         Some((p.composition.clone(), p.line())).filter(|(_, line)| *line != Line::Host)
     }
 
+    /// 正在組字，卻還沒開始判斷背景深淺（拿不到組字位置：Chromium 剛打的字還沒排版）。
+    fn tone_waiting(&self) -> bool {
+        self.composing && self.composition.is_some() && self.tone.is_none() && self.callback.is_some()
+    }
+
     /// 套用完一鍵之後：新的組字第一次拿到位置（`caret`）就開始在背景判斷深淺；同一個組字已經用結果
     /// （`painted_with`）畫過底線，讀完的通知就不必再重畫。沒在組字就丟掉。
     fn follow_tone(&mut self, caret: Option<RECT>, painted_with: Line) {
@@ -643,8 +648,9 @@ impl TextService_Impl {
                 None => None,
             };
         }
-        // 版面晚到（Chromium）時由 OnLayoutChange 補上位置；沒有候選就不必收通知。
-        self.watch_layout(if show { ctx } else { None });
+        // 版面晚到（Chromium）時由 OnLayoutChange 補上位置：候選窗要用，組字還沒拿到位置、不能判斷背景深淺時也要。
+        let tone_waiting = self.state.borrow().tone_waiting();
+        self.watch_layout(if show || tone_waiting { ctx } else { None });
         // Chromium 的視窗組字時，滑鼠按下先送出組字（#322，見 click.rs）。經系統相容層的 IMM32 程式不在此列。
         let composing_in = {
             let st = self.state.borrow();
@@ -654,8 +660,13 @@ impl TextService_Impl {
         self.state.borrow_mut().click_context = composing_in.filter(|_| click::watching_for(self)).cloned();
         // 套用期間略過的版面通知：現在 shown 與 revision 已是這一鍵的，位置不是準確的就補查一次。
         let exact = placed.is_some_and(|(_, source)| source == caret::Source::Exact);
-        if self.layout_missed.take() && show && !exact && self.applying.get() == 0 {
-            self.requery(ctx);
+        if self.layout_missed.take() && self.applying.get() == 0 {
+            if show && !exact {
+                self.requery(ctx);
+            }
+            if tone_waiting {
+                self.locate_tone(ctx);
+            }
         }
         snapshot.handled
     }
@@ -785,6 +796,40 @@ impl TextService_Impl {
                 Some(format!("OnLayoutChange 後無法重查位置：{}", e.code()))
             });
         }
+    }
+
+    /// 版面變了，組字還在等位置判斷背景深淺：另開唯讀 edit session 查組字開頭的位置，查到就開始判斷。
+    fn locate_tone(&self, ctx: Option<&ITfContext>) {
+        let request = {
+            let Ok(st) = self.state.try_borrow() else { return };
+            if !st.tone_waiting() {
+                return;
+            }
+            (st.client_id, st.composition.clone())
+        };
+        let (Some(ctx), (client, Some(composition))) = (ctx, request) else { return };
+        let service = self.to_object();
+        let target = composition.clone();
+        let requested = edit::request_locate(
+            ctx,
+            client,
+            Some(composition),
+            0,
+            0,
+            Box::new(move |located| service.tone_located(&target, located)),
+        );
+        if let Err(e) = requested {
+            zdebug!("tone locate {}", e.code());
+        }
+    }
+
+    fn tone_located(&self, composition: &ITfComposition, located: edit::Located) {
+        let Ok(mut st) = self.state.try_borrow_mut() else { return };
+        if st.composition.as_ref() != Some(composition) || !st.tone_waiting() {
+            return;
+        }
+        // 不在這裡取消版面通知（可能正在 OnLayoutChange 裡）：下一鍵 present_in_edit 會重新決定要不要收。
+        st.follow_tone(located.ok(), Line::Host);
     }
 
     /// OnLayoutChange 之後的唯讀 edit session 查到的位置：還是同一個畫面版本、位置變了才補送。
@@ -1922,7 +1967,7 @@ impl ITfThreadMgrEventSink_Impl for TextService_Impl {
 
 impl ITfTextLayoutSink_Impl for TextService_Impl {
     /// 宿主的版面變了（Chromium：renderer 送回剛打的字的位置）。有候選窗時另開唯讀 edit session 重查游標，
-    /// 位置不同或之前沒有位置才補送給候選窗（#144）。
+    /// 位置不同或之前沒有位置才補送給候選窗（#144）；組字還沒拿到位置時，查到就開始判斷背景深淺（tone.rs）。
     fn OnLayoutChange(
         &self,
         pic: Ref<'_, ITfContext>,
@@ -1940,6 +1985,7 @@ impl ITfTextLayoutSink_Impl for TextService_Impl {
                 return Ok(());
             }
             self.requery(pic.as_ref());
+            self.locate_tone(pic.as_ref());
             Ok(())
         })
     }
