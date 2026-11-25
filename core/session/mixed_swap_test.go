@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/english"
@@ -13,8 +14,14 @@ import (
 // swapSession 是 repairSession 加上 單（20 的 ㄉㄢ）與字典收的縮寫 png。
 func swapSession() *Session {
 	s := repairSession()
-	s.model.Lex.(*lexicon.Mem).Add(lexicon.Entry{Surface: "單", Reading: zhuyin.ParseReading("ㄉㄢ"), PRW: 1})
-	s.English = english.New([]english.Word{{Text: "a", Weight: 65}, {Text: "hello", Weight: 65}, {Text: "png", Weight: 65}})
+	for _, e := range []struct{ w, r string }{{"單", "ㄉㄢ"}, {"音", "ㄧㄣ"}} {
+		s.model.Lex.(*lexicon.Mem).Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
+	}
+	var words []english.Word
+	for _, w := range []string{"a", "hello", "png", "up", "upon"} {
+		words = append(words, english.Word{Text: w, Weight: 65})
+	}
+	s.English = english.New(words)
 	return s
 }
 
@@ -54,12 +61,32 @@ func TestMixedTabSwapsToTheOther(t *testing.T) {
 			t.Errorf("%s Tab␣ 是 %q，要 %q", tc.keys, got, tc.space)
 		}
 	}
-	// 再按一次換回來
-	s := swapSession()
-	mixedType(s, "gjn")
-	key(s, proto.KeyTab)
-	if got := key(s, proto.KeyTab); got.Text() != "ㄙㄨ" || got.Suggestion != "gjn" {
-		t.Fatalf("gjn Tab Tab：%q 提示 %q", got.Text(), got.Suggestion)
+}
+
+// Tab 只在原樣與另一個之間換，再按一次換回原樣：up 換成原按鍵後不再換成補全 upon，補全 hello 換回 hel；
+// 數字換成原按鍵後跟原樣看起來一樣，之後在原按鍵與照順序的注音之間換。小視窗一律顯示下一個。
+func TestMixedTabTogglesBack(t *testing.T) {
+	for _, want := range [][]string{
+		{"up", "ㄧㄣ", "up", "ㄧㄣ"},
+		{"hel", "hel", "hello", "hel"},
+		{"gjn", "ㄙㄨ", "gjn", "ㄙㄨ"},
+		{"png", "png", "ㄕㄣ", "png"},
+		{"20", "20", "20", "ㄉㄢ", "20"},
+	} {
+		s := swapSession()
+		snap := mixedType(s, want[0])
+		got := []string{snap.Text()}
+		for range want[2:] {
+			hint := snap.Suggestion
+			snap = key(s, proto.KeyTab)
+			if hint != snap.Text() {
+				t.Errorf("%s：小視窗是 %q，Tab 之後是 %q", want[0], hint, snap.Text())
+			}
+			got = append(got, snap.Text())
+		}
+		if !slices.Equal(got, want[1:]) {
+			t.Errorf("%s 連按 Tab：%q，要 %q", want[0], got, want[1:])
+		}
 	}
 }
 

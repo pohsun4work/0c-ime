@@ -18,6 +18,7 @@ mix-13	nm{Enter}	nm	P5；官方送出 ㄙㄩ
 mix-14	url␣	交	保留官方：反過來打的英文字
 mix-15	e(	e(	P5；官方 ㄍ（
 mix-16	e{KP2}e	e2e	P5；官方 ㄍ2e
+mix-17	go␣up␣and␣down	go␣up␣and␣down	P7：看後面打的英文換回英數，up␣ 用掉的空白要還回來（華碩打到 an 換回 up）；官方 go␣音and␣down
 sel-01	w8␣{Down}{pick:它}2k7t/6ru␣	它的成績	P8：手選過就固定
 red-01	wuuuu/6	停	P6；官方 wuuu營
 red-02	wu//6	停	P6

@@ -106,34 +106,47 @@ struct Theme {
     pad: i32,
     row: i32,
     small_row: i32,
+    /// 提示、讀音提示、Tab 提示的列高；一般版面同 common::notice_row，命中測試才對得上。
+    heading_row: i32,
     colors: Palette,
 }
 
 thread_local! {
-    static THEME: RefCell<Option<(u32, Rc<Theme>)>> = const { RefCell::new(None) };
+    static THEMES: RefCell<Option<(u32, [Option<Rc<Theme>>; 2])>> = const { RefCell::new(None) };
 }
 
-/// 字型與筆刷依 DPI 與系統主題快取；系統變更訊息會清除快取。
-fn theme(dpi: u32) -> Rc<Theme> {
-    THEME.with(|cell| {
+/// 字型與筆刷依 DPI、是否精簡與系統主題快取；系統變更訊息會清除快取。
+fn theme(dpi: u32, compact: bool) -> Rc<Theme> {
+    THEMES.with(|cell| {
         let mut cached = cell.borrow_mut();
-        if let Some((d, t)) = cached.as_ref() {
-            if *d == dpi {
-                return t.clone();
-            }
+        if !matches!(cached.as_ref(), Some((d, _)) if *d == dpi) {
+            *cached = Some((dpi, [None, None]));
         }
-        let t = Rc::new(build_theme(dpi));
-        *cached = Some((dpi, t.clone()));
-        t
+        let (_, themes) = cached.as_mut().unwrap();
+        themes[compact as usize]
+            .get_or_insert_with(|| Rc::new(build_theme(dpi, compact)))
+            .clone()
     })
 }
 
-fn build_theme(dpi: u32) -> Theme {
+fn clear_themes() {
+    THEMES.with(|cell| *cell.borrow_mut() = None);
+}
+
+/// 只有提示、沒有候選時用精簡版面：字小一號、留白與列高較小（使用者 11-25 要求）。
+/// 有候選時照原本的大小，Tab 提示跟候選同字級（#118）。
+fn compact(m: &UiMessage) -> bool {
+    m.candidates.is_empty()
+}
+
+fn build_theme(dpi: u32, compact: bool) -> Theme {
     let scale = |px: i32| (px * dpi as i32 + 48) / 96;
     let colors = palette::system_palette();
+    // 一般：字 18、小字 13、留白 8、列高 28、小字列高 20；精簡：字 15、小字 12、留白 5、列高 22、小字列高 18。
+    let (font_px, small_px, pad, row, small_row) = if compact { (15, 12, 5, 22, 18) } else { (18, 13, 8, 28, 20) };
     unsafe {
         let font = CreateFontW(
-            -scale(18),
+            -scale(font_px),
             0,
             0,
             0,
@@ -149,7 +162,7 @@ fn build_theme(dpi: u32) -> Theme {
             w!("Microsoft JhengHei UI"),
         );
         let small = CreateFontW(
-            -scale(13),
+            -scale(small_px),
             0,
             0,
             0,
@@ -194,9 +207,10 @@ fn build_theme(dpi: u32) -> Theme {
             badge: CreateSolidBrush(windows::Win32::Foundation::COLORREF(colors.badge)),
             badge_pen: CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(colors.badge_border)),
             colors,
-            pad: scale(8),
-            row: scale(28),
-            small_row: scale(20),
+            pad: scale(pad),
+            row: scale(row),
+            small_row: scale(small_row),
+            heading_row: if compact { scale(row) } else { notice_row(scale(small_row)) },
         }
     }
 }
@@ -289,8 +303,11 @@ fn break_note(words: &[(&str, i32)], space: i32, width: i32) -> String {
     out
 }
 
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
+}
+
 fn note_text(hdc: HDC, font: HFONT, note: &str, width: i32) -> Vec<u16> {
-    let wide = |s: &str| s.encode_utf16().collect::<Vec<_>>();
     let words: Vec<(&str, i32)> = note
         .split(' ')
         .filter(|w| !w.is_empty())
@@ -299,23 +316,25 @@ fn note_text(hdc: HDC, font: HFONT, note: &str, width: i32) -> Vec<u16> {
     wide(&break_note(&words, measure(hdc, font, &wide(" ")), width))
 }
 
-/// Tab 提示列開頭的小按鍵：小字「Tab」畫在圓角底色上，像鍵盤上的鍵，後面接按 Tab 之後的樣子（另外、ㄕㄣ）。
-const TAB_BADGE: &str = "Tab";
-
 /// 小按鍵的寬度：字寬加左右留白。
-fn badge_width(hdc: HDC, t: &Theme) -> i32 {
-    measure(hdc, t.small, &TAB_BADGE.encode_utf16().collect::<Vec<_>>()) + t.pad
+fn badge_width(hdc: HDC, t: &Theme, label: &str) -> i32 {
+    measure(hdc, t.small, &wide(label)) + t.pad
 }
 
 /// 小按鍵佔的寬度：再加與後面文字的間距。
-fn badge_advance(hdc: HDC, t: &Theme) -> i32 {
-    badge_width(hdc, t) + t.pad / 2
+fn badge_advance(hdc: HDC, t: &Theme, label: &str) -> i32 {
+    badge_width(hdc, t, label) + t.pad / 2
+}
+
+/// 這一列開頭要畫的小按鍵；沒有就是 0 寬。
+fn row_badge_advance(hdc: HDC, t: &Theme, row: Row) -> i32 {
+    row.badge().map_or(0, |label| badge_advance(hdc, t, label))
 }
 
 /// 在列頂 y、列高 row 的這一列從 x 畫小按鍵，回傳後面文字的起點。畫完還原字型，字色要另外設。
-unsafe fn draw_badge(hdc: HDC, t: &Theme, x: i32, y: i32, row: i32) -> i32 {
-    let label: Vec<u16> = TAB_BADGE.encode_utf16().collect();
-    let (width, height) = (badge_width(hdc, t), t.small_row - 2);
+unsafe fn draw_badge(hdc: HDC, t: &Theme, label: &str, x: i32, y: i32, row: i32) -> i32 {
+    let (width, height) = (badge_width(hdc, t, label), t.small_row - 2);
+    let text = wide(label);
     let top = y + (row - height) / 2;
     let brush = SelectObject(hdc, HGDIOBJ(t.badge.0));
     let pen = SelectObject(hdc, HGDIOBJ(t.badge_pen.0));
@@ -324,13 +343,13 @@ unsafe fn draw_badge(hdc: HDC, t: &Theme, x: i32, y: i32, row: i32) -> i32 {
     SelectObject(hdc, brush);
     let font = SelectObject(hdc, HGDIOBJ(t.small.0));
     SetTextColor(hdc, windows::Win32::Foundation::COLORREF(t.colors.hint));
-    let _ = TextOutW(hdc, x + t.pad / 2, top + (height - Row::Small.glyph(t)) / 2, &label);
+    let _ = TextOutW(hdc, x + t.pad / 2, top + (height - Row::Small.glyph(t)) / 2, &text);
     SelectObject(hdc, font);
-    x + badge_advance(hdc, t)
+    x + badge_advance(hdc, t, label)
 }
 
-/// 直排候選窗的一列是什麼：提示（一般字級、強調色）、讀音提示（一般字級、一般文字色，#162）、
-/// Tab 提示（一般字級，前面畫 Tab 小按鍵，#118）、小字（標題、頁碼）、候選。
+/// 直排候選窗的一列是什麼：提示（一般字級、強調色）、讀音提示（一般字級、一般文字色，前面畫「空白」小按鍵，#162）、
+/// Tab 提示（一般字級，前面畫「Tab」小按鍵，#118）、小字（標題、頁碼）、候選。
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Row {
     Notice,
@@ -344,9 +363,18 @@ impl Row {
     /// 列高；提示列與 common::header_height 用同一個值，命中測試才對得上。
     fn height(self, t: &Theme) -> i32 {
         match self {
-            Row::Notice | Row::Reading | Row::Suggestion => notice_row(t.small_row),
+            Row::Notice | Row::Reading | Row::Suggestion => t.heading_row,
             Row::Small => t.small_row,
             Row::Candidate { .. } => t.row,
+        }
+    }
+    /// 列開頭的小按鍵：小字畫在圓角底色上，像鍵盤上的鍵。讀音提示後面是按空白之後的讀音（20 的 ㄉㄢ），
+    /// Tab 提示後面是按 Tab 之後的樣子（另外、ㄕㄣ）。
+    fn badge(self) -> Option<&'static str> {
+        match self {
+            Row::Reading => Some("空白"),
+            Row::Suggestion => Some("Tab"),
+            _ => None,
         }
     }
     fn font(self, t: &Theme) -> HFONT {
@@ -366,20 +394,24 @@ impl Row {
     }
 }
 
+/// 候選之前的一列是哪一種。
+fn heading_row(m: &UiMessage, heading: &str) -> Row {
+    if !m.notice.is_empty() && heading == m.notice {
+        Row::Notice
+    } else if !m.reading.is_empty() && heading == m.reading {
+        Row::Reading
+    } else if heading == m.suggestion {
+        Row::Suggestion
+    } else {
+        Row::Small
+    }
+}
+
 /// 一列列的內容。候選之前的列由 header_lines 決定（提示優先：有提示時不畫標題）。
 fn lines(m: &UiMessage) -> Vec<(Vec<u16>, Row)> {
     let mut out = Vec::new();
     for heading in header_lines(m) {
-        let row = if !m.notice.is_empty() && heading == m.notice {
-            Row::Notice
-        } else if !m.reading.is_empty() && heading == m.reading {
-            Row::Reading
-        } else if heading == m.suggestion {
-            Row::Suggestion
-        } else {
-            Row::Small
-        };
-        out.push((heading.encode_utf16().collect(), row));
+        out.push((heading.encode_utf16().collect(), heading_row(m, heading)));
     }
     for (i, c) in m.candidates.iter().enumerate() {
         out.push((
@@ -460,7 +492,7 @@ fn grid_size(m: &UiMessage, max_width: i32, t: &Theme, hdc: HDC) -> (i32, i32) {
         .iter()
         .map(|h| {
             let font = if large_heading(m, h) { t.font } else { t.small };
-            let badge = if *h == m.suggestion { badge_advance(hdc, t) } else { 0 };
+            let badge = row_badge_advance(hdc, t, heading_row(m, h));
             badge + measure(hdc, font, &h.encode_utf16().collect::<Vec<_>>()) + t.pad * 3
         })
         .max()
@@ -487,7 +519,10 @@ unsafe fn draw_grid(m: &UiMessage, hdc: HDC, width: i32, t: &Theme) {
         } else {
             (t.colors.hint, t.small, t.small_row)
         };
-        let x = if heading == m.suggestion { draw_badge(hdc, t, t.pad, heading_y, height) } else { t.pad };
+        let x = match heading_row(m, heading).badge() {
+            Some(label) => draw_badge(hdc, t, label, t.pad, heading_y, height),
+            None => t.pad,
+        };
         SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color));
         SelectObject(hdc, HGDIOBJ(font.0));
         let text: Vec<u16> = heading.encode_utf16().collect();
@@ -684,7 +719,7 @@ pub fn present(hwnd: HWND, m: UiMessage) {
             return;
         }
         let dpi = GetDpiForWindow(hwnd);
-        let t = theme(dpi);
+        let t = theme(dpi, compact(&m));
         // 位置：游標下方；放不下就放上方；不超出該螢幕的工作區。
         let monitor = MonitorFromPoint(POINT { x: m.x, y: m.y }, MONITOR_DEFAULTTONEAREST);
         let mut info = MONITORINFO {
@@ -699,7 +734,7 @@ pub fn present(hwnd: HWND, m: UiMessage) {
         let mut width = 0;
         let mut height = t.pad;
         for (text, row) in lines(&m) {
-            let badge = if row == Row::Suggestion { badge_advance(hdc, &t) } else { 0 };
+            let badge = row_badge_advance(hdc, &t, row);
             width = width.max(badge + measure(hdc, row.font(&t), &text));
             height += row.height(&t);
         }
@@ -744,7 +779,8 @@ fn paint(hwnd: HWND) {
 /// WM_PAINT 與 WM_PRINTCLIENT 共用繪製，截圖不必讀取整個桌面。
 unsafe fn draw(hwnd: HWND, hdc: HDC) {
     let dpi = GetDpiForWindow(hwnd);
-    let t = theme(dpi);
+    let message = current(hwnd);
+    let t = theme(dpi, message.as_ref().is_some_and(compact));
     let mut rc = RECT::default();
     let _ = GetClientRect(hwnd, &mut rc);
     FillRect(hdc, &rc, t.border);
@@ -756,7 +792,7 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
     };
     FillRect(hdc, &inner, t.bg);
     SetBkMode(hdc, TRANSPARENT);
-    if let Some(m) = current(hwnd) {
+    if let Some(m) = message {
         if uses_grid(&m) {
             draw_grid(&m, hdc, rc.right - rc.left, &t);
             return;
@@ -786,8 +822,8 @@ unsafe fn draw(hwnd: HWND, hdc: HDC) {
             let old = SelectObject(hdc, HGDIOBJ(kind.font(&t).0));
             let top = y + (row - kind.glyph(&t)) / 2;
             let mut x = inner.left + t.pad;
-            if kind == Row::Suggestion {
-                x = draw_badge(hdc, &t, x, y, row);
+            if let Some(label) = kind.badge() {
+                x = draw_badge(hdc, &t, label, x, y, row);
             }
             SetTextColor(hdc, windows::Win32::Foundation::COLORREF(color));
             let _ = TextOutW(hdc, x, top, &text);
@@ -802,13 +838,13 @@ pub fn handle(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LR
     unsafe {
         match msg {
             WM_SETTINGCHANGE | WM_SYSCOLORCHANGE | WM_THEMECHANGED => {
-                THEME.with(|cell| *cell.borrow_mut() = None);
+                clear_themes();
                 let _ = InvalidateRect(Some(hwnd), None, true);
                 Some(LRESULT(0))
             }
             WM_DPICHANGED => {
                 // SetWindowPos 可同步觸發此訊息；排程重新量測，避免遞迴。
-                THEME.with(|cell| *cell.borrow_mut() = None);
+                clear_themes();
                 let _ = PostMessageW(Some(hwnd), WM_ZUIN_REFLOW, WPARAM(0), LPARAM(0));
                 Some(LRESULT(0))
             }
@@ -864,7 +900,7 @@ fn without_notice(mut m: UiMessage) -> UiMessage {
 }
 
 unsafe fn click(hwnd: HWND, m: &UiMessage, lparam: LPARAM) {
-    let t = theme(GetDpiForWindow(hwnd));
+    let t = theme(GetDpiForWindow(hwnd), compact(m));
     let y = ((lparam.0 >> 16) as u16) as i16 as i32;
     let target = HWND(m.target as usize as *mut c_void);
     let mut target_pid = 0;
@@ -1019,6 +1055,21 @@ mod tests {
         assert_eq!(String::from_utf16(&rows[0].0).unwrap(), "ㄉㄢ");
         assert_eq!(rows[0].1, Row::Reading);
         assert!(without_notice(m).show, "提示收起不影響讀音提示");
+    }
+
+    #[test]
+    fn reading_and_tab_rows_start_with_key_badges() {
+        // 20：〔空白〕ㄉㄢ／〔Tab〕20；只有提示、沒有候選時用精簡版面。
+        let m = UiMessage {
+            show: true,
+            reading: "ㄉㄢ".into(),
+            suggestion: "20".into(),
+            ..Default::default()
+        };
+        let badges: Vec<_> = lines(&m).iter().map(|(_, row)| row.badge()).collect();
+        assert_eq!(badges, [Some("空白"), Some("Tab")]);
+        assert!(compact(&m));
+        assert_eq!(Row::Notice.badge(), None);
     }
 
     #[test]

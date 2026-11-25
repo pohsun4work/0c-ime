@@ -319,14 +319,28 @@ func (s *Session) keepMixedDisplay(previous []decode.Seg, at, delta int) {
 }
 
 // mixedSwap：待定按鍵按 Tab 換成的另一個樣子，也就是小視窗顯示的那一個；回傳換過去的狀態與它在組字區的文字。
+// Tab 只在原樣與另一個之間換，再按一次換回原樣（ㄧㄣ → up → ㄧㄣ、hel → helped → hel）：
 //   - 顯示修正讀音的（gjn 的 ㄙㄨ）、照順序組得成字的英文詞（up 的 ㄧㄣ）、按空白會組成中文的數字（20）：
 //     換成原按鍵（choice 1），之後的空白就是空白。
-//   - 照英文顯示的：英文補全（hel → helped）優先，其次是選過原按鍵的照順序注音（20 → ㄉㄢ）、
-//     修正讀音（字典收的 png → ㄕㄣ，choice 3），最後是拼字修正。
+//   - 照英文顯示的：英文補全（hel → helped）優先，其次是修正讀音（字典收的 png → ㄕㄣ，choice 3），最後是拼字修正。
+//   - 換過的換回原樣；原樣看起來跟現在一樣時（20 換成的原按鍵）換成照順序的注音（20 → ㄉㄢ → 20）。
 func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 	p := s.mixed
-	if p.raw == "" || p.accepted != "" || s.cand != nil || s.english || s.englishWord {
+	if p.raw == "" || s.cand != nil || s.english || s.englishWord {
 		return p, "", false
+	}
+	if p.accepted != "" || p.choice == 1 || p.choice == 3 {
+		back := p.with(0)
+		if p.accepted != "" {
+			back = p // 換成英文詞之前的樣子
+			back.accepted = ""
+		}
+		if text := s.mixedTextOf(back); p.accepted != "" || text != s.mixedText() {
+			return back, text, true
+		}
+	}
+	if c, ok := s.mixedComposer(p.raw); ok && p.choice == 1 && zhuyin.Completable(zhuyin.Syllable(c.String())) {
+		return p.with(2), c.String(), true
 	}
 	switch p.choice {
 	case 2, 3:
@@ -352,9 +366,6 @@ func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 			}
 		}
 	}
-	if c, ok := s.mixedComposer(p.raw); ok && p.choice == 1 && zhuyin.Completable(zhuyin.Syllable(c.String())) {
-		return p.with(2), c.String(), true
-	}
 	if text, ok := s.repairedText(p.raw); ok {
 		return p.with(3), text, true
 	}
@@ -370,6 +381,15 @@ func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 func (p pendingKeys) with(choice int) pendingKeys {
 	p.choice = choice
 	return p
+}
+
+// mixedTextOf：待定按鍵換成 p 時組字區的樣子。
+func (s *Session) mixedTextOf(p pendingKeys) string {
+	saved := s.mixed
+	s.mixed = p
+	text := s.mixedText()
+	s.mixed = saved
+	return text
 }
 
 // mixedSuggestion：Tab 換成的英文詞（補全或拼字修正），不是英文時是空字串。
