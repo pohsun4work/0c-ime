@@ -63,12 +63,29 @@ func TestMixedTabSwapsToTheOther(t *testing.T) {
 	}
 }
 
-// Tab 只在原樣與另一個之間換，再按一次換回原樣：up 換成原按鍵後不再換成補全 upon，補全 hello 換回 hel；
+// 英文補全收下就定了：hel → hello 之後沒有小視窗，再按 Tab 不換。↓ 選了原按鍵是明確選英文，Tab 換成補全（up → upon）。
+func TestMixedTabCompletionStays(t *testing.T) {
+	for _, tc := range []struct{ keys, pick, want string }{{"hel", "", "hello"}, {"up", "up", "upon"}} {
+		s := swapSession()
+		mixedType(s, tc.keys)
+		if tc.pick != "" {
+			key(s, proto.KeyDown)
+			pickText(t, s, tc.pick)
+		}
+		if got := key(s, proto.KeyTab); got.Text() != tc.want || got.Suggestion != "" {
+			t.Fatalf("%s Tab：%q 提示 %q", tc.keys, got.Text(), got.Suggestion)
+		}
+		if got := key(s, proto.KeyTab).Text(); got != tc.want {
+			t.Errorf("%s Tab Tab：%q", tc.keys, got)
+		}
+	}
+}
+
+// Tab 換來的再按 Tab 換回原樣：up 換成原按鍵後不再換成補全 upon；
 // 數字換成原按鍵後跟原樣看起來一樣，之後在原按鍵與照順序的注音之間換。小視窗一律顯示下一個。
 func TestMixedTabTogglesBack(t *testing.T) {
 	for _, want := range [][]string{
 		{"up", "ㄧㄣ", "up", "ㄧㄣ"},
-		{"hel", "hel", "hello", "hel"},
 		{"gjn", "ㄙㄨ", "gjn", "ㄙㄨ"},
 		{"png", "png", "ㄕㄣ", "png"},
 		{"20", "20", "20", "ㄉㄢ", "20"},

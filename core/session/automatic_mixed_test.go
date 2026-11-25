@@ -177,9 +177,11 @@ func TestMixedFirstToneEnglishCollisions(t *testing.T) {
 			mixedType(s, tc.raw)
 			key(s, proto.KeyDown)
 			pickText(t, s, tc.raw)
-			// Tab 只在打出來的樣子與另一個之間換：選了英文再按 Tab 換回注音，不換成補全（P6）
-			if snap := key(s, proto.KeyTab); snap.Text() != tc.reading || snap.Suggestion != tc.raw {
-				t.Fatalf("Tab after explicit English: %+v", snap)
+			if snap := key(s, proto.KeyTab); snap.Text() != tc.completion {
+				t.Fatalf("explicit English completion: %+v", snap)
+			}
+			if snap := key(s, proto.KeyEscape); snap.Text() != tc.raw {
+				t.Fatalf("English completion undo: %+v", snap)
 			}
 			s = fresh()
 			mixedType(s, "ji3"+tc.raw+" ji3")
