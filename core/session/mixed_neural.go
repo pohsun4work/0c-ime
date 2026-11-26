@@ -27,6 +27,9 @@ const (
 	mixedNeuralNBest = 8
 	// mixedNeuralMin：這一鍵剩下的期限不到這麼多就不評分，照規則、留到下一鍵：超過期限的評分會讓下一個請求等它算完。
 	mixedNeuralMin = 10 * time.Millisecond
+	// mixedBusyKeys：評分超過期限（電腦忙）時，連同這一鍵共這麼多鍵不問神經、照規則，之後再試；
+	// 忙時照樣送，評分會偶爾超過 worker 的硬時限（-neural-timeout），worker 被殺要停 3 秒。
+	mixedBusyKeys = 8
 	// mixedNeuralKeys、mixedNeuralSyllables：後段最多幾個按鍵、幾個音節。
 	mixedNeuralKeys      = 16
 	mixedNeuralSyllables = 4
@@ -45,7 +48,7 @@ type mixedSplit struct {
 
 // neuralMixedTone：同一種切法（同切點同讀音）的同音字以 rerank.Choose 選代表，各切法比代表的神經分數
 // （修正扣分，repairPenalty），最好的不是規則結果 act、而且高出 mixedNeuralMargin 才換；評分器沒有、失敗或超過期限照規則。
-// 結果是中文音節時另回傳之後要回頭再比的紀錄（revisitMixed；位置由呼叫端填）。decided：神經比過或不用比；
+// 結果是中文音節或照原樣接空白時另回傳之後要回頭再比的紀錄（revisitMixed；位置由呼叫端填）。decided：神經比過或不用比；
 // 現在不能問、超過期限的是 false，之後能問時可以再算。
 func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone rune) (_ mixedToneAction, _ *mixedRevisit, decided bool) {
 	if !s.mixedNeuralReady() {
@@ -95,10 +98,13 @@ func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone run
 	} else {
 		act = mixedToneAction{kind: mixedToneSyllable, at: sp.at, syls: sp.syls}
 	}
-	// 整串組成一個音節的只有英文字典的詞、英數詞（up␣ 的 音、mp3 的 允）回頭再比，純中文（c96 的 還）不比；
+	// 回頭再比的：照原樣接空白（win115␣ 的 win115，後文 後 讓 win11之 翻過來）、中文音節；整串組成一個音節的
+	// 只有英文字典的詞、英數詞（up␣ 的 音、mp3 的 允），純中文（c96 的 還）不比。
 	// 贏其他切法 mixedRevisitGap 以上的（cl3 的 好）後文也翻不過來，不比。
-	if act.kind != mixedToneSyllable || act.at == 0 && len(act.syls) == 1 && !s.mixedEnglishWord(raw) &&
-		english.Alnum(raw+key) != english.AlnumKeysSecond {
+	literal := act.kind == mixedToneLiteral && key == " "
+	chinese := act.kind == mixedToneSyllable && (act.at > 0 || len(act.syls) > 1 || s.mixedEnglishWord(raw) ||
+		english.Alnum(raw+key) == english.AlnumKeysSecond)
+	if !literal && !chinese {
 		return act, nil, true
 	}
 	for n := range splits {
@@ -122,14 +128,16 @@ func (s *Session) scoreTexts(texts []string, end int, deadline time.Duration) ([
 		return nil, errTextsUnusable
 	}
 	scores, err := s.Rerank.Texts.ScoreTexts(req, deadline)
-	if err == nil && (len(scores) != len(texts) || slices.ContainsFunc(scores, func(x float64) bool { return !finite(x) })) {
+	if errors.Is(err, rerank.ErrDeadline) {
+		s.mixedBusy = mixedBusyKeys
+	} else if err == nil && (len(scores) != len(texts) || slices.ContainsFunc(scores, func(x float64) bool { return !finite(x) })) {
 		err = errTextsUnusable
 	}
 	return scores, err
 }
 
 const (
-	// mixedRevisitWindow：神經判成中文的決定，之後組字區多了字時最多再比幾次（約四個音節的後文）。
+	// mixedRevisitWindow：神經比過的決定，之後組字區多了字時最多再比幾次（約四個音節的後文）。
 	mixedRevisitWindow = 4
 	// mixedRevisitGap：決定時贏其他切法不到這麼多才回頭比（mp3 的 允 贏 3.4、後文 格式 但 翻過來 5.4）。
 	mixedRevisitGap = 10.0
@@ -137,7 +145,7 @@ const (
 	mixedRevisitReserve = 10 * time.Millisecond
 )
 
-// mixedRevisit 是最近一次神經判成中文的決定：之後組字區多了字時帶著後文再比一次，夠強才改，最多改一次。
+// mixedRevisit 是最近一次神經比過的決定（中文音節、照原樣接空白）：之後組字區多了字時帶著後文再比一次，夠強才改，最多改一次。
 type mixedRevisit struct {
 	start    int               // 這次決定插入的組字位置
 	syls     []zhuyin.Syllable // 插入的音節（s.syls[start:end()]）；之後被刪改就作廢
@@ -151,7 +159,7 @@ type mixedRevisit struct {
 
 func (v *mixedRevisit) end() int { return v.start + len(v.syls) }
 
-// revisitMixed：按鍵處理完、組字區多了字時，上一次神經判成中文的決定以「畫面上的樣子＋之後的字」對
+// revisitMixed：按鍵處理完、組字區多了字時，上一次神經比過的決定以「畫面上的樣子＋之後的字」對
 // 「其他切法的代表＋之後的字」再比一次，其他切法高出 mixedNeuralMargin（修正另扣分）就換掉；
 // 換過、比滿 mixedRevisitWindow 次、或被刪改、手選過就固定。期限是這一鍵 P7 還沒用掉的時間；不夠、
 // 或還有待定按鍵、打到一半的注音時留到下一鍵。
@@ -219,7 +227,8 @@ func (s *Session) revisitValid(v *mixedRevisit) bool {
 	return true
 }
 
-// replaceMixed 把組字區 [v.start, v.end()) 換成切法 sp，後面的字不動，游標回到最後。
+// replaceMixed 把組字區 [v.start, v.end()) 換成切法 sp，後面的字不動，游標回到最後；照原樣打出的空白換成中文時
+// 收回來當一聲（win115␣ → win11之）。
 // 換到一半時不評分（insertLiteral、insertMixedTyped 會先 refresh），換完整句重解評分一次（Rescore）。
 func (s *Session) replaceMixed(v *mixedRevisit, sp mixedSplit) {
 	allow := s.allowRerank
@@ -297,10 +306,10 @@ func (s *Session) spaceNeuralLiteral() bool {
 	return rule.kind == mixedToneSyllable && act.kind == mixedToneLiteral
 }
 
-// mixedNeuralReady：現在能問神經（不看待定按鍵本身）：有評分器、這個請求可以重排、這一鍵的期限還夠，
+// mixedNeuralReady：現在能問神經（不看待定按鍵本身）：有評分器、這個請求可以重排、這一鍵的期限還夠、不在忙時退讓，
 // 不在選字、私密、暫停、英文模式，待定按鍵沒選過。
 func (s *Session) mixedNeuralReady() bool {
-	return s.Rerank.Texts != nil && s.allowRerank && mixedNeuralDeadline-s.mixedSpent >= mixedNeuralMin &&
+	return s.Rerank.Texts != nil && s.allowRerank && mixedNeuralDeadline-s.mixedSpent >= mixedNeuralMin && s.mixedBusy == 0 &&
 		s.cand == nil && !s.private && !s.paused && !s.english && !s.englishWord && s.mixed.choice == 0 && s.mixed.accepted == ""
 }
 

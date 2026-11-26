@@ -680,6 +680,9 @@ func (s *Session) finishMixedTone(key string) bool {
 	} else {
 		act, visit, _ = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
 	}
+	if visit != nil && act.kind == mixedToneLiteral {
+		act = mixedToneAction{kind: mixedToneSpace} // 照原樣接空白（同 mixedKey）在這裡打，才記得到回頭比的位置
+	}
 	before := len(s.syls)
 	if !s.applyMixedTone(act, key, sym) {
 		return false

@@ -146,6 +146,40 @@ func TestMixedNeuralRevisit(t *testing.T) {
 	}
 }
 
+// 照原樣接空白的決定也回頭比：aq8␣ 神經判成照字面，接著打的 我 讓 a趴 比較好時換掉，空白收回來當一聲。
+func TestMixedNeuralRevisitLiteral(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scores map[string]float64
+		want   string
+	}{
+		{"換成中文", map[string]float64{"aq8": 0, "a趴": -2, "a趴我": 0, "aq8 我": -10}, "a趴我"},
+		{"照字面比較好", map[string]float64{"aq8": 0, "a趴": -2, "aq8 我": 0, "a趴我": -10}, "aq8 我"},
+		{"決定時差太多不回頭比", map[string]float64{"aq8": 0, "a趴": -20, "a趴我": 0, "aq8 我": -10}, "aq8 我"},
+	} {
+		if got := repairCommit(splitSession(tc.scores, nil), "aq8 ji3"); got != tc.want {
+			t.Errorf("%s：送出 %q，要 %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// 評分超過期限時，連同那一鍵共 mixedBusyKeys 鍵不問神經，之後再試。
+func TestMixedNeuralBusyBackoff(t *testing.T) {
+	calls := 0
+	s := splitSession(nil, nil)
+	s.Rerank = rerank.Options{Weight: 2, Texts: textsFunc(func(rerank.TextsRequest) ([]float64, error) {
+		calls++
+		return nil, rerank.ErrDeadline
+	})}
+	// 第 2 鍵（up）問了、超過期限，第 3～9 鍵不問（第 10 鍵的 u 本來就不問）。
+	if got := mixedType(s, "up up up u").Text(); calls != 1 || got != "音音音ㄧ" {
+		t.Fatalf("忙時照規則、不問神經：顯示 %q，問了 %d 次", got, calls)
+	}
+	if mixedType(s, "p"); calls != 2 {
+		t.Errorf("第 11 鍵再試：問了 %d 次", calls)
+	}
+}
+
 // 回頭比最多 mixedRevisitWindow 次，換過就固定。
 func TestMixedNeuralRevisitWindow(t *testing.T) {
 	var seen []rerank.TextsRequest
@@ -200,7 +234,7 @@ func TestMixedDisplayFollowsSpace(t *testing.T) {
 	}
 }
 
-// 顯示時神經沒比到（超過期限）的決定，按空白時再問一次。
+// 顯示時神經沒比到（超過期限）的決定，忙時退讓結束後按空白時再問一次。
 func TestMixedSpaceRetriesUndecided(t *testing.T) {
 	fail := true
 	s := splitSession(nil, nil)
@@ -219,7 +253,7 @@ func TestMixedSpaceRetriesUndecided(t *testing.T) {
 	if got := mixedType(s, "up").Text(); got != "ㄧㄣ" {
 		t.Fatalf("超過期限照規則：顯示 %q", got)
 	}
-	fail = false
+	fail, s.mixedBusy = false, 0
 	if got := key(s, " ").Text(); got != "up " {
 		t.Errorf("空白再問神經：%q", got)
 	}
