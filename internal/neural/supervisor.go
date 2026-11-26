@@ -62,6 +62,15 @@ func openSupervisedAsync(c Config, load func(Config) (Manifest, error), open fun
 func (s *Supervisor) Options() rerank.Options { return s.manifest.options(s) }
 
 func (s *Supervisor) Score(r rerank.Request) ([]float64, error) {
+	return s.call(func(w *Worker) ([]float64, error) { return w.Score(r) })
+}
+
+func (s *Supervisor) ScoreTexts(r rerank.TextsRequest, deadline time.Duration) ([]float64, error) {
+	return s.call(func(w *Worker) ([]float64, error) { return w.ScoreTexts(r, deadline) })
+}
+
+// call 把請求交給目前的 worker；worker 因這次請求停用時在背景重啟。
+func (s *Supervisor) call(score func(*Worker) ([]float64, error)) ([]float64, error) {
 	s.mu.Lock()
 	w := s.current
 	if w == nil {
@@ -72,7 +81,7 @@ func (s *Supervisor) Score(r rerank.Request) ([]float64, error) {
 		return nil, ErrUnavailable
 	}
 	s.mu.Unlock()
-	scores, err := w.Score(r)
+	scores, err := score(w)
 	if err != nil && w.Dead() {
 		s.mu.Lock()
 		if s.current == w {
@@ -93,15 +102,7 @@ func (s *Supervisor) retire(w *Worker) {
 }
 
 // accumulate 需持有 s.mu。
-func (s *Supervisor) accumulate(w *Worker) {
-	st := w.Stats()
-	s.total.Calls += st.Calls
-	s.total.Scored += st.Scored
-	s.total.Timeouts += st.Timeouts
-	s.total.Errors += st.Errors
-	s.total.Unavailable += st.Unavailable
-	s.total.TotalUS += st.TotalUS
-}
+func (s *Supervisor) accumulate(w *Worker) { s.total.add(w.Stats()) }
 
 // maybeRestart 需持有 s.mu。
 func (s *Supervisor) maybeRestart() {
@@ -156,13 +157,7 @@ func (s *Supervisor) Stats() Stats {
 	defer s.mu.Unlock()
 	st := s.total
 	if s.current != nil {
-		c := s.current.Stats()
-		st.Calls += c.Calls
-		st.Scored += c.Scored
-		st.Timeouts += c.Timeouts
-		st.Errors += c.Errors
-		st.Unavailable += c.Unavailable
-		st.TotalUS += c.TotalUS
+		st.add(s.current.Stats())
 	}
 	return st
 }

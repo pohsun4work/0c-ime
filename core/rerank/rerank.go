@@ -64,6 +64,8 @@ type Options struct {
 	// ContextlessWeight >0 時，前文是空的請求改用這個融合權重（平台設定，例：手機沒前文 0.5，見 MobileWeight）；
 	// 0 一律用 Weight。單音節文字評分一定有前文，用 TextWeight。
 	ContextlessWeight float64
+	// Texts 是支援 ModeTexts 的評分器（中英混打的切法比較，P7）；nil 時混打照規則。
+	Texts TextsScorer
 }
 
 // Supported 採整例回退，不以刪除 Partial/Correction 路徑製造虛假的召回改善。
