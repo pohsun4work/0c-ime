@@ -66,6 +66,21 @@ def validate_tone_known(tone_known, count, allow_unknown_tones):
     return tone_known
 
 
+def encode_head(context, chars):
+    """[BOS] 前文最後 64 字 [SEP]，表外字是 UNK。"""
+    return [1] + [chars.get(c, 4) for c in context[-64:]] + [2]
+
+
+def tree_mask(L, S, parent):
+    """前 S 個位置（前文、共用的讀音）因果注意；之後每個節點注意前 S 個位置與自己的祖先（parent 裡沒有的是根）。"""
+    mask = np.zeros((L, L), dtype=bool); mask[:S, :S] = np.tril(np.ones((S, S), dtype=bool))
+    for q in range(S, L):
+        mask[q, :S] = True; a = q
+        while a is not None:
+            mask[q, a] = True; a = parent.get(a)
+    return mask
+
+
 def prepare(context, reading, candidates, maps, allow_partial=False, text_only=False, neutral_last=False,
             tone_known=None, allow_unknown_tones=False):
     """前綴樹輸入：[BOS] 前文 [SEP] 讀音 [OUT] 只出現一次，候選共同開頭共用節點。
@@ -111,7 +126,7 @@ def prepare(context, reading, candidates, maps, allow_partial=False, text_only=F
     branches = [[(0, 0)]] if text_only else [[sounds[-1], (0, 0)]]
     if neutral_last and not text_only and known[-1] and sounds[-1][1] != 5:
         branches.append([(sounds[-1][0], 5), (0, 0)])
-    head = [1] + [chars.get(c, 4) for c in context[-64:]] + [2]
+    head = encode_head(context, chars)
     shared = sounds[:-1]
     ids = head + [0] * len(shared)
     base_ids = [0] * len(head) + [b for b, _ in shared]
@@ -136,11 +151,7 @@ def prepare(context, reading, candidates, maps, allow_partial=False, text_only=F
                     ids.append(cids[i - 1]); base_ids.append(0); tones.append(0); types.append(2); positions.append(P + i - 1)
         nodes.append(node)
     L = len(ids)
-    mask = np.zeros((L, L), dtype=bool); mask[:S, :S] = np.tril(np.ones((S, S), dtype=bool))
-    for q in range(S, L):
-        mask[q, :S] = True; a = q
-        while a is not None:
-            mask[q, a] = True; a = parent.get(a)
+    mask = tree_mask(L, S, parent)
     proj = sorted({v for node in nodes for v in node.values()}); index = {p: i for i, p in enumerate(proj)}
     target_node = np.array([[index[node[tuple(c[:i])]] for i in range(n)] for node in nodes for c in encoded], dtype=np.int64)
     target_ids = np.array([[x - 6 for x in c] for _ in nodes for c in encoded], dtype=np.int64)
@@ -160,7 +171,7 @@ def prepare_texts(context, texts, chars):
         encoded = [[chars[c] for c in t] for t in texts]
     except KeyError as e:
         raise ValueError('unknown_character') from e
-    head = [1] + [chars.get(c, 4) for c in context[-64:]] + [2]
+    head = encode_head(context, chars)
     S = len(head)
     ids, positions, types = head + [3], list(range(S + 1)), [0] * (S + 1)
     parent = {S: None}
@@ -172,11 +183,7 @@ def prepare_texts(context, texts, chars):
                 node[key] = len(ids); parent[len(ids)] = node[key[:-1]]
                 ids.append(cids[i - 1]); positions.append(S + i); types.append(2)
     L = len(ids)
-    mask = np.zeros((L, L), dtype=bool); mask[:S, :S] = np.tril(np.ones((S, S), dtype=bool))
-    for q in range(S, L):
-        mask[q, :S] = True; a = q
-        while a is not None:
-            mask[q, a] = True; a = parent.get(a)
+    mask = tree_mask(L, S, parent)
     proj = sorted(set(node.values())); index = {p: i for i, p in enumerate(proj)}
     rows, owner = [], []
     for ti, cids in enumerate(encoded):
@@ -257,6 +264,8 @@ class Runtime:
         return raw.reshape(-1, count).max(0).tolist()   # 各讀音分支逐候選取最大
 
     def score_texts(self, request):
+        if not self.text_mode:
+            raise ValueError('unsupported_mode')
         texts = request.get('texts')
         inputs, owner = prepare_texts(request.get('context', ''), texts, self.maps[1])
         raw = self.session.run(['scores'], inputs)[0].astype(float)
@@ -283,10 +292,12 @@ def main():
             'reading': [base] * 2, 'candidates': [seg(chars[0] + chars[1]), seg(chars[2] + chars[3])],
             'allow_partial': runtime.allow_partial}
     runtime.score(warm)
-    runtime.score({'dictionary_sha256': a.dictionary, 'model_sha256': runtime.model_sha, 'context': ''.join(chars),
-                   'mode': 'texts', 'texts': [chars[0], chars[1] + chars[2]], 'allow_partial': runtime.allow_partial})
     ready = {'ready': True, 'schema': runtime.manifest['schema'], 'model_sha256': runtime.model_sha,
-             'dictionary_sha256': a.dictionary, 'allow_partial': runtime.allow_partial, 'modes': ['texts']}
+             'dictionary_sha256': a.dictionary, 'allow_partial': runtime.allow_partial}
+    if runtime.text_mode:   # texts 用 text task 的版面
+        runtime.score({'dictionary_sha256': a.dictionary, 'model_sha256': runtime.model_sha, 'context': ''.join(chars),
+                       'mode': 'texts', 'texts': [chars[0], chars[1] + chars[2]], 'allow_partial': runtime.allow_partial})
+        ready['modes'] = ['texts']
     if runtime.allow_unknown_tones:
         ready['tone_policy'] = runtime.manifest['tone_policy']
     print(json.dumps(ready), flush=True)

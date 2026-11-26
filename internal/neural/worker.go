@@ -164,17 +164,20 @@ func (m Manifest) desktopUnknownTones() bool { return false }
 
 // options 是套件宣告的融合設定；Worker 與 Supervisor 共用。權重照 manifest（PF512 為 2.0），不設 ContextlessWeight；
 // Bases 讓字表外的讀音在本機就照統計引擎；Chars 讓含字表外字元的候選在本機拿掉。
-// 序列模型套件另給 Texts（混打切法比較）；worker 就緒時沒宣告 rerank.ModeTexts 的話，ScoreTexts 在本機就回錯誤、照規則。
+// 有 text task 的序列模型套件另給 Texts（混打切法比較）；worker 就緒時沒宣告 rerank.ModeTexts 的話，ScoreTexts 在本機就回錯誤、照規則。
 func (m Manifest) options(scorer rerank.Scorer) rerank.Options {
 	o := rerank.Options{Scorer: scorer, Weight: m.Weight, Margin: m.Margin, AllowPartial: m.AllowPartial,
 		ContextRunes: contextRunes(m), HintGap: m.HintGap, TextWeight: m.TextWeight, TextMargin: m.TextMargin,
 		NeutralExpand: m.NeutralExpand, NeutralBases: neutralBases(m),
 		UnknownTones: m.desktopUnknownTones(), Bases: m.bases, Chars: m.chars}
-	if t, ok := scorer.(rerank.TextsScorer); ok && contextRunes(m) > 0 {
+	if t, ok := scorer.(rerank.TextsScorer); ok && m.textsMode() {
 		o.Texts = t
 	}
 	return o
 }
+
+// textsMode：texts 評分用 text task 的版面（不放讀音），套件要有前文與 text task。
+func (m Manifest) textsMode() bool { return contextRunes(m) > 0 && m.TextWeight > 0 }
 
 // supports 是送出前的檢查（rerank.Options.Supports）：桌面不送 tone_known，字表外的基底與字不送。不建 NeutralBases，每次請求都走。
 func (m Manifest) supports(r rerank.Request) bool {
@@ -372,7 +375,7 @@ func start(cmd *exec.Cmd, m Manifest, timeout time.Duration) (*Worker, error) {
 		return nil, startupError("neural worker", err, stderr.finish())
 	}
 	stderr.finish()
-	w.texts = contextRunes(m) > 0 && slices.Contains(ready.Modes, rerank.ModeTexts)
+	w.texts = m.textsMode() && slices.Contains(ready.Modes, rerank.ModeTexts)
 	return w, nil
 }
 
@@ -406,50 +409,48 @@ func (w *Worker) send(request []byte) <-chan frame {
 
 // await 等回覆到 timeout。逾時關閉管線並殺掉 worker，不排隊、不可晚套用。
 func (w *Worker) await(done <-chan frame, timeout time.Duration) ([]byte, error) {
-	timer := time.NewTimer(max(timeout, 0))
-	defer timer.Stop()
-	select {
-	case r := <-done:
+	if r, ok := wait(done, timeout); ok {
 		return r.b, r.err
-	case <-timer.C:
-		if r, ok := poll(done); ok {
-			return r.b, r.err
-		}
-		w.stop()
-		return nil, ErrTimeout
 	}
+	w.stop()
+	return nil, ErrTimeout
 }
 
-// awaitBy 等回覆到 deadline：沒回就留給下一次請求前讀掉丟棄，回 rerank.ErrDeadline；硬時限仍是送出後 timeout。
-// deadline 為零或不早於硬時限時同 await。
-func (w *Worker) awaitBy(done <-chan frame, deadline time.Time) ([]byte, error) {
-	hard := time.Now().Add(w.timeout)
+// awaitBy 等回覆：deadline 比硬時限 hard 早時只等到 deadline，沒回就留給下一次請求（w.late）、回 rerank.ErrDeadline，
+// worker 繼續算；否則等到 hard，逾時同 await。
+func (w *Worker) awaitBy(done <-chan frame, deadline, hard time.Time) ([]byte, error) {
 	if deadline.IsZero() || !deadline.Before(hard) {
-		return w.await(done, w.timeout)
+		return w.await(done, time.Until(hard))
 	}
-	timer := time.NewTimer(max(time.Until(deadline), 0))
-	defer timer.Stop()
-	select {
-	case r := <-done:
+	if r, ok := wait(done, time.Until(deadline)); ok {
 		return r.b, r.err
-	case <-timer.C:
-		if r, ok := poll(done); ok {
-			return r.b, r.err
-		}
-		w.late, w.lateBy = done, hard
-		return nil, rerank.ErrDeadline
 	}
+	w.late, w.lateBy = done, hard
+	return nil, rerank.ErrDeadline
 }
 
-// settle 讀掉上一個超過期限的回覆（不用），到它的硬時限還沒回就殺掉 worker。
-func (w *Worker) settle() error {
-	if w.late == nil {
+// settle 讀掉上一個超過期限的回覆（不用）。等法同 awaitBy：texts 評分的 deadline 前還沒回就繼續留著，
+// worker 還在算，送新的請求只會再晚一次。
+func (w *Worker) settle(deadline time.Time) error {
+	late := w.late
+	if late == nil {
 		return nil
 	}
-	late := w.late
 	w.late = nil
-	_, err := w.await(late, time.Until(w.lateBy))
+	_, err := w.awaitBy(late, deadline, w.lateBy)
 	return err
+}
+
+// wait 等 done 最多 d；時間到時再看一次剛好回來的。
+func wait(done <-chan frame, d time.Duration) (frame, bool) {
+	timer := time.NewTimer(max(d, 0))
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		return r, true
+	case <-timer.C:
+		return poll(done)
+	}
 }
 
 func poll(done <-chan frame) (frame, bool) {
@@ -476,48 +477,50 @@ func (w *Worker) Dead() bool   { w.mu.Lock(); defer w.mu.Unlock(); return w.dead
 func (w *Worker) Score(r rerank.Request) ([]float64, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.stats.Calls++
-	if w.dead {
-		w.stats.Unavailable++
-		return nil, ErrUnavailable
-	}
-	if !w.manifest.supports(r) || r.AllowPartial != w.manifest.AllowPartial || (r.Mode == rerank.ModeText && (w.manifest.TextWeight <= 0 || contextRunes(w.manifest) == 0)) {
-		return nil, errors.New("unsupported neural request")
-	}
+	supported := w.manifest.supports(r) && r.AllowPartial == w.manifest.AllowPartial && (r.Mode != rerank.ModeText || w.manifest.textsMode())
 	if contextRunes(w.manifest) == 0 {
 		r.Context = "" // 未宣告前文的套件永遠收不到文件文字
 	}
-	started := time.Now()
-	defer func() { w.stats.TotalUS += time.Since(started).Microseconds() }()
-	w.next++
-	return w.roundTrip(struct {
-		rerank.Request
-		envelope
-	}{r, w.envelope()}, r.Revision, len(r.Candidates), time.Time{})
+	return w.score(supported, func(e envelope) any {
+		return struct {
+			rerank.Request
+			envelope
+		}{r, e}
+	}, r.Revision, len(r.Candidates), time.Time{})
 }
 
 // ScoreTexts 是 rerank.TextsScorer。deadline 內沒回就回 rerank.ErrDeadline、照規則，worker 繼續算完，
 // 回覆在下一次請求前讀掉丟棄；從送出算起超過 timeout 一樣殺掉 worker。
 func (w *Worker) ScoreTexts(r rerank.TextsRequest, deadline time.Duration) ([]float64, error) {
-	started := time.Now()
+	by := time.Now().Add(deadline)
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	supported := w.texts && rerank.Options{Chars: w.manifest.chars}.SupportsTexts(r)
+	return w.score(supported, func(e envelope) any {
+		return struct {
+			Mode         string `json:"mode"`
+			AllowPartial bool   `json:"allow_partial,omitempty"`
+			rerank.TextsRequest
+			envelope
+		}{rerank.ModeTexts, w.manifest.AllowPartial, r, e}
+	}, r.Revision, len(r.Texts), by)
+}
+
+// score 需持有 w.mu：Score 與 ScoreTexts 共用的統計與檢查。supported 為 false 時在本機拒絕、不殺 worker；
+// request 以這次的身分組請求。
+func (w *Worker) score(supported bool, request func(envelope) any, revision, n int, deadline time.Time) ([]float64, error) {
 	w.stats.Calls++
 	if w.dead {
 		w.stats.Unavailable++
 		return nil, ErrUnavailable
 	}
-	if !w.texts || !rerank.SupportedTexts(r, w.manifest.chars) {
+	if !supported {
 		return nil, errors.New("unsupported neural request")
 	}
+	started := time.Now()
 	defer func() { w.stats.TotalUS += time.Since(started).Microseconds() }()
 	w.next++
-	return w.roundTrip(struct {
-		Mode         string `json:"mode"`
-		AllowPartial bool   `json:"allow_partial,omitempty"`
-		rerank.TextsRequest
-		envelope
-	}{rerank.ModeTexts, w.manifest.AllowPartial, r, w.envelope()}, r.Revision, len(r.Texts), started.Add(deadline))
+	return w.roundTrip(request(w.envelope()), revision, n, deadline)
 }
 
 // envelope 是請求的身分（w.next 是這次的 ID），回覆要原樣帶回。
@@ -541,8 +544,12 @@ func (w *Worker) roundTrip(request any, revision, n int, deadline time.Time) ([]
 	if len(b)+1 > frameLimit {
 		return nil, errors.New("neural request frame too large")
 	}
-	if err = w.settle(); err == nil {
-		b, err = w.awaitBy(w.send(append(b, '\n')), deadline)
+	if err = w.settle(deadline); err == nil {
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			err = rerank.ErrDeadline // 讀掉晚到的回覆就到期限了：不送
+		} else {
+			b, err = w.awaitBy(w.send(append(b, '\n')), deadline, time.Now().Add(w.timeout))
+		}
 	}
 	switch {
 	case errors.Is(err, rerank.ErrDeadline):

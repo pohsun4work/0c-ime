@@ -115,7 +115,7 @@ func contextChild(t *testing.T, schema, policy string) *Worker {
 }
 func textsChild(t *testing.T, mode string, timeout time.Duration) *Worker {
 	t.Helper()
-	return startChild(t, mode, Manifest{Schema: rerank.SequenceSchemaV1, ContextPolicy: "confirmed_left_64", Weight: 1}, timeout)
+	return startChild(t, mode, Manifest{Schema: rerank.SequenceSchemaV1, ContextPolicy: "confirmed_left_64", Weight: 1, TextWeight: 1}, timeout)
 }
 
 func TestContractsAndContextPolicy(t *testing.T) {
@@ -244,6 +244,10 @@ func TestScoreTexts(t *testing.T) {
 	if o := contextChild(t, "zuin-encoder-runtime-v1", "empty").Options(); o.Texts != nil {
 		t.Fatal("encoder package must not offer texts scoring")
 	}
+	// 沒有 text task（text_weight 0）的序列套件不給：texts 用 text task 的版面。
+	if o := startChild(t, "texts", Manifest{Schema: rerank.SequenceSchemaV1, ContextPolicy: "confirmed_left_64", Weight: 1}, time.Second); o.Options().Texts != nil || o.texts {
+		t.Fatal("package without text task must not offer texts scoring")
+	}
 }
 
 // 超過期限回 ErrDeadline、worker 不殺；下一個請求先讀掉晚到的回覆再送，身分照樣對得上。
@@ -261,6 +265,23 @@ func TestScoreTextsDeadlineKeepsWorker(t *testing.T) {
 	}
 	if st := w.Stats(); st.Late != 1 || st.Timeouts != 0 || st.Scored != 1 {
 		t.Fatalf("stats: %+v", st)
+	}
+}
+
+// 前一個 texts 還在算、期限內等不到時不送新的：連續超過期限的請求不疊在 worker 後面，之後的請求只等第一個算完。
+func TestScoreTextsDoesNotQueue(t *testing.T) {
+	w := textsChild(t, "texts_slow", time.Second)
+	start := time.Now()
+	for range 3 {
+		if _, err := w.ScoreTexts(textsRequest(), 10*time.Millisecond); !errors.Is(err, rerank.ErrDeadline) || w.Dead() {
+			t.Fatalf("deadline: err=%v dead=%v", err, w.Dead())
+		}
+	}
+	if scores, err := w.Score(request()); err != nil || len(scores) != 2 {
+		t.Fatalf("worker unusable: %v %v", scores, err)
+	}
+	if d := time.Since(start); d > 180*time.Millisecond { // 一個 texts 100 ms；疊上去的話要 300 ms
+		t.Fatalf("late texts requests queued: %v", d)
 	}
 }
 

@@ -18,7 +18,7 @@ type textsFunc func(rerank.TextsRequest) ([]float64, error)
 
 func (f textsFunc) ScoreTexts(r rerank.TextsRequest, _ time.Duration) ([]float64, error) { return f(r) }
 
-// splitSession 的英文字典有 hello、go、zip、up、the、thew、a、as；評分器照 scores 給分（沒列的 -100），收到的請求記在 seen。
+// splitSession 的英文字典有 hello、go、zip、up、upon、the、thew、a、as；評分器照 scores 給分（沒列的 -100），收到的請求記在 seen。
 func splitSession(scores map[string]float64, seen *[]rerank.TextsRequest) *Session {
 	lex, sys := lexicon.NewMem(), lm.NewMem()
 	for _, e := range []struct{ w, r string }{
@@ -30,7 +30,7 @@ func splitSession(scores map[string]float64, seen *[]rerank.TextsRequest) *Sessi
 	}
 	s := New(personal.NewModel(lex, sys))
 	var words []english.Word
-	for _, w := range []string{"hello", "go", "zip", "up", "the", "thew", "a", "as"} {
+	for _, w := range []string{"hello", "go", "zip", "up", "upon", "the", "thew", "a", "as"} {
 		words = append(words, english.Word{Text: w, Weight: 65})
 	}
 	s.English = english.New(words)
@@ -52,11 +52,6 @@ func splitSession(scores map[string]float64, seen *[]rerank.TextsRequest) *Sessi
 	return s
 }
 
-func splitCommit(s *Session, keys string) string {
-	mixedType(s, keys)
-	return key(s, proto.KeyEnter).Commit
-}
-
 // 神經選到的切法跟規則不同時換掉規則結果，包括換成照字面、照順序組成多個音節。
 func TestMixedNeuralChoosesSplit(t *testing.T) {
 	for _, tc := range []struct {
@@ -74,7 +69,7 @@ func TestMixedNeuralChoosesSplit(t *testing.T) {
 		// 第一次（qji3）照字面留著；接著打完 su3 時切成兩個音節（規則是 qji3你）
 		{"多個音節", "qji3su3", map[string]float64{"qji3": 0, "q我你": 0, "qji3你": -50}, "q我你"},
 	} {
-		if got := splitCommit(splitSession(tc.scores, nil), tc.keys); got != tc.want {
+		if got := repairCommit(splitSession(tc.scores, nil), tc.keys); got != tc.want {
 			t.Errorf("%s：%q 送出 %q，要 %q", tc.name, tc.keys, got, tc.want)
 		}
 	}
@@ -82,18 +77,18 @@ func TestMixedNeuralChoosesSplit(t *testing.T) {
 
 // 修正切法扣 mixedRepairPenalty：su;;␣ 的 s央（合併冗餘的 ;）要比照字面高出 6 分以上才換；規則結果也是修正時不扣。
 func TestMixedNeuralRepairPenalty(t *testing.T) {
-	if got := splitCommit(splitSession(map[string]float64{"su;;": -10, "s央": -6}, nil), "su;; "); got != "su;; " {
+	if got := repairCommit(splitSession(map[string]float64{"su;;": -10, "s央": -6}, nil), "su;; "); got != "su;; " {
 		t.Errorf("差 4 分不換：送出 %q", got)
 	}
-	if got := splitCommit(splitSession(map[string]float64{"su;;": -10, "s央": -3}, nil), "su;; "); got != "s央" {
+	if got := repairCommit(splitSession(map[string]float64{"su;;": -10, "s央": -3}, nil), "su;; "); got != "s央" {
 		t.Errorf("差 7 分要換：送出 %q", got)
 	}
 	// 規則結果本身不扣：zsuu3 的 z你（合併冗餘音、切在不是詞的 z 後面）贏照字面就留著。
-	if got := splitCommit(splitSession(map[string]float64{"z你": -10, "zsuu3": -14}, nil), "zsuu3"); got != "z你" {
+	if got := repairCommit(splitSession(map[string]float64{"z你": -10, "zsuu3": -14}, nil), "zsuu3"); got != "z你" {
 		t.Errorf("規則結果不扣分：送出 %q", got)
 	}
 	// 規則的 thew營 也是合併冗餘音：the停 不扣分，高一點就換。
-	if got := splitCommit(splitSession(map[string]float64{"thew營": -10, "the停": -8}, nil), "thewuuu/6"); got != "the停" {
+	if got := repairCommit(splitSession(map[string]float64{"thew營": -10, "the停": -8}, nil), "thewuuu/6"); got != "the停" {
 		t.Errorf("修正對修正：送出 %q", got)
 	}
 }
@@ -103,18 +98,18 @@ func TestMixedNeuralRepairPenalty(t *testing.T) {
 func TestMixedNeuralRequests(t *testing.T) {
 	for _, keys := range []string{"ji3su3", "u; ", "zip "} {
 		var seen []rerank.TextsRequest
-		if got := splitCommit(splitSession(map[string]float64{}, &seen), keys); len(seen) != 0 {
+		if got := repairCommit(splitSession(map[string]float64{}, &seen), keys); len(seen) != 0 {
 			t.Fatalf("%q（送出 %q）不該問神經：%+v", keys, got, seen)
 		}
 	}
 	var seen []rerank.TextsRequest
-	splitCommit(splitSession(map[string]float64{}, &seen), "asu3")
+	repairCommit(splitSession(map[string]float64{}, &seen), "asu3")
 	if len(seen) != 1 || !slices.Contains(seen[0].Texts, "a你") || slices.Contains(seen[0].Texts, "你") {
 		t.Fatalf("asu3 candidates: %+v", seen)
 	}
 	// 前文是組字區游標前的字。
 	seen = nil
-	splitCommit(splitSession(map[string]float64{}, &seen), "ji3helloji3")
+	repairCommit(splitSession(map[string]float64{}, &seen), "ji3helloji3")
 	if len(seen) != 1 || seen[0].Context != "我" || !slices.Contains(seen[0].Texts, "hello我") {
 		t.Fatalf("context: %+v", seen)
 	}
@@ -124,7 +119,7 @@ func TestMixedNeuralRequests(t *testing.T) {
 func TestMixedNeuralFallsBack(t *testing.T) {
 	s := splitSession(nil, nil)
 	s.Rerank = rerank.Options{Weight: 2, Texts: textsFunc(func(rerank.TextsRequest) ([]float64, error) { return nil, rerank.ErrDeadline })}
-	if got := splitCommit(s, "helloji3"); got != "hello我" {
+	if got := repairCommit(s, "helloji3"); got != "hello我" {
 		t.Errorf("deadline 送出 %q", got)
 	}
 }
@@ -145,7 +140,7 @@ func TestMixedNeuralRevisit(t *testing.T) {
 		// 前面有字、後文兩個字：比的是 允我你 對 mp3我你（前文是 你）。
 		{"前面有字", "su3mp3ji3su3", map[string]float64{"允": 0, "mp3": -5, "允我你": 0, "mp3我你": -5}, "你允我你"},
 	} {
-		if got := splitCommit(splitSession(tc.scores, nil), tc.keys); got != tc.want {
+		if got := repairCommit(splitSession(tc.scores, nil), tc.keys); got != tc.want {
 			t.Errorf("%s：%q 送出 %q，要 %q", tc.name, tc.keys, got, tc.want)
 		}
 	}
@@ -154,19 +149,19 @@ func TestMixedNeuralRevisit(t *testing.T) {
 // 回頭比最多 mixedRevisitWindow 次，換過就固定。
 func TestMixedNeuralRevisitWindow(t *testing.T) {
 	var seen []rerank.TextsRequest
-	splitCommit(splitSession(map[string]float64{"允": 0, "mp3": -5}, &seen), "mp3ji3su3ji3su3ji3su3")
+	repairCommit(splitSession(map[string]float64{"允": 0, "mp3": -5}, &seen), "mp3ji3su3ji3su3ji3su3")
 	if len(seen) != 1+mixedRevisitWindow {
 		t.Fatalf("要 1 次決定＋%d 次回頭，問了 %d 次", mixedRevisitWindow, len(seen))
 	}
 	seen = nil
-	splitCommit(splitSession(map[string]float64{"允": 0, "mp3": -5, "mp3我": 0}, &seen), "mp3ji3su3ji3")
+	repairCommit(splitSession(map[string]float64{"允": 0, "mp3": -5, "mp3我": 0}, &seen), "mp3ji3su3ji3")
 	if len(seen) != 2 {
 		t.Fatalf("換過就固定：問了 %d 次", len(seen))
 	}
 }
 
 // 組字區照空白的結果顯示：規則接空白切成英文＋中文的（aq8␣ 是 a趴）顯示 aㄆㄚ，神經判成照字面時顯示原按鍵；
-// 神經判成英文的 up 顯示 up，Tab 換成規則的 ㄧㄣ、再按換回。空白直接用顯示時的決定，不再問一次神經。
+// 神經判成英文的 up 顯示 up，Tab 在它跟規則的 ㄧㄣ 之間換。空白直接用顯示時的決定，不再問一次神經。
 func TestMixedDisplayFollowsSpace(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -194,11 +189,38 @@ func TestMixedDisplayFollowsSpace(t *testing.T) {
 	if got := key(s, proto.KeyTab).Text(); got != "ㄧㄣ" {
 		t.Errorf("Tab 換成規則的注音：%q", got)
 	}
-	if got := key(s, proto.KeyTab).Text(); got != "up" {
-		t.Errorf("再按 Tab 換回：%q", got)
+	for i, want := range []string{"up", "ㄧㄣ", "up"} { // 只在兩個之間換，不換到英文補全
+		if got := key(s, proto.KeyTab).Text(); got != want {
+			t.Errorf("第 %d 次 Tab：%q，要 %q", i+2, got, want)
+		}
 	}
 	n := len(seen)
 	if got := key(s, " "); got.Text() != "up " || len(seen) != n {
 		t.Errorf("空白照顯示的決定、不再問神經：%q，多問了 %d 次", got.Text(), len(seen)-n)
+	}
+}
+
+// 顯示時神經沒比到（超過期限）的決定，按空白時再問一次。
+func TestMixedSpaceRetriesUndecided(t *testing.T) {
+	fail := true
+	s := splitSession(nil, nil)
+	s.Rerank = rerank.Options{Weight: 2, ContextRunes: rerank.MaxContextRunes, Texts: textsFunc(func(r rerank.TextsRequest) ([]float64, error) {
+		if fail {
+			return nil, rerank.ErrDeadline
+		}
+		out := make([]float64, len(r.Texts))
+		for i, t := range r.Texts {
+			if out[i] = -10; t == "up" {
+				out[i] = 0
+			}
+		}
+		return out, nil
+	})}
+	if got := mixedType(s, "up").Text(); got != "ㄧㄣ" {
+		t.Fatalf("超過期限照規則：顯示 %q", got)
+	}
+	fail = false
+	if got := key(s, " ").Text(); got != "up " {
+		t.Errorf("空白再問神經：%q", got)
 	}
 }

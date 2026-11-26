@@ -31,26 +31,23 @@ type TextsScorer interface {
 	ScoreTexts(r TextsRequest, deadline time.Duration) ([]float64, error)
 }
 
-// SupportedTexts 是送出前的檢查：2～MaxTexts 個不重複、非空、不超過 MaxTextRunes 字的文字，前文不超過 MaxContextRunes 字；
-// chars 非 nil 時每個字都要在字表內（評分器遇到表外字會整批拒絕）。
-func SupportedTexts(r TextsRequest, chars map[rune]bool) bool {
+// FitsText：t 能放進 texts 評分：非空、不超過 MaxTextRunes 字、每個字都在字表內（Encodable；評分器遇到表外字會整批拒絕）。
+func (o Options) FitsText(t string) bool {
+	n := utf8.RuneCountInString(t)
+	return n > 0 && n <= MaxTextRunes && utf8.ValidString(t) && o.Encodable(t)
+}
+
+// SupportsTexts 是送出前的檢查：2～MaxTexts 個不重複、FitsText 的文字，前文不超過 MaxContextRunes 字。
+func (o Options) SupportsTexts(r TextsRequest) bool {
 	if len(r.Texts) < 2 || len(r.Texts) > MaxTexts || !utf8.ValidString(r.Context) || utf8.RuneCountInString(r.Context) > MaxContextRunes {
 		return false
 	}
 	seen := make(map[string]bool, len(r.Texts))
 	for _, t := range r.Texts {
-		n := utf8.RuneCountInString(t)
-		if seen[t] || n == 0 || n > MaxTextRunes || !utf8.ValidString(t) {
+		if seen[t] || !o.FitsText(t) {
 			return false
 		}
 		seen[t] = true
-		if chars != nil {
-			for _, c := range t {
-				if !chars[c] {
-					return false
-				}
-			}
-		}
 	}
 	return true
 }

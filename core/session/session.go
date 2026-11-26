@@ -122,7 +122,6 @@ type Session struct {
 	missedMemo          map[zhuyin.Syllable][]zhuyin.Syllable // 打的音節補上一鍵的讀音（missedFor，#335）
 	repairMemo          repairMemo                            // 待定按鍵顯示的修正讀音（mixedRepairShown）
 	spaceMemo           spaceMemo                             // 待定按鍵接空白的決定（mixedSpaceAction，P7）
-	spaceDeciding       bool                                  // 正在算 mixedSpaceAction：畫面照規則本身的顯示
 	EnglishAutocomplete bool
 	// KeepRedundantKeys：「重複按的注音當成一次」關閉時由宿主設定（P6）。混打時重複的注音不合併，照官方（wuuuu/6 是 wuuu營）。
 	KeepRedundantKeys bool
@@ -143,7 +142,7 @@ type Session struct {
 	mixedKeys             map[int]string      // completed phonetic position → original keys, retained until edited/committed
 	mixedOrigins          map[int]mixedOrigin // literal positions: independently typed vs system-assisted
 	mixedRevisit          *mixedRevisit       // 最近一次神經判成中文的混打決定，之後帶著後文再比一次（P7）
-	mixedSpent            time.Duration       // 這個請求裡 P7 整串評分花掉的時間（每鍵預算 mixedNeuralDeadline）
+	mixedSpent            time.Duration       // 這個請求裡 P7 花掉的時間（每鍵預算 mixedNeuralDeadline）
 	pendingToneKey        *toneKeyPending     // 上一鍵是單獨的聲調鍵：緊接著的空白換成聲調符號（#135）
 	toneKeyDone           string              // 上一鍵用這個聲調鍵打完一個字：緊接著再按同一個鍵是連按（#321）
 	untonedRun            *untonedRun         // 聲調選填時這一串連續打的注音鍵（#150），認「我的詞彙」的英文詞

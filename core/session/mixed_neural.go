@@ -1,11 +1,11 @@
 package session
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/english"
@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	// mixedNeuralDeadline：每鍵 P7 評分（切法比較、回頭比）合計最多等這麼久（每鍵不比官方慢 30 ms 以上）。
+	// mixedNeuralDeadline：每鍵 P7（列切法、評分、回頭比）合計最多花這麼久（每鍵不比官方慢 30 ms 以上）。
 	mixedNeuralDeadline = 30 * time.Millisecond
 	// mixedRepairPenalty：修正切法（合併冗餘音、丟打錯的鍵、換順序）的神經分數扣分。整串評分偏好字少的文字，
 	// 修正把好幾個鍵變成一個字，不扣會吃掉照字面的英文。
@@ -33,55 +33,53 @@ const (
 )
 
 // mixedSplit 是一種切法：前段 raw[:at] 照字面，後段照順序組成 syls；literal 是整串照字面。
-// texts 是整串文字（前段加中文 N-best），engine 是中文部分的引擎分數。
+// rows 是整串文字（前段加中文 N-best）與中文部分的引擎分數。
 type mixedSplit struct {
 	at      int
 	syls    []zhuyin.Syllable
 	literal bool
 	repair  bool
 	wordCut bool // 切在詞的後面（mixedWordPrefix）或開頭
-	texts   []string
-	engine  []float64
+	rows    []decode.Hypothesis
 }
 
-// neuralMixedTone：同一種切法（同切點同讀音）的同音字以 引擎＋權重×神經 選代表，各切法比代表的神經分數
+// neuralMixedTone：同一種切法（同切點同讀音）的同音字以 rerank.Choose 選代表，各切法比代表的神經分數
 // （修正扣分，repairPenalty），最好的不是規則結果 act、而且高出 mixedNeuralMargin 才換；評分器沒有、失敗或超過期限照規則。
-// 結果是中文音節時另回傳之後要回頭再比的紀錄（revisitMixed；位置由呼叫端填）。
-func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone rune) (mixedToneAction, *mixedRevisit) {
-	if !s.mixedNeuralWanted(act, raw, key) {
-		return act, nil
+// 結果是中文音節時另回傳之後要回頭再比的紀錄（revisitMixed；位置由呼叫端填）。decided：神經比過或不用比；
+// 現在不能問、超過期限的是 false，之後能問時可以再算。
+func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone rune) (_ mixedToneAction, _ *mixedRevisit, decided bool) {
+	if !s.mixedNeuralReady() {
+		return act, nil, false
 	}
-	deadline := mixedNeuralDeadline - s.mixedSpent
-	if deadline < mixedNeuralMin {
-		return act, nil
+	started := time.Now()
+	defer func() { s.mixedSpent += time.Since(started) }()
+	if !s.mixedNeuralWanted(act, raw, key) {
+		return act, nil, true
 	}
 	splits, rule := s.mixedSplits(act, raw, key, tone)
 	var texts []string
 	for _, sp := range splits {
-		texts = append(texts, sp.texts...)
+		for _, h := range sp.rows {
+			texts = append(texts, h.Text)
+		}
 	}
-	if len(splits[rule].texts) == 0 || len(texts) < 2 {
-		return act, nil
+	if len(splits[rule].rows) == 0 || len(texts) < 2 {
+		return act, nil, true
 	}
-	scores, ok := s.scoreTexts(texts, s.cursor, deadline)
-	if !ok {
-		return act, nil
+	scores, err := s.scoreTexts(texts, s.cursor, mixedNeuralDeadline-s.mixedSpent-time.Since(started))
+	if err != nil {
+		return act, nil, !errors.Is(err, rerank.ErrDeadline)
 	}
 	heads, scored := make([]int, len(splits)), make([]float64, len(splits))
 	best := -1
 	for n, sp := range splits {
-		got := scores[:len(sp.texts)]
-		scores = scores[len(sp.texts):]
+		got := scores[:len(sp.rows)]
+		scores = scores[len(sp.rows):]
 		heads[n] = -1
 		if len(got) == 0 {
 			continue
 		}
-		head := 0
-		for j := range got {
-			if sp.engine[j]+s.Rerank.Weight*got[j] > sp.engine[head]+s.Rerank.Weight*got[head] {
-				head = j
-			}
-		}
+		head := rerank.Choose(sp.rows, got, s.Rerank.Weight, 0)
 		heads[n], scored[n] = head, got[head]
 		if n != rule {
 			scored[n] -= repairPenalty(sp, splits[rule])
@@ -93,9 +91,7 @@ func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone run
 	if best == rule || scored[best]-scored[rule] <= mixedNeuralMargin {
 		best = rule
 	} else if sp := splits[best]; sp.literal {
-		if act.kind != mixedToneSpace && act.kind != mixedToneSpaceAsTyped {
-			act = mixedToneAction{}
-		}
+		act = mixedToneAction{} // 規則不是音節時規則結果就是照字面（rule 0），換成照字面的只有音節
 	} else {
 		act = mixedToneAction{kind: mixedToneSyllable, at: sp.at, syls: sp.syls}
 	}
@@ -103,33 +99,33 @@ func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone run
 	// 贏其他切法 mixedRevisitGap 以上的（cl3 的 好）後文也翻不過來，不比。
 	if act.kind != mixedToneSyllable || act.at == 0 && len(act.syls) == 1 && !s.mixedEnglishWord(raw) &&
 		english.Alnum(raw+key) != english.AlnumKeysSecond {
-		return act, nil
+		return act, nil, true
 	}
 	for n := range splits {
 		if n != best && heads[n] >= 0 && scored[best]-scored[n] < mixedRevisitGap {
-			return act, &mixedRevisit{raw: raw, key: key, splits: splits, heads: heads, shown: best}
+			return act, &mixedRevisit{raw: raw, key: key, splits: splits, heads: heads, shown: best}, true
 		}
 	}
-	return act, nil
+	return act, nil, true
 }
 
-// scoreTexts 以 neuralContext 加組字區 [0, end) 為前文評 texts，花掉的時間記進 mixedSpent；不支援、失敗或分數不是有限值時回 false。
-func (s *Session) scoreTexts(texts []string, end int, deadline time.Duration) ([]float64, bool) {
+var errTextsUnusable = errors.New("texts not scorable")
+
+// scoreTexts 以 neuralContext 加組字區 [0, end) 為前文評 texts；送不出去、分數數量不對或不是有限值時回 errTextsUnusable。
+func (s *Session) scoreTexts(texts []string, end int, deadline time.Duration) ([]float64, error) {
 	context := ""
 	if s.Rerank.ContextRunes > 0 {
 		context = lastRunes(s.neuralContext()+s.spanText(0, end), min(s.Rerank.ContextRunes, rerank.MaxContextRunes))
 	}
 	req := rerank.TextsRequest{Revision: s.rev + 1, Context: context, Texts: texts}
-	if !rerank.SupportedTexts(req, s.Rerank.Chars) {
-		return nil, false
+	if !s.Rerank.SupportsTexts(req) {
+		return nil, errTextsUnusable
 	}
-	started := time.Now()
 	scores, err := s.Rerank.Texts.ScoreTexts(req, deadline)
-	s.mixedSpent += time.Since(started)
-	if err != nil || len(scores) != len(texts) || slices.ContainsFunc(scores, func(x float64) bool { return !finite(x) }) {
-		return nil, false
+	if err == nil && (len(scores) != len(texts) || slices.ContainsFunc(scores, func(x float64) bool { return !finite(x) })) {
+		err = errTextsUnusable
 	}
-	return scores, true
+	return scores, err
 }
 
 const (
@@ -143,15 +139,17 @@ const (
 
 // mixedRevisit 是最近一次神經判成中文的決定：之後組字區多了字時帶著後文再比一次，夠強才改，最多改一次。
 type mixedRevisit struct {
-	start, end int               // 這次決定插入的組字位置
-	syls       []zhuyin.Syllable // 插入後的 s.syls[start:end]；之後被刪改就作廢
-	raw, key   string
-	splits     []mixedSplit
-	heads      []int // 各切法的代表文字（texts 的索引；-1 沒有）
-	shown      int   // 選到的切法
-	seen       int   // 之後比過幾次
-	checked    int   // 上次比（或記下）時組字區的音節數
+	start    int               // 這次決定插入的組字位置
+	syls     []zhuyin.Syllable // 插入的音節（s.syls[start:end()]）；之後被刪改就作廢
+	raw, key string
+	splits   []mixedSplit
+	heads    []int // 各切法的代表文字（rows 的索引；-1 沒有）
+	shown    int   // 選到的切法
+	seen     int   // 之後比過幾次
+	checked  int   // 上次比（或記下）時組字區的音節數
 }
+
+func (v *mixedRevisit) end() int { return v.start + len(v.syls) }
 
 // revisitMixed：按鍵處理完、組字區多了字時，上一次神經判成中文的決定以「畫面上的樣子＋之後的字」對
 // 「其他切法的代表＋之後的字」再比一次，其他切法高出 mixedNeuralMargin（修正另扣分）就換掉；
@@ -167,23 +165,24 @@ func (s *Session) revisitMixed() {
 		return
 	}
 	left := mixedNeuralDeadline - s.mixedSpent - mixedRevisitReserve
-	if left < mixedNeuralMin || s.Rerank.Texts == nil || !s.allowRerank || s.private || s.paused || s.english ||
-		s.mixed.raw != "" || !s.comp.Empty() {
+	if left < mixedNeuralMin || !s.mixedNeuralReady() || s.mixed.raw != "" || !s.comp.Empty() {
 		return
 	}
+	started := time.Now()
+	defer func() { s.mixedSpent += time.Since(started) }()
 	v.seen, v.checked = v.seen+1, len(s.syls)
-	follow := s.spanText(v.end, s.cursor-v.end)
-	texts := []string{s.spanText(v.start, v.end-v.start) + follow}
+	follow := s.spanText(v.end(), s.cursor-v.end())
+	texts := []string{s.spanText(v.start, len(v.syls)) + follow}
 	var owners []int
 	for i, sp := range v.splits {
 		if i == v.shown || v.heads[i] < 0 {
 			continue
 		}
-		t := sp.texts[v.heads[i]]
+		t := sp.rows[v.heads[i]].Text
 		if sp.literal && v.key == " " {
 			t += " " // 空白被當一聲用掉的英文換回來時，空白還回來（go up and down）
 		}
-		if t += follow; s.textEncodable(t) && !slices.Contains(texts, t) {
+		if t += follow; s.Rerank.FitsText(t) && !slices.Contains(texts, t) {
 			texts = append(texts, t)
 			owners = append(owners, i)
 		}
@@ -191,8 +190,8 @@ func (s *Session) revisitMixed() {
 	if len(texts) < 2 {
 		return
 	}
-	scores, ok := s.scoreTexts(texts, v.start, left)
-	if !ok {
+	scores, err := s.scoreTexts(texts, v.start, left-time.Since(started))
+	if err != nil {
 		return
 	}
 	best, bestScore := -1, scores[0]+mixedNeuralMargin
@@ -209,23 +208,23 @@ func (s *Session) revisitMixed() {
 
 // revisitValid：游標在組字區最後、那次插入的字沒被刪改、沒有手選過。
 func (s *Session) revisitValid(v *mixedRevisit) bool {
-	if s.cursor != len(s.syls) || v.end > s.cursor || !slices.Equal(s.syls[v.start:v.end], v.syls) {
+	if s.cursor != len(s.syls) || v.end() > s.cursor || !slices.Equal(s.syls[v.start:v.end()], v.syls) {
 		return false
 	}
 	for start, lock := range s.locks {
-		if start < v.end && v.start < start+lock.Len {
+		if start < v.end() && v.start < start+lock.Len {
 			return false
 		}
 	}
 	return true
 }
 
-// replaceMixed 把組字區 [v.start, v.end) 換成切法 sp，後面的字不動，游標回到最後。
-// 換到一半時不評分（insertLiteral、insertMixedTyped 會先 refresh），換完整句重解評分一次。
+// replaceMixed 把組字區 [v.start, v.end()) 換成切法 sp，後面的字不動，游標回到最後。
+// 換到一半時不評分（insertLiteral、insertMixedTyped 會先 refresh），換完整句重解評分一次（Rescore）。
 func (s *Session) replaceMixed(v *mixedRevisit, sp mixedSplit) {
 	allow := s.allowRerank
 	s.allowRerank = false
-	s.cursor = v.end
+	s.cursor = v.end()
 	for s.cursor > v.start {
 		s.eraseBeforeCursor()
 	}
@@ -237,8 +236,7 @@ func (s *Session) replaceMixed(v *mixedRevisit, sp mixedSplit) {
 	}
 	s.allowRerank = allow
 	s.cursor = len(s.syls)
-	s.pathSig = ""
-	s.refresh()
+	s.Rescore()
 }
 
 // spaceMemo 記下待定按鍵接空白的決定（mixedSpaceAction）：組字區照它顯示，按空白時直接套用，不再評分一次。
@@ -246,7 +244,7 @@ func (s *Session) replaceMixed(v *mixedRevisit, sp mixedSplit) {
 type spaceMemo struct {
 	raw, sig  string
 	cursor    int
-	neural    bool // 算的時候可以問神經
+	decided   bool // 神經比過或不用比（neuralMixedTone）；沒比到的之後能問時再算
 	rule, act mixedToneAction
 	visit     *mixedRevisit
 }
@@ -255,35 +253,27 @@ type spaceMemo struct {
 // 組字區照 act 顯示（組字區＝空白的結果：aq8 是 aㄆㄚ、神經判成英文的 up 是 up），空白鍵直接用。
 func (s *Session) mixedSpaceAction() (rule, act mixedToneAction, visit *mixedRevisit) {
 	raw := s.mixed.raw
-	neural := s.Rerank.Texts != nil && s.allowRerank && mixedNeuralDeadline-s.mixedSpent >= mixedNeuralMin
 	m := &s.spaceMemo
-	if m.raw == raw && m.sig == s.pathSig && m.cursor == s.cursor && (m.neural || !neural) {
+	if m.raw == raw && m.sig == s.pathSig && m.cursor == s.cursor && (m.decided || !s.mixedNeuralReady()) {
 		return m.rule, m.act, m.visit
 	}
-	sym, _ := layout.Standard.Symbol(' ')
-	s.spaceDeciding = true // 規則裡看畫面的判斷（mixedKeepable）照規則本身的顯示
-	rule = s.decideMixedTone(raw, " ", sym)
-	act, visit = s.neuralMixedTone(rule, raw, " ", sym)
-	s.spaceDeciding = false
-	*m = spaceMemo{raw: raw, sig: s.pathSig, cursor: s.cursor, neural: neural, rule: rule, act: act, visit: visit}
+	rule = s.decideMixedTone(raw, " ", zhuyin.Tone1)
+	act, visit, decided := s.neuralMixedTone(rule, raw, " ", zhuyin.Tone1)
+	*m = spaceMemo{raw: raw, sig: s.pathSig, cursor: s.cursor, decided: decided, rule: rule, act: act, visit: visit}
 	return rule, act, visit
 }
 
 // spaceFollowed：沒選過的待定按鍵照空白的決定顯示。沒有字母的（20 照字面加讀音提示，#162）、使用者加的英文詞、
-// 選過的注音文照原本的顯示；正在決定空白時（spaceDeciding）照規則本身的顯示。
+// 選過的注音文照原本的顯示。
 func (s *Session) spaceFollowed() bool {
 	raw := s.mixed.raw
-	return !s.spaceDeciding && strings.ContainsFunc(raw, unicode.IsLetter) && !s.vocabEnglish(raw) && !s.zhuyinKeyHabit(raw)
+	return strings.ContainsFunc(raw, unicode.IsLetter) && !s.vocabEnglish(raw) && !s.zhuyinKeyHabit(raw)
 }
 
 // spaceShown：沒選過的待定按鍵接空白會組成一個中文音節、而組字區本來不會這樣顯示時（修正讀音 gjn 的 ㄙㄨ、
 // 切成英文＋中文 aq8 的 aㄆㄚ），回傳切點與音節。整串照順序組成的（su 的 ㄋㄧ）照一般注音顯示。
-// 正在決定空白時照規則本身的修正顯示（spaceRepair）。
 func (s *Session) spaceShown() (int, zhuyin.Syllable, bool) {
 	raw := s.mixed.raw
-	if s.spaceDeciding {
-		return s.spaceRepair(raw)
-	}
 	if !s.spaceFollowed() {
 		return 0, "", false
 	}
@@ -304,24 +294,29 @@ func (s *Session) spaceNeuralLiteral() bool {
 		return false
 	}
 	rule, act, _ := s.mixedSpaceAction()
-	return rule.kind == mixedToneSyllable && (act.kind == mixedToneLiteral || act.kind == mixedToneSpaceAsTyped)
+	return rule.kind == mixedToneSyllable && act.kind == mixedToneLiteral
+}
+
+// mixedNeuralReady：現在能問神經（不看待定按鍵本身）：有評分器、這個請求可以重排、這一鍵的期限還夠，
+// 不在選字、私密、暫停、英文模式，待定按鍵沒選過。
+func (s *Session) mixedNeuralReady() bool {
+	return s.Rerank.Texts != nil && s.allowRerank && mixedNeuralDeadline-s.mixedSpent >= mixedNeuralMin &&
+		s.cand == nil && !s.private && !s.paused && !s.english && !s.englishWord && s.mixed.choice == 0 && s.mixed.accepted == ""
 }
 
 // mixedNeuralWanted：純中文不多問神經。待定按鍵要有英文字母，而且是英文字典的詞（up␣ 照規則是 音）、
 // 接聲調鍵是 alnum.tsv 照舊出字的英數詞（mp3 照規則是 允），或規則結果不是整串照順序組成一個音節，
 // 或有數字、大寫或符號（整串照順序組成一個音節時注音的數字、標點鍵不算：2k7 的、q96 排）。
-// 只有數字標點的（5␣、10␣）、使用者選過的、留注音的照規則；
+// 只有數字標點的（5␣、10␣）、留注音的照規則；
 // 英文字典的詞、alnum.tsv 照字面的英數詞，規則照字面的也照規則（sum3 不是 su與、win10␣ 不是 win班）。
 func (s *Session) mixedNeuralWanted(act mixedToneAction, raw, key string) bool {
-	if s.Rerank.Texts == nil || !s.allowRerank || s.cand != nil || s.private || s.paused || s.english || s.englishWord ||
-		s.mixed.choice != 0 || s.mixed.accepted != "" || act.kind == mixedToneKeep {
+	if act.kind == mixedToneKeep {
 		return false
 	}
 	if act.kind == mixedToneLiteral && (s.mixedEnglishWord(raw) || english.Alnum(raw) == english.AlnumLiteral || s.literalToken(raw+key)) {
 		return false
 	}
-	lower := func(r rune) bool { return r >= 'a' && r <= 'z' }
-	if !strings.ContainsFunc(raw, func(r rune) bool { return lower(r) || r >= 'A' && r <= 'Z' }) {
+	if !strings.ContainsFunc(raw, unicode.IsLetter) {
 		return false
 	}
 	if s.mixedEnglishWord(raw) || key != " " && english.Alnum(raw+key) == english.AlnumKeysSecond ||
@@ -331,7 +326,7 @@ func (s *Session) mixedNeuralWanted(act mixedToneAction, raw, key string) bool {
 	if strict, ok := s.strictSyllables(raw + key); ok && slices.Equal(strict, act.syls) {
 		return false
 	}
-	return strings.ContainsFunc(raw, func(r rune) bool { return !lower(r) })
+	return strings.ContainsFunc(raw, func(r rune) bool { return r < 'a' || r > 'z' })
 }
 
 // mixedSplits 列出要比較的切法與規則結果是第幾個：整串照字面、規則的切法、每個切點的後段照順序組成的音節，
@@ -341,7 +336,7 @@ func (s *Session) mixedSplits(act mixedToneAction, raw, key string, tone rune) (
 	if key != " " {
 		literal += key
 	}
-	splits := []mixedSplit{{literal: true, texts: []string{literal}, engine: []float64{0}}}
+	splits := []mixedSplit{{literal: true, rows: []decode.Hypothesis{{Text: literal}}}}
 	add := func(at int, syls []zhuyin.Syllable, repair bool) int {
 		for i, sp := range splits {
 			if !sp.literal && sp.at == at && slices.Equal(sp.syls, syls) {
@@ -470,36 +465,27 @@ func (s *Session) fillSplitTexts(splits []mixedSplit, raw string) {
 	for i := range splits {
 		sp := &splits[i]
 		if sp.literal {
-			if s.textEncodable(sp.texts[0]) {
-				seen[sp.texts[0]] = true
+			if t := sp.rows[0].Text; s.Rerank.FitsText(t) {
+				seen[t] = true
 			} else {
-				sp.texts, sp.engine = nil, nil
+				sp.rows = nil
 			}
 		} else {
 			rows, _ := dec.NBest(input.Exact{}.Expand(sp.syls), nil, false, mixedNeuralNBest)
 			for _, h := range rows {
-				if t := raw[:sp.at] + h.Text; !seen[t] && s.textEncodable(t) {
-					seen[t] = true
-					sp.texts = append(sp.texts, t)
-					sp.engine = append(sp.engine, h.LogScore)
+				if h.Text = raw[:sp.at] + h.Text; !seen[h.Text] && s.Rerank.FitsText(h.Text) {
+					seen[h.Text] = true
+					sp.rows = append(sp.rows, h)
 				}
 			}
 		}
-		total += len(sp.texts)
+		total += len(sp.rows)
 	}
 	for k := mixedNeuralNBest - 1; total > rerank.MaxTexts && k > 0; k-- {
 		total = 0
 		for i := range splits {
-			sp := &splits[i]
-			sp.texts, sp.engine = sp.texts[:min(k, len(sp.texts))], sp.engine[:min(k, len(sp.engine))]
-			total += len(sp.texts)
+			splits[i].rows = splits[i].rows[:min(k, len(splits[i].rows))]
+			total += len(splits[i].rows)
 		}
 	}
-}
-
-func (s *Session) textEncodable(t string) bool {
-	if utf8.RuneCountInString(t) > rerank.MaxTextRunes {
-		return false
-	}
-	return s.Rerank.Chars == nil || !strings.ContainsFunc(t, func(r rune) bool { return !s.Rerank.Chars[r] })
 }

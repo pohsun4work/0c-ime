@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestSupportedTexts(t *testing.T) {
+func TestSupportsTexts(t *testing.T) {
 	chars := map[rune]bool{}
 	for _, c := range "mp3允格式我下載了" {
 		chars[c] = true
@@ -31,8 +31,8 @@ func TestSupportedTexts(t *testing.T) {
 		{"out of vocab", TextsRequest{Texts: []string{"zip", "允"}}, chars, false},
 		{"long context", TextsRequest{Context: strings.Repeat("我", MaxContextRunes+1), Texts: []string{"mp3", "允"}}, chars, false},
 	} {
-		if got := SupportedTexts(c.r, c.chars); got != c.ok {
-			t.Errorf("%s: SupportedTexts = %v", c.name, got)
+		if got := (Options{Chars: c.chars}).SupportsTexts(c.r); got != c.ok {
+			t.Errorf("%s: SupportsTexts = %v", c.name, got)
 		}
 	}
 }

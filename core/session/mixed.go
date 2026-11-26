@@ -49,7 +49,11 @@ func (s *Session) mixedComposer(raw string) (zhuyin.Composer, bool) {
 	return c, raw != ""
 }
 
-func (s *Session) mixedText() string {
+func (s *Session) mixedText() string { return s.mixedTextFor(true) }
+
+// mixedTextFor：follow 為 false 時沒選過的待定按鍵不照空白的決定顯示（spaceShown、spaceNeuralLiteral）：
+// 決定空白的規則（mixedKeepable）看這個樣子，不繞回來問空白的決定。
+func (s *Session) mixedTextFor(follow bool) string {
 	p := s.mixed
 	if p.accepted != "" {
 		return p.accepted
@@ -59,12 +63,14 @@ func (s *Session) mixedText() string {
 	}
 	// 接空白會經過冗餘音、打錯鍵修正組成中文的（gjn、5wu0），或按 Tab 換成修正讀音的（png）：直接顯示修正後的注音
 	// （ㄙㄨ、5ㄊㄧㄢ、ㄕㄣ），組字區是什麼按空白就出什麼。
-	if at, done, ok := s.mixedRepairShown(); ok {
-		return p.raw[:at] + string(done.Base())
+	if follow || p.choice != 0 {
+		if at, done, ok := s.mixedRepairShown(); ok {
+			return p.raw[:at] + string(done.Base())
+		}
 	}
 	// 使用者加的英文詞（ls、rm、kubectl，#146）：完全相同（大小寫照字面）就照字面，優先於一聲讀音與注音解釋。
 	// ↓ 選了注音解釋（choice 2）照舊顯示注音。
-	if p.choice == 0 && (s.vocabEnglish(p.raw) || s.spaceNeuralLiteral()) {
+	if p.choice == 0 && (s.vocabEnglish(p.raw) || follow && s.spaceNeuralLiteral()) {
 		return p.raw
 	}
 	// 沒有字母（只有數字與標點鍵，也是 ㄅㄉㄓㄚㄞㄢ、ㄝㄡㄥㄤㄦ）時照字面顯示與提交：「我.」送出「我.」不是「我ㄡ」，
@@ -336,6 +342,7 @@ func (s *Session) keepMixedDisplay(previous []decode.Seg, at, delta int) {
 //     換成原按鍵（choice 1），之後的空白就是空白。
 //   - 照英文顯示的、↓ 選了原按鍵的：英文補全（hel → helped、↓ 選 up → upon）優先，其次是照順序的注音（20 → ㄉㄢ）、
 //     修正讀音（字典收的 png → ㄕㄣ，choice 3），最後是拼字修正。
+//   - 神經判成英文的（go up 的 up）：另一個是規則的注音（ㄧㄣ），只在這兩個之間換。
 //   - Tab 換來的再按 Tab 換回原樣（ㄧㄣ → up → ㄧㄣ）；原樣看起來跟現在一樣時（20 換成的原按鍵）照上一條往下換。
 //   - 英文補全、拼字修正收下就定了，不再換（hi → high）。
 func (s *Session) mixedSwap() (pendingKeys, string, bool) {
@@ -351,6 +358,9 @@ func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 	}
 	switch p.choice {
 	case 2, 3:
+		if s.spaceNeuralLiteral() {
+			return p.with(0), p.raw, true
+		}
 		return p.with(1), p.raw, true
 	case 0:
 		if s.mixedText() != p.raw {
@@ -362,12 +372,9 @@ func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 		if _, _, ok := s.mixedSpaceReading(); ok {
 			return p.with(1), p.raw, true
 		}
-		if s.spaceNeuralLiteral() { // 神經判成英文的（go up 的 up）：另一個是規則的注音，不是英文補全
-			if c, ok := s.mixedComposer(p.raw); ok && zhuyin.Completable(zhuyin.Syllable(c.String())) {
-				return p.with(2), c.String(), true
-			}
-			if text, ok := s.repairedText(p.raw); ok {
-				return p.with(3), text, true
+		if s.spaceNeuralLiteral() {
+			if next, text, ok := s.zhuyinSwap(p, true); ok {
+				return next, text, true
 			}
 		}
 	}
@@ -381,17 +388,25 @@ func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 			}
 		}
 	}
-	if c, ok := s.mixedComposer(p.raw); ok && p.choice == 1 && zhuyin.Completable(zhuyin.Syllable(c.String())) {
-		return p.with(2), c.String(), true
-	}
-	if text, ok := s.repairedText(p.raw); ok {
-		return p.with(3), text, true
+	if next, text, ok := s.zhuyinSwap(p, p.choice == 1); ok {
+		return next, text, true
 	}
 	if english {
 		if cs := s.englishCorrections(p.raw, 1); len(cs) > 0 {
 			word.accepted = cs[0].Text
 			return word, cs[0].Text, true
 		}
+	}
+	return p, "", false
+}
+
+// zhuyinSwap：Tab 換成注音：照順序組得成的（choice 2，inOrder 時才試），其次是修正讀音（choice 3）。
+func (s *Session) zhuyinSwap(p pendingKeys, inOrder bool) (pendingKeys, string, bool) {
+	if c, ok := s.mixedComposer(p.raw); ok && inOrder && zhuyin.Completable(zhuyin.Syllable(c.String())) {
+		return p.with(2), c.String(), true
+	}
+	if text, ok := s.repairedText(p.raw); ok {
+		return p.with(3), text, true
 	}
 	return p, "", false
 }
@@ -663,16 +678,16 @@ func (s *Session) finishMixedTone(key string) bool {
 	if key == " " && s.mixed.choice == 0 {
 		_, act, visit = s.mixedSpaceAction() // 組字區照著顯示的那個決定
 	} else {
-		act, visit = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
+		act, visit, _ = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
 	}
-	n := len(s.syls)
+	before := len(s.syls)
 	if !s.applyMixedTone(act, key, sym) {
 		return false
 	}
-	if n = len(s.syls) - n; visit != nil && n > 0 && s.cursor == len(s.syls) {
-		visit.start, visit.end = s.cursor-n, s.cursor
-		visit.syls, visit.checked = slices.Clone(s.syls[visit.start:visit.end]), len(s.syls)
-		s.mixedRevisit = visit
+	if added := len(s.syls) - before; visit != nil && added > 0 && s.cursor == len(s.syls) {
+		v := *visit // spaceMemo 留著的那份不跟著改
+		v.start, v.syls, v.checked = s.cursor-added, slices.Clone(s.syls[s.cursor-added:]), len(s.syls)
+		s.mixedRevisit = &v
 	}
 	return true
 }
@@ -684,7 +699,6 @@ func mixedSyllable(at int, done zhuyin.Syllable) mixedToneAction {
 // decideMixedTone 照規則決定聲調鍵或空白怎麼收尾待定按鍵 raw，不改狀態。
 func (s *Session) decideMixedTone(raw, key string, sym rune) mixedToneAction {
 	var literal mixedToneAction
-	syllable := mixedSyllable
 	// 已知的英數詞、使用者選回原按鍵學到的英數詞（#249）。
 	if s.mixed.choice == 0 && key != " " && s.literalToken(raw+key) {
 		return literal
@@ -702,7 +716,7 @@ func (s *Session) decideMixedTone(raw, key string, sym rune) mixedToneAction {
 	}
 	if key == " " && s.mixed.choice != 2 {
 		if at, done, ok := s.mixedPunctSplit(raw, sym); ok {
-			act := syllable(at, done)
+			act := mixedSyllable(at, done)
 			act.plain = true
 			return act
 		}
@@ -730,7 +744,7 @@ func (s *Session) decideMixedTone(raw, key string, sym rune) mixedToneAction {
 	// 數字鍵聲母晚一鍵的兩鍵組成常用字的（k27 的、j14 不）不論前面是什麼都組字（lateDigitInitial）。
 	if key != " " && s.mixed.choice == 0 && s.reversedAlnum(raw) {
 		if at, done, ok := s.numberThenSyllable(raw, sym); ok {
-			act := syllable(at, done)
+			act := mixedSyllable(at, done)
 			act.plain = true
 			return act
 		}
@@ -739,7 +753,7 @@ func (s *Session) decideMixedTone(raw, key string, sym rune) mixedToneAction {
 		}
 	}
 	if done, ok := s.mixedReading(raw, sym); ok {
-		return syllable(0, done)
+		return mixedSyllable(0, done)
 	}
 	if englishNumber {
 		return literal
@@ -751,7 +765,7 @@ func (s *Session) decideMixedTone(raw, key string, sym rune) mixedToneAction {
 		return literal
 	}
 	if at, done, ok := s.mixedBoundary(raw, key, sym); ok {
-		return syllable(at, done)
+		return mixedSyllable(at, done)
 	}
 	// 畫面顯示成注音、空白組不成字而 mixedKeepsZhuyin 的，或 ↓ 選了注音解釋後的聲調組不成字（2 ↓ㄉ，#208）：
 	// 比照一般注音模式（#109）原樣留下注音，空白當一聲吃掉（c␣c␣ 是「ㄏㄏ」）。
@@ -804,7 +818,7 @@ func (s *Session) applyMixedTone(act mixedToneAction, key string, sym rune) bool
 func (s *Session) mixedKeepable(choice int, tone rune) bool {
 	saved := s.mixed.choice
 	s.mixed.choice = choice
-	c, ok := s.mixedPending(s.mixedText())
+	c, ok := s.mixedPending(s.mixedTextFor(false))
 	s.mixed.choice = saved
 	if ok {
 		_, ok = c.Add(tone)
