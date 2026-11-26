@@ -178,7 +178,7 @@ func (w *PunctWorker) stopLocked() {
 	w.stoppedAt = time.Now()
 }
 
-// exchange 與 Worker.exchange 相同：至多一個 I/O goroutine，逾時殺掉 worker，不排隊、不可晚套用。
+// exchange 同 Worker 的 send＋await：至多一個 I/O goroutine，逾時殺掉 worker，不排隊、不可晚套用。
 func (p *punctProc) exchange(request []byte, timeout time.Duration) ([]byte, error) {
 	type result struct {
 		b   []byte

@@ -10,6 +10,9 @@ mode="text"（單音節聲調容錯）：只用前文續寫評分 logP(候選｜
 讀音只用來核對長度；必須有前文。規則同 SequenceModel 的 text task。
 套件宣告 neutral_tolerant_last（一聲音節清單）時，讀音最後一個音節若在清單內，另以輕聲讀音評分，
 逐候選取較大者（同一次 ONNX 呼叫的分支）。
+
+mode="texts"（中英混打的切法比較）：候選是長短不一、可含英數的完整文字，評整串 logP(文字｜前文)，
+版面同 text task（不放讀音 token）；全部文字共用一棵前綴樹，一次 ONNX 呼叫。
 """
 import argparse
 import hashlib
@@ -34,6 +37,8 @@ CONTEXT_POLICY = 'confirmed_left_64'
 TONES = {'ˊ': 2, 'ˇ': 3, 'ˋ': 4, '˙': 5}
 TONE_POLICY_SCHEMA = 'zuin-tone-mask-v1'
 MAX_CANDIDATES = 16   # 同 ime rerank.MaxCandidates：打出讀音 8 個＋輕聲擴充最多 8 個
+MAX_TEXTS = 64        # 同 ime rerank.MaxTexts：texts 模式一次評的文字數上限
+MAX_TEXT_RUNES = 32   # 同 ime rerank.MaxTextRunes：texts 模式每個文字的字數上限
 
 
 def sha(path):
@@ -59,6 +64,21 @@ def validate_tone_known(tone_known, count, allow_unknown_tones):
     if not allow_unknown_tones and not all(tone_known):
         raise ValueError('unsupported_unknown_tone')
     return tone_known
+
+
+def encode_head(context, chars):
+    """[BOS] 前文最後 64 字 [SEP]，表外字是 UNK。"""
+    return [1] + [chars.get(c, 4) for c in context[-64:]] + [2]
+
+
+def tree_mask(L, S, parent):
+    """前 S 個位置（前文、共用的讀音）因果注意；之後每個節點注意前 S 個位置與自己的祖先（parent 裡沒有的是根）。"""
+    mask = np.zeros((L, L), dtype=bool); mask[:S, :S] = np.tril(np.ones((S, S), dtype=bool))
+    for q in range(S, L):
+        mask[q, :S] = True; a = q
+        while a is not None:
+            mask[q, a] = True; a = parent.get(a)
+    return mask
 
 
 def prepare(context, reading, candidates, maps, allow_partial=False, text_only=False, neutral_last=False,
@@ -106,7 +126,7 @@ def prepare(context, reading, candidates, maps, allow_partial=False, text_only=F
     branches = [[(0, 0)]] if text_only else [[sounds[-1], (0, 0)]]
     if neutral_last and not text_only and known[-1] and sounds[-1][1] != 5:
         branches.append([(sounds[-1][0], 5), (0, 0)])
-    head = [1] + [chars.get(c, 4) for c in context[-64:]] + [2]
+    head = encode_head(context, chars)
     shared = sounds[:-1]
     ids = head + [0] * len(shared)
     base_ids = [0] * len(head) + [b for b, _ in shared]
@@ -131,17 +151,50 @@ def prepare(context, reading, candidates, maps, allow_partial=False, text_only=F
                     ids.append(cids[i - 1]); base_ids.append(0); tones.append(0); types.append(2); positions.append(P + i - 1)
         nodes.append(node)
     L = len(ids)
-    mask = np.zeros((L, L), dtype=bool); mask[:S, :S] = np.tril(np.ones((S, S), dtype=bool))
-    for q in range(S, L):
-        mask[q, :S] = True; a = q
-        while a is not None:
-            mask[q, a] = True; a = parent.get(a)
+    mask = tree_mask(L, S, parent)
     proj = sorted({v for node in nodes for v in node.values()}); index = {p: i for i, p in enumerate(proj)}
     target_node = np.array([[index[node[tuple(c[:i])]] for i in range(n)] for node in nodes for c in encoded], dtype=np.int64)
     target_ids = np.array([[x - 6 for x in c] for _ in nodes for c in encoded], dtype=np.int64)
     row = lambda x: np.array([x], dtype=np.int64)
     return {'ids': row(ids), 'bases': row(base_ids), 'tones': row(tones), 'types': row(types), 'positions': row(positions),
             'mask': mask[None, None], 'proj_pos': np.array(proj, dtype=np.int64), 'target_node': target_node, 'target_ids': target_ids}
+
+
+def prepare_texts(context, texts, chars):
+    """texts 模式的前綴樹輸入：[BOS] 前文 [SEP] [OUT] 之後每個文字一條路徑，共同開頭共用節點。
+    target 每列只取一個字（n=1），回傳每列屬於第幾個文字，由呼叫端逐文字加總。"""
+    if not isinstance(context, str) or not isinstance(texts, list) or not 2 <= len(texts) <= MAX_TEXTS:
+        raise ValueError('unsupported_shape')
+    if any(not isinstance(t, str) or not 1 <= len(t) <= MAX_TEXT_RUNES for t in texts) or len(set(texts)) != len(texts):
+        raise ValueError('invalid_texts')
+    try:
+        encoded = [[chars[c] for c in t] for t in texts]
+    except KeyError as e:
+        raise ValueError('unknown_character') from e
+    head = encode_head(context, chars)
+    S = len(head)
+    ids, positions, types = head + [3], list(range(S + 1)), [0] * (S + 1)
+    parent = {S: None}
+    node = {(): S}
+    for cids in encoded:
+        for i in range(1, len(cids)):
+            key = tuple(cids[:i])
+            if key not in node:
+                node[key] = len(ids); parent[len(ids)] = node[key[:-1]]
+                ids.append(cids[i - 1]); positions.append(S + i); types.append(2)
+    L = len(ids)
+    mask = tree_mask(L, S, parent)
+    proj = sorted(set(node.values())); index = {p: i for i, p in enumerate(proj)}
+    rows, owner = [], []
+    for ti, cids in enumerate(encoded):
+        for i, c in enumerate(cids):
+            rows.append((index[node[tuple(cids[:i])]], c - 6)); owner.append(ti)
+    row = lambda x: np.array([x], dtype=np.int64)
+    inputs = {'ids': row(ids), 'bases': row([0] * L), 'tones': row([0] * L), 'types': row(types), 'positions': row(positions),
+              'mask': mask[None, None], 'proj_pos': np.array(proj, dtype=np.int64),
+              'target_node': np.array([[a] for a, _ in rows], dtype=np.int64),
+              'target_ids': np.array([[b] for _, b in rows], dtype=np.int64)}
+    return inputs, owner
 
 
 class Runtime:
@@ -189,6 +242,8 @@ class Runtime:
         if bool(request.get('allow_partial', False)) != self.allow_partial:
             raise ValueError('candidate_policy_mismatch')
         mode = request.get('mode', '')
+        if mode == 'texts':
+            return self.score_texts(request)
         if mode not in ('', 'text') or (mode == 'text' and not self.text_mode):
             raise ValueError('unsupported_mode')
         reading, count = request['reading'], len(request['candidates'])
@@ -208,6 +263,19 @@ class Runtime:
             raise ValueError('nonfinite_neural_score')
         return raw.reshape(-1, count).max(0).tolist()   # 各讀音分支逐候選取最大
 
+    def score_texts(self, request):
+        if not self.text_mode:
+            raise ValueError('unsupported_mode')
+        texts = request.get('texts')
+        inputs, owner = prepare_texts(request.get('context', ''), texts, self.maps[1])
+        raw = self.session.run(['scores'], inputs)[0].astype(float)
+        if raw.shape[0] != len(owner) or not np.isfinite(raw).all():
+            raise ValueError('nonfinite_neural_score')
+        total = [0.0] * len(texts)
+        for o, v in zip(owner, raw.tolist()):
+            total[o] += v
+        return total
+
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
@@ -226,6 +294,10 @@ def main():
     runtime.score(warm)
     ready = {'ready': True, 'schema': runtime.manifest['schema'], 'model_sha256': runtime.model_sha,
              'dictionary_sha256': a.dictionary, 'allow_partial': runtime.allow_partial}
+    if runtime.text_mode:   # texts 用 text task 的版面
+        runtime.score({'dictionary_sha256': a.dictionary, 'model_sha256': runtime.model_sha, 'context': ''.join(chars),
+                       'mode': 'texts', 'texts': [chars[0], chars[1] + chars[2]], 'allow_partial': runtime.allow_partial})
+        ready['modes'] = ['texts']
     if runtime.allow_unknown_tones:
         ready['tone_policy'] = runtime.manifest['tone_policy']
     print(json.dumps(ready), flush=True)

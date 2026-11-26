@@ -25,6 +25,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import fetch_assets  # noqa: E402
+from hf_models import WORKER_NAMES, WORKERS  # noqa: E402
 from package_release import prepare_data_manifest  # noqa: E402
 from source_release import digest, extract_dictionary, git  # noqa: E402
 
@@ -70,10 +71,17 @@ def ensure_data(tag, receipt):
 
 
 def ensure_neural(tag, receipt, data):
-    """依安裝收據逐檔複製已安裝版本的 neural/ 並核對雜湊，執行期多出來的檔案不會帶進套件；快取以配對的字典區分。"""
+    """依安裝收據逐檔複製已安裝版本的 neural/ 並核對雜湊，執行期多出來的檔案不會帶進套件；快取以配對的字典區分。
+    worker 換成這個 checkout 的版本（同 hf_models.replace_models）：worker 以 -B 從原始碼執行，不必重編 bytecode。"""
     target = OUT / "neural" / digest(data / "manifest.json")[:12]
-    if target.is_dir():
-        return target
+    if not target.is_dir():
+        copy_installed_neural(tag, receipt, data, target)
+    for name in WORKER_NAMES:
+        shutil.copyfile(WORKERS / name, target / name)
+    return target
+
+
+def copy_installed_neural(tag, receipt, data, target):
     if receipt is None:
         raise ValueError("這台沒有安裝靈犀注音，取不到 neural/")
     source = ZUIN / receipt["directory"]
@@ -92,7 +100,6 @@ def ensure_neural(tag, receipt, data):
         if digest(dest) != sha:
             raise ValueError(f"已安裝的檔案跟安裝收據不符：{name}")
     stage.rename(target)
-    return target
 
 
 def prune_cache(keep):

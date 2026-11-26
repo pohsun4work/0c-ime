@@ -38,11 +38,33 @@ func TestWorkerProcess(t *testing.T) {
 	if schema == "" {
 		schema = "zuin-encoder-runtime-v1"
 	}
-	fmt.Printf(`{"ready":true,"schema":%q,"model_sha256":"model","dictionary_sha256":"dictionary"}`+"\n", schema)
+	modes := ""
+	if strings.HasPrefix(mode, "texts") {
+		modes = `,"modes":["texts"]`
+	}
+	fmt.Printf(`{"ready":true,"schema":%q,"model_sha256":"model","dictionary_sha256":"dictionary"%s}`+"\n", schema, modes)
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		var r map[string]any
 		_ = json.Unmarshal(scanner.Bytes(), &r)
+		if r["mode"] == rerank.ModeTexts { // 每個文字回負的字數
+			switch mode {
+			case "texts_slow":
+				time.Sleep(100 * time.Millisecond)
+			case "texts_hang":
+				time.Sleep(2 * time.Second)
+			}
+			texts, _ := r["texts"].([]any)
+			scores := make([]float64, len(texts))
+			for i, x := range texts {
+				s, _ := x.(string)
+				scores[i] = -float64(len([]rune(s)))
+			}
+			r["scores"] = scores
+			b, _ := json.Marshal(r)
+			fmt.Println(string(b))
+			continue
+		}
 		switch mode {
 		case "timeout":
 			time.Sleep(time.Second)
@@ -71,27 +93,29 @@ func TestWorkerProcess(t *testing.T) {
 	}
 	os.Exit(0)
 }
-func child(t *testing.T, mode string) *Worker {
+func startChild(t *testing.T, mode string, m Manifest, timeout time.Duration) *Worker {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestWorkerProcess$")
-	cmd.Env = append(os.Environ(), "ZUIN_TEST_NEURAL_CHILD="+mode)
-	w, err := start(cmd, Manifest{Schema: "zuin-encoder-runtime-v1", DictionarySHA256: "dictionary", Files: map[string]string{"model.onnx": "model"}, Weight: .1}, 20*time.Millisecond)
+	cmd.Env = append(os.Environ(), "ZUIN_TEST_NEURAL_CHILD="+mode, "ZUIN_TEST_NEURAL_SCHEMA="+m.Schema)
+	m.DictionarySHA256, m.Files = "dictionary", map[string]string{"model.onnx": "model"}
+	w, err := start(cmd, m, timeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(w.Close)
 	return w
 }
+func child(t *testing.T, mode string) *Worker {
+	t.Helper()
+	return startChild(t, mode, Manifest{Schema: "zuin-encoder-runtime-v1", Weight: .1}, 20*time.Millisecond)
+}
 func contextChild(t *testing.T, schema, policy string) *Worker {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestWorkerProcess$")
-	cmd.Env = append(os.Environ(), "ZUIN_TEST_NEURAL_CHILD=context", "ZUIN_TEST_NEURAL_SCHEMA="+schema)
-	w, err := start(cmd, Manifest{Schema: schema, ContextPolicy: policy, DictionarySHA256: "dictionary", Files: map[string]string{"model.onnx": "model"}, Weight: 1, Margin: 2, HintGap: 1.5}, 20*time.Millisecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(w.Close)
-	return w
+	return startChild(t, "context", Manifest{Schema: schema, ContextPolicy: policy, Weight: 1, Margin: 2, HintGap: 1.5}, 20*time.Millisecond)
+}
+func textsChild(t *testing.T, mode string, timeout time.Duration) *Worker {
+	t.Helper()
+	return startChild(t, mode, Manifest{Schema: rerank.SequenceSchemaV1, ContextPolicy: "confirmed_left_64", Weight: 1, TextWeight: 1}, timeout)
 }
 
 func TestContractsAndContextPolicy(t *testing.T) {
@@ -127,7 +151,9 @@ func TestContractsAndContextPolicy(t *testing.T) {
 // v2 套件（#281）要帶合法的 tone_policy 才載入；v1 不能帶。桌面的請求沒有 tone_known，打了聲調的段落照常評分。
 func TestSequenceV2TonePolicy(t *testing.T) {
 	zero, one := 0, 1
-	mask := func(id *int) *rerank.TonePolicy { return &rerank.TonePolicy{Schema: rerank.ToneMaskSchema, UnknownToneID: id} }
+	mask := func(id *int) *rerank.TonePolicy {
+		return &rerank.TonePolicy{Schema: rerank.ToneMaskSchema, UnknownToneID: id}
+	}
 	for _, c := range []struct {
 		name   string
 		schema string
@@ -193,6 +219,87 @@ func TestWorkerDeadlineIdentityAndCrash(t *testing.T) {
 	}
 }
 
+func textsRequest() rerank.TextsRequest {
+	return rerank.TextsRequest{Revision: 3, Context: "我下載了", Texts: []string{"mp3格式", "允格式"}}
+}
+
+func TestScoreTexts(t *testing.T) {
+	w := textsChild(t, "texts", time.Second)
+	if w.Options().Texts == nil {
+		t.Fatal("sequence worker must offer texts scoring")
+	}
+	if scores, err := w.ScoreTexts(textsRequest(), time.Second); err != nil || len(scores) != 2 || scores[0] != -5 || scores[1] != -3 {
+		t.Fatalf("texts: %v %v", scores, err)
+	}
+	one := textsRequest()
+	one.Texts = one.Texts[:1]
+	if _, err := w.ScoreTexts(one, time.Second); err == nil || w.Dead() {
+		t.Fatalf("unsupported texts request must be rejected locally: err=%v dead=%v", err, w.Dead())
+	}
+	// 沒宣告 texts 的 worker（舊版 worker 腳本）在本機就拒絕；encoder 套件不給 Texts。
+	undeclared := contextChild(t, rerank.SequenceSchemaV1, "confirmed_left_64")
+	if _, err := undeclared.ScoreTexts(textsRequest(), time.Second); err == nil || undeclared.Dead() {
+		t.Fatalf("undeclared texts mode: err=%v dead=%v", err, undeclared.Dead())
+	}
+	if o := contextChild(t, "zuin-encoder-runtime-v1", "empty").Options(); o.Texts != nil {
+		t.Fatal("encoder package must not offer texts scoring")
+	}
+	// 沒有 text task（text_weight 0）的序列套件不給：texts 用 text task 的版面。
+	if o := startChild(t, "texts", Manifest{Schema: rerank.SequenceSchemaV1, ContextPolicy: "confirmed_left_64", Weight: 1}, time.Second); o.Options().Texts != nil || o.texts {
+		t.Fatal("package without text task must not offer texts scoring")
+	}
+}
+
+// 超過期限回 ErrDeadline、worker 不殺；下一個請求先讀掉晚到的回覆再送，身分照樣對得上。
+func TestScoreTextsDeadlineKeepsWorker(t *testing.T) {
+	w := textsChild(t, "texts_slow", time.Second)
+	start := time.Now()
+	if _, err := w.ScoreTexts(textsRequest(), 10*time.Millisecond); !errors.Is(err, rerank.ErrDeadline) || w.Dead() {
+		t.Fatalf("deadline: err=%v dead=%v", err, w.Dead())
+	}
+	if time.Since(start) > 80*time.Millisecond {
+		t.Fatal("deadline not honoured")
+	}
+	if scores, err := w.Score(request()); err != nil || len(scores) != 2 {
+		t.Fatalf("worker unusable after late reply: %v %v", scores, err)
+	}
+	if st := w.Stats(); st.Late != 1 || st.Timeouts != 0 || st.Scored != 1 {
+		t.Fatalf("stats: %+v", st)
+	}
+}
+
+// 前一個 texts 還在算、期限內等不到時不送新的：連續超過期限的請求不疊在 worker 後面，之後的請求只等第一個算完。
+func TestScoreTextsDoesNotQueue(t *testing.T) {
+	w := textsChild(t, "texts_slow", time.Second)
+	start := time.Now()
+	for range 3 {
+		if _, err := w.ScoreTexts(textsRequest(), 10*time.Millisecond); !errors.Is(err, rerank.ErrDeadline) || w.Dead() {
+			t.Fatalf("deadline: err=%v dead=%v", err, w.Dead())
+		}
+	}
+	if scores, err := w.Score(request()); err != nil || len(scores) != 2 {
+		t.Fatalf("worker unusable: %v %v", scores, err)
+	}
+	if d := time.Since(start); d > 180*time.Millisecond { // 一個 texts 100 ms；疊上去的話要 300 ms
+		t.Fatalf("late texts requests queued: %v", d)
+	}
+}
+
+// 晚到的回覆從送出算起超過 timeout 還沒回，下一個請求殺掉 worker。
+func TestScoreTextsLateReplyStillBounded(t *testing.T) {
+	w := textsChild(t, "texts_hang", 150*time.Millisecond)
+	if _, err := w.ScoreTexts(textsRequest(), 10*time.Millisecond); !errors.Is(err, rerank.ErrDeadline) {
+		t.Fatalf("deadline: %v", err)
+	}
+	start := time.Now()
+	if _, err := w.Score(request()); !errors.Is(err, ErrTimeout) || !w.Dead() {
+		t.Fatalf("hung worker kept: err=%v dead=%v", err, w.Dead())
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Fatal("unbounded late wait")
+	}
+}
+
 func TestONNXPackageIntegration(t *testing.T) {
 	packagePath := os.Getenv("ZUIN_TEST_NEURAL_PACKAGE")
 	if packagePath == "" {
@@ -220,6 +327,11 @@ func TestONNXPackageIntegration(t *testing.T) {
 	scores, err := w.Score(r)
 	if err != nil || len(scores) != 2 {
 		t.Fatalf("actual ONNX: %v %v", scores, err)
+	}
+	if strings.HasPrefix(m.Schema, "zuin-sequence-runtime-") {
+		if scores, err = w.ScoreTexts(textsRequest(), time.Second); err != nil || len(scores) != 2 || !(scores[0] > scores[1]) {
+			t.Fatalf("actual ONNX texts: %v %v", scores, err)
+		}
 	}
 	wrong := cfg
 	wrong.DictionarySHA256 = strings.Repeat("0", 64)

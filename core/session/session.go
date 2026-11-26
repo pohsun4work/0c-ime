@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -120,6 +121,7 @@ type Session struct {
 	sylPrior            map[zhuyin.Syllable]float64           // 簡拼保留讀音用的單音節常用程度（syllablePrior）
 	missedMemo          map[zhuyin.Syllable][]zhuyin.Syllable // 打的音節補上一鍵的讀音（missedFor，#335）
 	repairMemo          repairMemo                            // 待定按鍵顯示的修正讀音（mixedRepairShown）
+	spaceMemo           spaceMemo                             // 待定按鍵接空白的決定（mixedSpaceAction，P7）
 	EnglishAutocomplete bool
 	// KeepRedundantKeys：「重複按的注音當成一次」關閉時由宿主設定（P6）。混打時重複的注音不合併，照官方（wuuuu/6 是 wuuu營）。
 	KeepRedundantKeys bool
@@ -139,6 +141,9 @@ type Session struct {
 	mixed                 pendingKeys
 	mixedKeys             map[int]string      // completed phonetic position → original keys, retained until edited/committed
 	mixedOrigins          map[int]mixedOrigin // literal positions: independently typed vs system-assisted
+	mixedRevisit          *mixedRevisit       // 最近一次神經比過、之後帶著後文再比一次的混打決定（P7）
+	mixedSpent            time.Duration       // 這個請求裡 P7 花掉的時間（每鍵預算 mixedNeuralDeadline）
+	mixedBusy             int                 // 評分超過期限後還有幾鍵不問神經（mixedBusyKeys）
 	pendingToneKey        *toneKeyPending     // 上一鍵是單獨的聲調鍵：緊接著的空白換成聲調符號（#135）
 	toneKeyDone           string              // 上一鍵用這個聲調鍵打完一個字：緊接著再按同一個鍵是連按（#321）
 	untonedRun            *untonedRun         // 聲調選填時這一串連續打的注音鍵（#150），認「我的詞彙」的英文詞
@@ -287,8 +292,12 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.untonedRun = nil
 	}
 	_, keypad := proto.KeypadChar(r.Key)
+	s.mixedSpent = 0
 	s.allowRerank = r.Type == proto.Symbol || r.Type == proto.Backspace || r.Type == proto.Key && (len([]rune(r.Key)) == 1 || keypad || r.Key == proto.KeyBackspace)
 	defer func() { s.allowRerank = false }()
+	if s.allowRerank && s.mixedBusy > 0 {
+		s.mixedBusy--
+	}
 	if !(r.Type == proto.Key && (r.Key == proto.KeyTab || r.Key == proto.KeyEscape)) && r.Type != proto.Accept {
 		s.previewRewrite = false
 	}
@@ -329,6 +338,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		}
 		s.finishSymbolPending()
 		handled, commit = s.key(r.Key)
+		s.revisitMixed()
 	case proto.Symbol:
 		s.settleMixed(true) // 顯示成注音的待定按鍵交給注音接著組（nj 再點 ㄅ 是 ㄅㄨ）
 		for _, sym := range r.Symbol {
@@ -1744,6 +1754,7 @@ func (s *Session) reset() {
 	s.clearMixed()
 	s.mixedKeys = nil
 	s.mixedOrigins = nil
+	s.mixedRevisit = nil
 	s.pendingToneKey, s.literalKeys = nil, nil
 	s.toneKeyDone = ""
 	s.clearDocumentContext()

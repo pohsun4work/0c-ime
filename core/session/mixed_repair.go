@@ -4,7 +4,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/0c-biggo/0c-ime/core/english"
 	"github.com/0c-biggo/0c-ime/core/layout"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
@@ -137,29 +136,6 @@ func (s *Session) repairedText(raw string) (string, bool) {
 	return raw[:at] + string(done.Base()), ok
 }
 
-// spaceRepair：沒選過的待定按鍵接空白時，finishMixedTone 會照修正組成中文（gjn␣ 是 蘇、5wu0␣ 是 5天）。
-// 順序同 finishMixedTone：英文詞、英數詞、數字、本身組得成字的都不是修正。
-func (s *Session) spaceRepair(raw string) (int, zhuyin.Syllable, bool) {
-	if s.vocabEnglish(raw) || s.zhuyinKeyHabit(raw) || english.Alnum(raw) == english.AlnumLiteral || s.mixedEnglishWord(raw) ||
-		s.mixedSpaceNumber(raw, zhuyin.Tone1) || s.alnumThenSpace(raw, zhuyin.Tone1) || s.rareAlnumSpace(raw) {
-		return 0, "", false
-	}
-	if _, _, ok := s.mixedPunctSplit(raw, zhuyin.Tone1); ok {
-		return 0, "", false
-	}
-	if _, ok := s.mixedReading(raw, zhuyin.Tone1); ok {
-		return 0, "", false
-	}
-	at, done, ok := s.repairFor(raw, " ", zhuyin.Tone1)
-	if !ok {
-		return 0, "", false
-	}
-	if bat, bdone, bok := s.mixedBoundary(raw, " ", zhuyin.Tone1); !bok || bat != at || bdone != done {
-		return 0, "", false
-	}
-	return at, done, true
-}
-
 // repairMemo 記下 mixedRepairShown 上次的輸入與結果：一次按鍵的組字區、小視窗、定案會問好幾次，修正要比較切法的常用程度。
 type repairMemo struct {
 	raw                       string
@@ -170,7 +146,7 @@ type repairMemo struct {
 }
 
 // mixedRepairShown：組字區顯示修正讀音時，回傳切點與修正後的音節，切點前照字面。沒選過的（choice 0）照接空白的結果
-// （gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
+// （spaceShown：gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ、aq8 是 aㄆㄚ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
 func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	p := s.mixed
 	if p.raw == "" || p.accepted != "" || s.english || s.englishWord || p.choice == 1 || p.choice == 2 {
@@ -186,7 +162,7 @@ func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	if p.choice == 3 {
 		at, done, ok = s.repairFor(p.raw, " ", zhuyin.Tone1)
 	} else {
-		at, done, ok = s.spaceRepair(p.raw)
+		at, done, ok = s.spaceShown()
 	}
 	*m = repairMemo{raw: p.raw, rev: s.rev, choice: p.choice, cursor: s.cursor, syls: len(s.syls), at: at, done: done, ok: ok}
 	return at, done, ok
