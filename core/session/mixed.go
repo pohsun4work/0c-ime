@@ -133,6 +133,18 @@ func (s *Session) insertMixedTyped(syl zhuyin.Syllable, keys string) {
 	}
 }
 
+// insertMixedSyllables 收進混打組成的音節：一個音節時 keys 整段是它的原按鍵（規則的音節不一定照順序），
+// 多個時以聲調鍵分段（神經的切法，toneChunks）。
+func (s *Session) insertMixedSyllables(syls []zhuyin.Syllable, keys string) {
+	if len(syls) == 1 {
+		s.insertMixedTyped(syls[0], keys)
+		return
+	}
+	for i, k := range toneChunks(keys) {
+		s.insertMixedTyped(syls[i], k)
+	}
+}
+
 // baseComposer 回傳 syl 不帶聲調的組音狀態。
 func baseComposer(syl zhuyin.Syllable) zhuyin.Composer {
 	var c zhuyin.Composer
@@ -638,7 +650,17 @@ func (s *Session) finishMixedTone(key string) bool {
 	if key == " " && s.zhuyinKeyHabit(raw) && s.mixedKeepable(2, sym) {
 		return s.applyMixedTone(mixedToneAction{kind: mixedToneKeep, choice: 2, mark: zhuyinKeyApplied}, key, sym)
 	}
-	return s.applyMixedTone(s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym), key, sym)
+	act, visit := s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
+	n := len(s.syls)
+	if !s.applyMixedTone(act, key, sym) {
+		return false
+	}
+	if n = len(s.syls) - n; visit != nil && n > 0 && s.cursor == len(s.syls) {
+		visit.start, visit.end = s.cursor-n, s.cursor
+		visit.syls, visit.checked = slices.Clone(s.syls[visit.start:visit.end]), len(s.syls)
+		s.mixedRevisit = visit
+	}
+	return true
 }
 
 func mixedSyllable(at int, done zhuyin.Syllable) mixedToneAction {
@@ -741,13 +763,7 @@ func (s *Session) applyMixedTone(act mixedToneAction, key string, sym rune) bool
 		} else {
 			s.insertMixedPrefix(raw[:act.at], false, false)
 		}
-		if len(act.syls) == 1 {
-			s.insertMixedTyped(act.syls[0], raw[act.at:]+key)
-			break
-		}
-		for i, keys := range toneChunks(raw[act.at:] + key) {
-			s.insertMixedTyped(act.syls[i], keys)
-		}
+		s.insertMixedSyllables(act.syls, raw[act.at:]+key)
 	case mixedToneSpace:
 		s.flushMixed()
 		s.insertMixedLiteral(" ", false, false)
