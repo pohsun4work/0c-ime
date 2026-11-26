@@ -141,8 +141,9 @@ type Session struct {
 	mixed                 pendingKeys
 	mixedKeys             map[int]string      // completed phonetic position → original keys, retained until edited/committed
 	mixedOrigins          map[int]mixedOrigin // literal positions: independently typed vs system-assisted
-	mixedRevisit          *mixedRevisit       // 最近一次神經比過、之後帶著後文再比一次的混打決定（P7）
+	mixedRevisits         []*mixedRevisit     // 神經比過、之後帶著後文再比一次的混打決定（P7，最多 mixedRevisitSlots 個）
 	mixedSpent            time.Duration       // 這個請求裡 P7 花掉的時間（每鍵預算 mixedNeuralDeadline）
+	mixedAsked            bool                // 這個請求裡已經為決定問過神經：回頭比留到下一鍵
 	mixedBusy             int                 // 評分超過期限後還有幾鍵不問神經（mixedBusyKeys）
 	pendingToneKey        *toneKeyPending     // 上一鍵是單獨的聲調鍵：緊接著的空白換成聲調符號（#135）
 	toneKeyDone           string              // 上一鍵用這個聲調鍵打完一個字：緊接著再按同一個鍵是連按（#321）
@@ -292,7 +293,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.untonedRun = nil
 	}
 	_, keypad := proto.KeypadChar(r.Key)
-	s.mixedSpent = 0
+	s.mixedSpent, s.mixedAsked = 0, false
 	s.allowRerank = r.Type == proto.Symbol || r.Type == proto.Backspace || r.Type == proto.Key && (len([]rune(r.Key)) == 1 || keypad || r.Key == proto.KeyBackspace)
 	defer func() { s.allowRerank = false }()
 	if s.allowRerank && s.mixedBusy > 0 {
@@ -1754,7 +1755,7 @@ func (s *Session) reset() {
 	s.clearMixed()
 	s.mixedKeys = nil
 	s.mixedOrigins = nil
-	s.mixedRevisit = nil
+	s.mixedRevisits = nil
 	s.pendingToneKey, s.literalKeys = nil, nil
 	s.toneKeyDone = ""
 	s.clearDocumentContext()

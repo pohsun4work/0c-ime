@@ -690,7 +690,7 @@ func (s *Session) finishMixedTone(key string) bool {
 	if added := len(s.syls) - before; visit != nil && added > 0 && s.cursor == len(s.syls) {
 		v := *visit // spaceMemo 留著的那份不跟著改
 		v.start, v.syls, v.checked = s.cursor-added, slices.Clone(s.syls[s.cursor-added:]), len(s.syls)
-		s.mixedRevisit = &v
+		s.keepRevisit(&v)
 	}
 	return true
 }
@@ -1490,8 +1490,8 @@ func (s *Session) mixedSpaceNumber(raw string, tone rune) bool {
 }
 
 // mixedSpaceReading（#162）：中英混打時照字面顯示成數字的待定按鍵（有數字、沒有字母），按空白會組成中文時，
-// 回傳組成中文的那段按鍵的起點與讀音（20 → 0、ㄉㄢ；我,2. 的 ,2. → 1、ㄉㄡ），供快照的讀音提示。
-// 判斷與 finishMixedTone 接空白的順序一致：標點切開、數字、一聲組成中文。拼不成音節（2026）、
+// 回傳組成中文的那段按鍵的起點與讀音（20 → 0、ㄉㄢ；我,2. 的 ,2. → 1、ㄉㄡ；用了205; → 2、ㄓㄤ），供快照的讀音提示。
+// 照接空白的決定（mixedSpaceAction，規則＋神經）：神經判成數字的（我 10 的 10）、拼不成音節（2026）、
 // 數字寫法（3.5、318）、已用 ↓ 選過原按鍵或注音解釋、候選開著時沒有提示。
 func (s *Session) mixedSpaceReading() (int, zhuyin.Syllable, bool) {
 	raw := s.mixed.raw
@@ -1500,14 +1500,11 @@ func (s *Session) mixedSpaceReading() (int, zhuyin.Syllable, bool) {
 		s.vocabEnglish(raw) || s.mixedText() != raw {
 		return 0, "", false
 	}
-	if at, done, ok := s.mixedPunctSplit(raw, zhuyin.Tone1); ok {
-		return at, done, true
-	}
-	if s.mixedSpaceNumber(raw, zhuyin.Tone1) {
+	_, act, _ := s.mixedSpaceAction()
+	if act.kind != mixedToneSyllable || len(act.syls) != 1 {
 		return 0, "", false
 	}
-	done, ok := s.mixedReading(raw, zhuyin.Tone1)
-	return 0, done, ok
+	return act.at, act.syls[0], true
 }
 
 // digitWord（#162）：只用數字鍵、照聲母韻母的順序打完，一聲自己就是字的按鍵（標準排列的 20 ㄉㄢ 單、18 ㄅㄚ 八、
