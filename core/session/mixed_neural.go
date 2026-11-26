@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -46,8 +47,8 @@ type mixedSplit struct {
 	rows    []decode.Hypothesis
 }
 
-// neuralMixedTone：同一種切法（同切點同讀音）的同音字以 rerank.Choose 選代表，各切法比代表的神經分數
-// （修正扣分，repairPenalty），最好的不是規則結果 act、而且高出 mixedNeuralMargin 才換；評分器沒有、失敗或超過期限照規則。
+// neuralMixedTone：各切法比所有同音字的神經機率加總（不受哪個字常用影響：常打 喔 的 2jo4i␣ 照樣比 對喔＋對啊… 對 對i；
+// 修正扣分，repairPenalty），最好的不是規則結果 act、而且高出 mixedNeuralMargin 才換；評分器沒有、失敗或超過期限照規則。
 // 結果是中文音節或照原樣接空白時另回傳之後要回頭再比的紀錄（revisitMixed；位置由呼叫端填）。decided：神經比過或不用比；
 // 現在不能問、超過期限的是 false，之後能問時可以再算。
 func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone rune) (_ mixedToneAction, _ *mixedRevisit, decided bool) {
@@ -82,8 +83,7 @@ func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone run
 		if len(got) == 0 {
 			continue
 		}
-		head := rerank.Choose(sp.rows, got, s.Rerank.Weight, 0)
-		heads[n], scored[n] = head, got[head]
+		heads[n], scored[n] = rerank.Choose(sp.rows, got, s.Rerank.Weight, 0), logSumExp(got) // 代表字給回頭比用
 		if n != rule {
 			scored[n] -= repairPenalty(sp, splits[rule])
 		}
@@ -113,6 +113,16 @@ func (s *Session) neuralMixedTone(act mixedToneAction, raw, key string, tone run
 		}
 	}
 	return act, nil, true
+}
+
+// logSumExp 是 log(Σ exp(x))：同一種切法各同音字的機率加總。
+func logSumExp(xs []float64) float64 {
+	top := slices.Max(xs)
+	sum := 0.0
+	for _, x := range xs {
+		sum += math.Exp(x - top)
+	}
+	return top + math.Log(sum)
 }
 
 var errTextsUnusable = errors.New("texts not scorable")

@@ -28,6 +28,8 @@ func splitSession(scores map[string]float64, seen *[]rerank.TextsRequest) *Sessi
 		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
 		sys.SetUni(e.w, 1e-3)
 	}
+	lex.Add(lexicon.Entry{Surface: "因", Reading: zhuyin.ParseReading("ㄧㄣ"), PRW: 1}) // 音 的同音字、比較少用
+	sys.SetUni("因", 1e-4)
 	s := New(personal.NewModel(lex, sys))
 	var words []english.Word
 	for _, w := range []string{"hello", "go", "zip", "up", "upon", "the", "thew", "a", "as"} {
@@ -72,6 +74,16 @@ func TestMixedNeuralChoosesSplit(t *testing.T) {
 		if got := repairCommit(splitSession(tc.scores, nil), tc.keys); got != tc.want {
 			t.Errorf("%s：%q 送出 %q，要 %q", tc.name, tc.keys, got, tc.want)
 		}
+	}
+}
+
+// 各切法比所有同音字的機率加總：引擎選的代表 音 單獨輸給 up，音＋因 加起來贏。
+func TestMixedNeuralSumsHomophones(t *testing.T) {
+	if got := repairCommit(splitSession(map[string]float64{"up": -5, "音": -5.5, "因": -5.5}, nil), "up "); got != "音" {
+		t.Errorf("送出 %q，要 音", got)
+	}
+	if got := repairCommit(splitSession(map[string]float64{"up": -5, "音": -6, "因": -6}, nil), "up "); got != "up " {
+		t.Errorf("加起來也輸：送出 %q，要 up␣", got)
 	}
 }
 
