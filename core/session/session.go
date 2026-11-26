@@ -121,6 +121,8 @@ type Session struct {
 	sylPrior            map[zhuyin.Syllable]float64           // 簡拼保留讀音用的單音節常用程度（syllablePrior）
 	missedMemo          map[zhuyin.Syllable][]zhuyin.Syllable // 打的音節補上一鍵的讀音（missedFor，#335）
 	repairMemo          repairMemo                            // 待定按鍵顯示的修正讀音（mixedRepairShown）
+	spaceMemo           spaceMemo                             // 待定按鍵接空白的決定（mixedSpaceAction，P7）
+	spaceDeciding       bool                                  // 正在算 mixedSpaceAction：畫面照規則本身的顯示
 	EnglishAutocomplete bool
 	// KeepRedundantKeys：「重複按的注音當成一次」關閉時由宿主設定（P6）。混打時重複的注音不合併，照官方（wuuuu/6 是 wuuu營）。
 	KeepRedundantKeys bool

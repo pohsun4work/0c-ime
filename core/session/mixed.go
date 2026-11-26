@@ -64,7 +64,7 @@ func (s *Session) mixedText() string {
 	}
 	// 使用者加的英文詞（ls、rm、kubectl，#146）：完全相同（大小寫照字面）就照字面，優先於一聲讀音與注音解釋。
 	// ↓ 選了注音解釋（choice 2）照舊顯示注音。
-	if p.choice == 0 && s.vocabEnglish(p.raw) {
+	if p.choice == 0 && (s.vocabEnglish(p.raw) || s.spaceNeuralLiteral()) {
 		return p.raw
 	}
 	// 沒有字母（只有數字與標點鍵，也是 ㄅㄉㄓㄚㄞㄢ、ㄝㄡㄥㄤㄦ）時照字面顯示與提交：「我.」送出「我.」不是「我ㄡ」，
@@ -362,6 +362,14 @@ func (s *Session) mixedSwap() (pendingKeys, string, bool) {
 		if _, _, ok := s.mixedSpaceReading(); ok {
 			return p.with(1), p.raw, true
 		}
+		if s.spaceNeuralLiteral() { // 神經判成英文的（go up 的 up）：另一個是規則的注音，不是英文補全
+			if c, ok := s.mixedComposer(p.raw); ok && zhuyin.Completable(zhuyin.Syllable(c.String())) {
+				return p.with(2), c.String(), true
+			}
+			if text, ok := s.repairedText(p.raw); ok {
+				return p.with(3), text, true
+			}
+		}
 	}
 	word := p
 	english := len(p.raw) >= 2 && !s.vocabEnglish(p.raw) // 補全與拼字修正至少兩個字母，使用者加的英文詞不換
@@ -650,7 +658,13 @@ func (s *Session) finishMixedTone(key string) bool {
 	if key == " " && s.zhuyinKeyHabit(raw) && s.mixedKeepable(2, sym) {
 		return s.applyMixedTone(mixedToneAction{kind: mixedToneKeep, choice: 2, mark: zhuyinKeyApplied}, key, sym)
 	}
-	act, visit := s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
+	var act mixedToneAction
+	var visit *mixedRevisit
+	if key == " " && s.mixed.choice == 0 {
+		_, act, visit = s.mixedSpaceAction() // 組字區照著顯示的那個決定
+	} else {
+		act, visit = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
+	}
 	n := len(s.syls)
 	if !s.applyMixedTone(act, key, sym) {
 		return false

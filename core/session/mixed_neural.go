@@ -241,6 +241,72 @@ func (s *Session) replaceMixed(v *mixedRevisit, sp mixedSplit) {
 	s.refresh()
 }
 
+// spaceMemo 記下待定按鍵接空白的決定（mixedSpaceAction）：組字區照它顯示，按空白時直接套用，不再評分一次。
+// 前文確認等不是按鍵的請求不能問神經，看的是待定按鍵與組字區（pathSig）有沒有變，不看 rev。
+type spaceMemo struct {
+	raw, sig  string
+	cursor    int
+	neural    bool // 算的時候可以問神經
+	rule, act mixedToneAction
+	visit     *mixedRevisit
+}
+
+// mixedSpaceAction：沒選過（choice 0）的待定按鍵接空白時規則的決定 rule，與神經切法比較後實際套用的 act。
+// 組字區照 act 顯示（組字區＝空白的結果：aq8 是 aㄆㄚ、神經判成英文的 up 是 up），空白鍵直接用。
+func (s *Session) mixedSpaceAction() (rule, act mixedToneAction, visit *mixedRevisit) {
+	raw := s.mixed.raw
+	neural := s.Rerank.Texts != nil && s.allowRerank && mixedNeuralDeadline-s.mixedSpent >= mixedNeuralMin
+	m := &s.spaceMemo
+	if m.raw == raw && m.sig == s.pathSig && m.cursor == s.cursor && (m.neural || !neural) {
+		return m.rule, m.act, m.visit
+	}
+	sym, _ := layout.Standard.Symbol(' ')
+	s.spaceDeciding = true // 規則裡看畫面的判斷（mixedKeepable）照規則本身的顯示
+	rule = s.decideMixedTone(raw, " ", sym)
+	act, visit = s.neuralMixedTone(rule, raw, " ", sym)
+	s.spaceDeciding = false
+	*m = spaceMemo{raw: raw, sig: s.pathSig, cursor: s.cursor, neural: neural, rule: rule, act: act, visit: visit}
+	return rule, act, visit
+}
+
+// spaceFollowed：沒選過的待定按鍵照空白的決定顯示。沒有字母的（20 照字面加讀音提示，#162）、使用者加的英文詞、
+// 選過的注音文照原本的顯示；正在決定空白時（spaceDeciding）照規則本身的顯示。
+func (s *Session) spaceFollowed() bool {
+	raw := s.mixed.raw
+	return !s.spaceDeciding && strings.ContainsFunc(raw, unicode.IsLetter) && !s.vocabEnglish(raw) && !s.zhuyinKeyHabit(raw)
+}
+
+// spaceShown：沒選過的待定按鍵接空白會組成一個中文音節、而組字區本來不會這樣顯示時（修正讀音 gjn 的 ㄙㄨ、
+// 切成英文＋中文 aq8 的 aㄆㄚ），回傳切點與音節。整串照順序組成的（su 的 ㄋㄧ）照一般注音顯示。
+// 正在決定空白時照規則本身的修正顯示（spaceRepair）。
+func (s *Session) spaceShown() (int, zhuyin.Syllable, bool) {
+	raw := s.mixed.raw
+	if s.spaceDeciding {
+		return s.spaceRepair(raw)
+	}
+	if !s.spaceFollowed() {
+		return 0, "", false
+	}
+	_, act, _ := s.mixedSpaceAction()
+	if act.kind != mixedToneSyllable || act.plain || len(act.syls) != 1 {
+		return 0, "", false
+	}
+	if c, ok := s.mixedComposer(raw); act.at == 0 && ok && zhuyin.Syllable(c.String()) == act.syls[0].Base() {
+		return 0, "", false
+	}
+	return act.at, act.syls[0], true
+}
+
+// spaceNeuralLiteral：沒選過的待定按鍵，規則接空白會組成中文、神經判成照原按鍵（go up 的 up）：組字區照字面顯示，
+// Tab 的「另一個」是規則的注音。
+func (s *Session) spaceNeuralLiteral() bool {
+	if !s.spaceFollowed() {
+		return false
+	}
+	rule, act, _ := s.mixedSpaceAction()
+	return rule.kind == mixedToneSyllable && (act.kind == mixedToneLiteral || act.kind == mixedToneSpaceAsTyped)
+}
+
 // mixedNeuralWanted：純中文不多問神經。待定按鍵要有英文字母，而且是英文字典的詞（up␣ 照規則是 音）、
 // 接聲調鍵是 alnum.tsv 照舊出字的英數詞（mp3 照規則是 允），或規則結果不是整串照順序組成一個音節，
 // 或有數字、大寫或符號（整串照順序組成一個音節時注音的數字、標點鍵不算：2k7 的、q96 排）。

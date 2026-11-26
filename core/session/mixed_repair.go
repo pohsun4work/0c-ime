@@ -137,8 +137,8 @@ func (s *Session) repairedText(raw string) (string, bool) {
 	return raw[:at] + string(done.Base()), ok
 }
 
-// spaceRepair：沒選過的待定按鍵接空白時，finishMixedTone 會照修正組成中文（gjn␣ 是 蘇、5wu0␣ 是 5天）。
-// 順序同 finishMixedTone：英文詞、英數詞、數字、本身組得成字的都不是修正。
+// spaceRepair：規則本身的修正顯示：沒選過的待定按鍵接空白時，規則會照修正組成中文（gjn␣ 是 蘇、5wu0␣ 是 5天）。
+// 順序同 decideMixedTone：英文詞、英數詞、數字、本身組得成字的都不是修正。決定空白時（spaceShown）用。
 func (s *Session) spaceRepair(raw string) (int, zhuyin.Syllable, bool) {
 	if s.vocabEnglish(raw) || s.zhuyinKeyHabit(raw) || english.Alnum(raw) == english.AlnumLiteral || s.mixedEnglishWord(raw) ||
 		s.mixedSpaceNumber(raw, zhuyin.Tone1) || s.alnumThenSpace(raw, zhuyin.Tone1) || s.rareAlnumSpace(raw) {
@@ -164,20 +164,21 @@ func (s *Session) spaceRepair(raw string) (int, zhuyin.Syllable, bool) {
 type repairMemo struct {
 	raw                       string
 	rev, choice, cursor, syls int
+	deciding                  bool
 	at                        int
 	done                      zhuyin.Syllable
 	ok                        bool
 }
 
 // mixedRepairShown：組字區顯示修正讀音時，回傳切點與修正後的音節，切點前照字面。沒選過的（choice 0）照接空白的結果
-// （gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
+// （spaceShown：gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ、aq8 是 aㄆㄚ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
 func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	p := s.mixed
 	if p.raw == "" || p.accepted != "" || s.english || s.englishWord || p.choice == 1 || p.choice == 2 {
 		return 0, "", false
 	}
 	m := &s.repairMemo
-	if m.raw == p.raw && m.rev == s.rev && m.choice == p.choice && m.cursor == s.cursor && m.syls == len(s.syls) {
+	if m.raw == p.raw && m.rev == s.rev && m.choice == p.choice && m.cursor == s.cursor && m.syls == len(s.syls) && m.deciding == s.spaceDeciding {
 		return m.at, m.done, m.ok
 	}
 	var at int
@@ -186,9 +187,9 @@ func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	if p.choice == 3 {
 		at, done, ok = s.repairFor(p.raw, " ", zhuyin.Tone1)
 	} else {
-		at, done, ok = s.spaceRepair(p.raw)
+		at, done, ok = s.spaceShown()
 	}
-	*m = repairMemo{raw: p.raw, rev: s.rev, choice: p.choice, cursor: s.cursor, syls: len(s.syls), at: at, done: done, ok: ok}
+	*m = repairMemo{raw: p.raw, rev: s.rev, choice: p.choice, cursor: s.cursor, syls: len(s.syls), deciding: s.spaceDeciding, at: at, done: done, ok: ok}
 	return at, done, ok
 }
 

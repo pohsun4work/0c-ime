@@ -23,7 +23,7 @@ func splitSession(scores map[string]float64, seen *[]rerank.TextsRequest) *Sessi
 	lex, sys := lexicon.NewMem(), lm.NewMem()
 	for _, e := range []struct{ w, r string }{
 		{"我", "ㄨㄛˇ"}, {"你", "ㄋㄧˇ"}, {"央", "ㄧㄤ"}, {"允", "ㄩㄣˇ"}, {"分", "ㄈㄣ"}, {"嗯", "ㄣ"}, {"誰", "ㄕㄟˊ"}, {"音", "ㄧㄣ"},
-		{"停", "ㄊㄧㄥˊ"}, {"營", "ㄧㄥˊ"},
+		{"停", "ㄊㄧㄥˊ"}, {"營", "ㄧㄥˊ"}, {"趴", "ㄆㄚ"},
 	} {
 		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
 		sys.SetUni(e.w, 1e-3)
@@ -162,5 +162,43 @@ func TestMixedNeuralRevisitWindow(t *testing.T) {
 	splitCommit(splitSession(map[string]float64{"允": 0, "mp3": -5, "mp3我": 0}, &seen), "mp3ji3su3ji3")
 	if len(seen) != 2 {
 		t.Fatalf("換過就固定：問了 %d 次", len(seen))
+	}
+}
+
+// 組字區照空白的結果顯示：規則接空白切成英文＋中文的（aq8␣ 是 a趴）顯示 aㄆㄚ，神經判成照字面時顯示原按鍵；
+// 神經判成英文的 up 顯示 up，Tab 換成規則的 ㄧㄣ、再按換回。空白直接用顯示時的決定，不再問一次神經。
+func TestMixedDisplayFollowsSpace(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scores map[string]float64
+		want   string
+	}{
+		{"規則", nil, "aㄆㄚ"},
+		{"神經照規則", map[string]float64{"a趴": 0, "aq8": -10}, "aㄆㄚ"},
+		{"神經照字面", map[string]float64{"aq8": 0, "a趴": -10}, "aq8"},
+	} {
+		s := splitSession(tc.scores, nil)
+		if got := mixedType(s, "aq8").Text(); got != tc.want {
+			t.Errorf("%s：aq8 顯示 %q，要 %q", tc.name, got, tc.want)
+		}
+	}
+	var seen []rerank.TextsRequest
+	s := splitSession(map[string]float64{"up": 0, "音": -10}, &seen)
+	if got := mixedType(s, "up").Text(); got != "up" {
+		t.Fatalf("神經判成英文：顯示 %q", got)
+	}
+	// 不是按鍵的請求（不能問神經）不換掉神經的決定。
+	if got := s.Handle(proto.Request{Type: proto.Display, Columns: 5}).Text(); got != "up" {
+		t.Errorf("欄數請求之後：%q", got)
+	}
+	if got := key(s, proto.KeyTab).Text(); got != "ㄧㄣ" {
+		t.Errorf("Tab 換成規則的注音：%q", got)
+	}
+	if got := key(s, proto.KeyTab).Text(); got != "up" {
+		t.Errorf("再按 Tab 換回：%q", got)
+	}
+	n := len(seen)
+	if got := key(s, " "); got.Text() != "up " || len(seen) != n {
+		t.Errorf("空白照顯示的決定、不再問神經：%q，多問了 %d 次", got.Text(), len(seen)-n)
 	}
 }
