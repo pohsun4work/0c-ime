@@ -595,10 +595,11 @@ func (s *Session) neutralFallback(done zhuyin.Syllable) zhuyin.Syllable {
 
 // mixedToneAction 是聲調鍵或空白收尾待定按鍵的做法：decideMixedTone 照規則決定，applyMixedTone 套用。
 type mixedToneAction struct {
-	kind   mixedToneKind
-	at     int             // mixedToneSyllable：raw[:at] 照字面，raw[at:] 加這一鍵組成 syl
-	syl    zhuyin.Syllable // mixedToneSyllable
-	plain  bool            // mixedToneSyllable：前段直接照字面插入，結尾的併入符號不另外分開（見 insertMixedPrefix）
+	kind mixedToneKind
+	at   int // mixedToneSyllable：raw[:at] 照字面，raw[at:] 加這一鍵照順序組成 syls（規則只有一個音節；神經的切法以聲調鍵分成多個）
+	syls []zhuyin.Syllable
+	// plain：mixedToneSyllable 的前段直接照字面插入，結尾的併入符號不另外分開（見 insertMixedPrefix）
+	plain  bool
 	choice int             // mixedToneKeep：以這個 choice 顯示的注音留下
 	mark   zhuyinKeyOrigin // mixedToneKeep：留下後記的來源；0 不記
 }
@@ -624,7 +625,7 @@ func (s *Session) finishMixedTone(key string) bool {
 	// Tab 換成修正讀音的（png → ㄕㄣ）：空白、聲調鍵照修正組字（身、審）；這個聲調組不成時照沒選過的判斷。
 	if s.mixed.choice == 3 {
 		if at, done, ok := s.repairFor(raw, key, sym); ok {
-			return s.applyMixedTone(mixedToneAction{kind: mixedToneSyllable, at: at, syl: done}, key, sym)
+			return s.applyMixedTone(mixedSyllable(at, done), key, sym)
 		}
 		s.mixed.choice = 0
 	}
@@ -637,15 +638,17 @@ func (s *Session) finishMixedTone(key string) bool {
 	if key == " " && s.zhuyinKeyHabit(raw) && s.mixedKeepable(2, sym) {
 		return s.applyMixedTone(mixedToneAction{kind: mixedToneKeep, choice: 2, mark: zhuyinKeyApplied}, key, sym)
 	}
-	return s.applyMixedTone(s.decideMixedTone(raw, key, sym), key, sym)
+	return s.applyMixedTone(s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym), key, sym)
+}
+
+func mixedSyllable(at int, done zhuyin.Syllable) mixedToneAction {
+	return mixedToneAction{kind: mixedToneSyllable, at: at, syls: []zhuyin.Syllable{done}}
 }
 
 // decideMixedTone 照規則決定聲調鍵或空白怎麼收尾待定按鍵 raw，不改狀態。
 func (s *Session) decideMixedTone(raw, key string, sym rune) mixedToneAction {
 	var literal mixedToneAction
-	syllable := func(at int, done zhuyin.Syllable) mixedToneAction {
-		return mixedToneAction{kind: mixedToneSyllable, at: at, syl: done}
-	}
+	syllable := mixedSyllable
 	// 已知的英數詞、使用者選回原按鍵學到的英數詞（#249）。
 	if s.mixed.choice == 0 && key != " " && s.literalToken(raw+key) {
 		return literal
@@ -738,7 +741,13 @@ func (s *Session) applyMixedTone(act mixedToneAction, key string, sym rune) bool
 		} else {
 			s.insertMixedPrefix(raw[:act.at], false, false)
 		}
-		s.insertMixedTyped(act.syl, raw[act.at:]+key)
+		if len(act.syls) == 1 {
+			s.insertMixedTyped(act.syls[0], raw[act.at:]+key)
+			break
+		}
+		for i, keys := range toneChunks(raw[act.at:] + key) {
+			s.insertMixedTyped(act.syls[i], keys)
+		}
 	case mixedToneSpace:
 		s.flushMixed()
 		s.insertMixedLiteral(" ", false, false)
