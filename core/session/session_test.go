@@ -165,21 +165,24 @@ func TestCandidateHighlightMovesWithArrows(t *testing.T) {
 	}
 }
 
-// 各詞長的候選由長到短接成一份清單：往下走過尾端接到較短的詞長，往上則回到較長的。
-func TestCandidateHighlightCrossesWordLengths(t *testing.T) {
+// P8：↓ 先開游標後面那一個字；上下鍵在同一份清單裡繞圈、不換詞長，換詞長用 Tab（官方各詞長接成一份清單）。
+func TestCandidateHighlightStaysInWordLength(t *testing.T) {
 	s := newSession()
 	symbolSyl(s, "ㄈㄥ") // 注音鍵打：清單不含混打的原始按鍵
 	symbolSyl(s, "ㄐㄧㄥˇ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	snap := key(s, proto.KeyDown)
-	if c := snap.Candidates; c == nil || c.Length != 2 || c.Items[c.Highlight].Text != "風景" {
-		t.Fatalf("應先開最長的詞：%+v", c)
+	if c := snap.Candidates; c == nil || c.Length != 1 || c.Items[c.Highlight].Text != "風" {
+		t.Fatalf("應先開游標後面的字：%+v", c)
+	}
+	if c := key(s, proto.KeyUp).Candidates; c == nil || c.Length != 1 || c.Highlight != len(c.Items)-1 {
+		t.Fatalf("往上應繞到同一份清單的最後一個：%+v", c)
 	}
 	if c := key(s, proto.KeyDown).Candidates; c == nil || c.Length != 1 || c.Items[c.Highlight].Text != "風" {
-		t.Fatalf("往下應接到較短的詞長：%+v", c)
+		t.Fatalf("往下應繞回第一個：%+v", c)
 	}
-	if c := key(s, proto.KeyUp).Candidates; c == nil || c.Length != 2 || c.Items[c.Highlight].Text != "風景" {
-		t.Fatalf("往上應回到較長的詞長：%+v", c)
+	if c := key(s, proto.KeyTab).Candidates; c == nil || c.Length != 2 || c.Items[c.Highlight].Text != "風景" {
+		t.Fatalf("Tab 換成較長的詞：%+v", c)
 	}
 }
 

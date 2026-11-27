@@ -91,7 +91,7 @@ func (s *Session) gridMove(key string) {
 }
 
 func (s *Session) candidateText() string {
-	return s.spanText(s.cand.span(s.cand.cursor))
+	return s.spanText(s.cand.start, s.cand.length)
 }
 
 // spanText 是組字區 [start, start+length) 目前顯示的文字。Candidate positions count syllables,

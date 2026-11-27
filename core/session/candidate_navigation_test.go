@@ -47,20 +47,15 @@ func TestGridWordLengthBoundariesPreserveAnchor(t *testing.T) {
 			key(s, proto.KeyLeft)
 			key(s, proto.KeyLeft)
 		}
-		snap := key(s, proto.KeyDown)
-		cursorRange(t, snap, 0, 2)
-		// The single characters of the caret's character share the grid (#161):
-		// moving onto one narrows the range to that character.
+		// ↓ 先開游標旁那個字，Tab 換成整個詞（P8）。
 		single := 0
 		if before {
 			single = 1
 		}
-		for range s.cand.split {
-			snap = key(s, proto.KeyRight)
-		}
-		cursorRange(t, snap, single, 1)
-		// One row holds every candidate and there is no other multi-character
-		// length: down wraps to the first word, up lands on the last word.
+		cursorRange(t, key(s, proto.KeyDown), single, 1)
+		snap := key(s, proto.KeyTab)
+		cursorRange(t, snap, 0, 2)
+		// 一列放得下整份清單：↓ 繞回第一個、↑ 繞到最後一個，都不換詞長。
 		snap = key(s, proto.KeyDown)
 		cursorRange(t, snap, 0, 2)
 		if snap.Candidates.Highlight != 0 {
@@ -68,8 +63,8 @@ func TestGridWordLengthBoundariesPreserveAnchor(t *testing.T) {
 		}
 		snap = key(s, proto.KeyUp)
 		cursorRange(t, snap, 0, 2)
-		if s.cand.cursor != s.cand.split-1 {
-			t.Fatal("previous length must end at its last word, not its single characters")
+		if s.cand.cursor != len(s.cand.items)-1 {
+			t.Fatal("up must wrap to the last candidate of the same length")
 		}
 	}
 }
@@ -107,16 +102,17 @@ func TestCandidateTitleNamesReplacementAndWordLengthShortcut(t *testing.T) {
 		symbolSyl(s, "ㄐㄧㄥˇ")
 		key(s, proto.KeyLeft)
 		key(s, proto.KeyLeft)
-		cursorChoose(t, s, key(s, proto.KeyDown), "風景")
-		first := key(s, proto.KeyDown)
-		if first.Candidates.Title != "修改「風景」 · Tab 切換詞長" {
-			t.Fatalf("whole-word heading: %q", first.Candidates.Title)
-		}
-		single := key(s, proto.KeyTab)
+		key(s, proto.KeyDown)
+		cursorChoose(t, s, key(s, proto.KeyTab), "風景")
+		single := key(s, proto.KeyDown)
 		if single.Candidates.Title != "修改「風」 · Tab 切換詞長" {
 			t.Fatalf("single-character heading: %q", single.Candidates.Title)
 		}
-		selected := cursorChoose(t, s, single, "風")
+		first := key(s, proto.KeyTab)
+		if first.Candidates.Title != "修改「風景」 · Tab 切換詞長" {
+			t.Fatalf("whole-word heading: %q", first.Candidates.Title)
+		}
+		selected := cursorChoose(t, s, first, "風景")
 		if selected.Text() != first.Text() || selected.Commit != "" {
 			t.Fatal("showing range must not change the composition")
 		}

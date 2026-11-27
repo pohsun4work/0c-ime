@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/layout"
@@ -126,7 +127,8 @@ func TestTonelessCandidatesMixTones(t *testing.T) {
 	}
 	key(s, proto.KeyEscape)
 	key(s, proto.KeyHome)
-	snap = key(s, proto.KeyDown)
+	key(s, proto.KeyDown)
+	snap = key(s, proto.KeyTab) // ↓ 先開單字，Tab 換成兩個字
 	got = map[string]bool{}
 	for _, it := range snap.Candidates.Items {
 		got[it.Text] = true
@@ -180,7 +182,8 @@ func TestTonelessPickIsLearnedWithLexiconReading(t *testing.T) {
 	}
 	typeBare(s, "ㄏㄨㄟㄧ")
 	key(s, proto.KeyHome)
-	snap := key(s, proto.KeyDown)
+	key(s, proto.KeyDown)
+	snap := key(s, proto.KeyTab)
 	picked := false
 	for _, it := range snap.Candidates.Items {
 		if it.Text == "回憶" {
@@ -269,9 +272,13 @@ func withNiHaoCorrection(s *Session, uni float64) *Session {
 }
 
 // pickHere 在游標處開候選、選 word。
+// pickHere 在游標處按 ↓，照 word 的字數按 Tab 換詞長，選 word。
 func pickHere(t *testing.T, s *Session, word string) {
 	t.Helper()
 	snap := key(s, proto.KeyDown)
+	for snap.Candidates != nil && snap.Candidates.Length < utf8.RuneCountInString(word) {
+		snap = key(s, proto.KeyTab)
+	}
 	if snap.Candidates != nil {
 		for _, it := range snap.Candidates.Items {
 			if it.Text == word {

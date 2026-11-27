@@ -51,9 +51,12 @@ func splitTypoSession() *Session {
 func TestWholeWordPickerKeepsRawLastAndExactChoice(t *testing.T) {
 	s := splitTypoSession()
 	fzType(s, typoReading)
-	// 句尾 ↓ 選結束在游標的詞（難盡）；單字清單由明確的詞長請求打開，原樣注音仍排最後。
-	if snap := key(s, proto.KeyDown); snap.Candidates == nil || snap.Candidates.Start != 2 || snap.Candidates.Length != 2 {
+	// 句尾 ↓ 先開最後一個字，Tab 換成結束在游標的詞（難盡）；單字清單的原樣注音仍排最後。
+	if snap := key(s, proto.KeyDown); snap.Candidates == nil || snap.Candidates.Start != 3 || snap.Candidates.Length != 1 {
 		t.Fatalf("tail Down: %+v", snap.Candidates)
+	}
+	if snap := key(s, proto.KeyTab); snap.Candidates == nil || snap.Candidates.Start != 2 || snap.Candidates.Length != 2 {
+		t.Fatalf("tail Down Tab: %+v", snap.Candidates)
 	}
 	snap := s.Handle(proto.Request{Type: proto.Candidates, Length: 1})
 	first := snap.Candidates.Items[0].Text

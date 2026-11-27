@@ -63,7 +63,8 @@ func TestAdvanceAfterSelectWholeWordAndEverySelectPath(t *testing.T) {
 			typeSyl(s, "ㄐㄧㄥˇ")
 			typeSyl(s, "ㄊㄚ")
 			key(s, proto.KeyHome)
-			snap := key(s, proto.KeyDown)
+			key(s, proto.KeyDown)
+			snap := key(s, proto.KeyTab) // ↓ 先開單字，Tab 換成整個詞
 			cursorRange(t, snap, 0, 2)
 			switch path {
 			case "select":

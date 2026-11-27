@@ -77,7 +77,8 @@ func TestVocabLongWordAndHomophones(t *testing.T) {
 	if got := typeReading(e, id, "ㄕˋ ㄐㄧㄝˋ").Text(); got != "世界" {
 		t.Fatalf("常用同音詞照樣首選：%q", got)
 	}
-	snap, _ := e.Do(id, proto.Request{Type: proto.Key, Key: proto.KeyDown})
+	e.Do(id, proto.Request{Type: proto.Key, Key: proto.KeyDown})
+	snap, _ := e.Do(id, proto.Request{Type: proto.Key, Key: proto.KeyTab}) // ↓ 先開單字，Tab 換成兩個字
 	if snap.Candidates == nil || len(snap.Candidates.Items) < 2 || snap.Candidates.Items[1].Text != "世介" {
 		t.Fatalf("自訂詞保證在第一頁：%+v", snap.Candidates)
 	}

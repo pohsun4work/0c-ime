@@ -45,9 +45,9 @@ func TestCommonCharacterBeforeJapaneseVariantInSingles(t *testing.T) {
 	if got := s.snapshot().Text(); got != "空氣" {
 		t.Fatalf("fixture decodes %q", got)
 	}
-	key(s, proto.KeyDown)
+	key(s, proto.KeyDown) // 游標在句尾：開「氣」的單字
 	items := texts(allItems(s))
-	singles := items[s.cand.split:]
+	singles := items
 	qi, ki := slices.Index(singles, "氣"), slices.Index(singles, "気")
 	if qi < 0 || ki < 0 || qi > ki {
 		t.Fatalf("氣 must come before 気 in the singles: %v", items)

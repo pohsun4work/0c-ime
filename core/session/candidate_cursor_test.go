@@ -87,13 +87,12 @@ func TestCandidateBeforeCursorWholeWordAndLengthAnchor(t *testing.T) {
 	cursorChoose(t, s, s.Handle(proto.Request{Type: proto.Candidates, Length: 2}), "風景")
 	s.CandidateBeforeCursor = true
 	s.Handle(proto.Request{Type: proto.Cursor, To: 3})
+	// ↓ 先開游標前那一個字；Tab 換成較長的詞，右緣固定在游標、不延伸到 好。
 	snap := key(s, proto.KeyDown)
-	cursorRange(t, snap, 1, 2)
-	// Tab wraps to the single character immediately before the original caret.
-	snap = key(s, proto.KeyTab)
 	cursorRange(t, snap, 2, 1)
-	// Walking beyond the first single-character candidate returns to the word,
-	// keeping its right edge at the caret instead of extending into 好.
+	snap = key(s, proto.KeyTab)
+	cursorRange(t, snap, 1, 2)
+	// ↑ 在同一份清單裡繞圈，不換詞長。
 	snap = key(s, proto.KeyUp)
 	cursorRange(t, snap, 1, 2)
 	snap = cursorChoose(t, s, snap, "風井")
@@ -164,8 +163,8 @@ func TestCandidateBeforeCursorLiteralAndMixedBoundaries(t *testing.T) {
 	}
 }
 
-// 後方模式（Linux／Windows 預設）的游標在組字尾端時，後面沒有字可選；改選結束在游標的詞，
-// 換詞長也以游標為詞尾。打完一句回頭改最後一個詞是常見操作，不能只改最後一個字。
+// 後方模式（Windows 預設）的游標在組字尾端時，後面沒有字可選；改選游標前面那個字，
+// Tab 換成結束在游標的詞（P8：↓ 一律先開單字）。
 func TestCandidateAfterCursorAtTailSelectsWordEndingAtCaret(t *testing.T) {
 	s := cursorSession()
 	for _, syl := range []string{"ㄨㄛˇ", "ㄈㄥ", "ㄐㄧㄥˇ"} {
@@ -175,29 +174,22 @@ func TestCandidateAfterCursorAtTailSelectsWordEndingAtCaret(t *testing.T) {
 		t.Fatal("fixture must use the after-cursor default")
 	}
 	snap := key(s, proto.KeyDown)
-	cursorRange(t, snap, 1, 2)
+	cursorRange(t, snap, 2, 1)
 	if snap.Text() != "我風景" || snap.Cursor.Rune != 3 {
 		t.Fatalf("opening changed composition: %+v", snap)
 	}
-	// Tab 由整詞換到游標前的單字，再回到整詞；右緣固定在游標。
-	cursorRange(t, key(s, proto.KeyTab), 2, 1)
+	// Tab 由單字換到結束在游標的整詞（沒有三個字的詞），再回到單字；右緣固定在游標。
 	cursorRange(t, key(s, proto.KeyTab), 1, 2)
-	// 詞的候選後面接著列游標前那個字的單字（#161）：往下走進單字，範圍換成那個字，往上回到詞。
-	for range s.cand.split {
-		snap = key(s, proto.KeyDown)
-	}
-	cursorRange(t, snap, 2, 1)
-	snap = key(s, proto.KeyUp)
+	cursorRange(t, key(s, proto.KeyTab), 2, 1)
+	snap = key(s, proto.KeyTab)
 	cursorRange(t, snap, 1, 2)
-	// 走過清單尾端：單字已經列過，沒有其他多字詞長，回到第一個詞。
+	// 每份清單只列這個詞長：走過清單尾端回到第一個，不跨到單字。
 	key(s, proto.KeyEnd)
 	snap = key(s, proto.KeyDown)
 	cursorRange(t, snap, 1, 2)
 	if snap.Candidates.Highlight != 0 {
 		t.Fatalf("past the end must wrap to the first word: %+v", snap.Candidates)
 	}
-	key(s, proto.KeyDown) // 回到原本反白的整詞，下面照舊改選風井
-	snap = key(s, proto.KeyUp)
 	snap = cursorChoose(t, s, snap, "風井")
 	if snap.Text() != "我風井" || snap.Cursor.Rune != 3 || snap.Candidates != nil {
 		t.Fatalf("%+v", snap)
@@ -221,9 +213,9 @@ func TestCandidateAfterCursorAtTailSelectsWordEndingAtCaret(t *testing.T) {
 	}
 }
 
-// 句尾以外的位置維持後方模式：選游標所在的字或由游標開始的詞。
+// 句尾以外的位置維持後方模式：選游標後面那個字（游標在詞首也一樣，P8）。
 func TestCandidateAfterCursorAwayFromTailUnchanged(t *testing.T) {
-	for _, tc := range []struct{ at, start, length int }{{0, 0, 1}, {1, 1, 2}, {2, 2, 1}} {
+	for _, tc := range []struct{ at, start, length int }{{0, 0, 1}, {1, 1, 1}, {2, 2, 1}} {
 		s := cursorSession()
 		for _, syl := range []string{"ㄨㄛˇ", "ㄈㄥ", "ㄐㄧㄥˇ"} {
 			symbolSyl(s, syl)
@@ -253,13 +245,13 @@ func TestCandidateAfterCursorAtTailLiteralBoundaries(t *testing.T) {
 		t.Fatalf("symbol replacement: %+v", snap)
 	}
 
-	// 標點後的整詞：只往左延伸到標點為止。
+	// 標點後的詞：Tab 只往左延伸到標點為止。
 	s = cursorSession()
 	symbolSyl(s, "ㄊㄚ")
 	s.insertLiteral("，")
 	symbolSyl(s, "ㄈㄥ")
 	symbolSyl(s, "ㄐㄧㄥˇ")
-	cursorRange(t, key(s, proto.KeyDown), 2, 2)
+	cursorRange(t, key(s, proto.KeyDown), 3, 1)
 	for range 4 {
 		c := key(s, proto.KeyTab).Candidates
 		if c == nil || c.Start < 2 || c.Start+c.Length != 4 {

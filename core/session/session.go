@@ -51,29 +51,13 @@ type candState struct {
 	kind          string
 	direct        bool  // empty composition: selection commits once.
 	ids           []int // stable palette IDs, independent of recent order.
-	// split > 0 時是混合清單（#161）：items[:split] 是 start/length 的詞，items[split:] 接著列
-	// 游標那個字（位置 single）的單字候選，翻頁就看得到，不必先按 Tab 換到單字。
-	split  int
-	single int
 }
 
 func (s *Session) candidatePage() int { return s.cand.cursor / s.pageSize() }
 
-// span 回報第 id 項候選替換的組字範圍：混合清單的單字項目只替換游標那個字。
-func (c *candState) span(id int) (start, length int) {
-	if c.split > 0 && id >= c.split {
-		return c.single, 1
-	}
-	return c.start, c.length
-}
-
-// hasExact 回報目前詞長是否有原音候選（非近音）；混合清單接在後面的單字不算。
+// hasExact 回報目前詞長是否有原音候選（非近音）。
 func (c *candState) hasExact() bool {
-	n := len(c.items)
-	if c.split > 0 {
-		n = c.split
-	}
-	for i := range n {
+	for i := range c.items {
 		if i >= len(c.matched) || c.matched[i] == "" {
 			return true
 		}
@@ -603,7 +587,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		case proto.KeyHome:
 			s.cand.cursor = 0 // 第一個候選（#106）
 		case proto.KeyEnd:
-			s.cand.cursor = len(s.cand.items) - 1 // 清單的最後一個候選（混合清單是單字的原樣注音）
+			s.cand.cursor = len(s.cand.items) - 1 // 清單的最後一個候選
 		case proto.KeyTab:
 			switch s.InputStyle.CandidateTab {
 			case "grid":
@@ -1234,43 +1218,16 @@ func (s *Session) openCandidates(length int) {
 	if before {
 		anchor = pos + 1
 	}
-	open := func(length int) bool { return s.openAnchored(anchor, length, before) }
-	if length > 0 {
-		open(length)
-		return
+	if length == 0 {
+		length = 1 // ↓ 一律先開游標旁那一個字（我｜說不上 是「說」、說｜不上 是「不」），Tab 才換更長（P8）
 	}
-	// 以游標所指的現有分詞為優先。前方模式選詞首到游標，後方模式選游標到詞尾；
-	// 游標在詞的兩端時可重選整詞，Tab 與上下鍵保留其他詞長。
-	s.refresh()
-	for _, g := range s.path {
-		if g.Start <= pos && pos < g.End {
-			length := g.End - pos
-			if before {
-				length = anchor - g.Start
-			}
-			if open(length) {
-				return
-			}
-		}
-	}
-	// 沒有現成分詞時由最長的詞長找起。只有「也有原音候選」的詞長才算數，所以與沒有模糊音時
-	// 選同一個詞長；只有近音的詞長仍可用 Tab 或方向鍵切換進入。
-	maxLen := min(decode.MaxLen(s.dec.Lex), len(s.syls)-pos)
-	if before {
-		maxLen = min(decode.MaxLen(s.dec.Lex), anchor)
-	}
-	for l := maxLen; l >= 1; l-- {
-		if open(l) && (l == 1 || s.cand.hasExact()) {
-			return
-		}
-	}
+	s.openAnchored(anchor, length, before)
 }
 
-// stepCandidate 把要修改的詞往前（d=-1，j）或往後（d=1，k）換一個並重開候選（#193，照新酷音）：
-// 不必 Esc、←／→、再 ↓。換到的是緊鄰目前候選範圍的那個詞（現有分詞；標點等原樣文字整段算一個），
-// 游標放到「修改字詞的位置」那一側再照 ↓ 的規則開窗：前方模式放在詞尾、選結束在游標的詞，
-// 後方模式放在詞首、選從游標開始的詞。兩種模式走過的詞一樣，換到的範圍都跟把游標放在那裡按 ↓ 相同，
-// 不會停在詞的一半（以前一次移一個字，前方模式按 j 從「風景」到「風」、後方模式從句尾的「好」到「景」，BD-0e2d73）。
+// stepCandidate 把要修改的字往前（d=-1，j）或往後（d=1，k）換一個並重開候選（#193，照新酷音）：
+// 不必 Esc、←／→、再 ↓。換到的是緊鄰目前候選範圍的那個字（標點等原樣文字整段算一個），
+// 游標放到「修改字詞的位置」那一側再照 ↓ 的規則開窗（前方模式在字後、後方模式在字前）。
+// ↓ 一律先開單字（P8），所以一次換一個字（官方 BD-0e2d73 一次換一個詞是配合 ↓ 先開現有分詞）。
 // 後方模式在句尾開的前方候選也照後方模式往前換。已在頭尾時不動。
 // 只用於改字的候選：Emoji／顏文字、中英混打的按鍵候選、注音打到一半的符號候選都不套用。
 func (s *Session) stepCandidate(d int) {
@@ -1295,15 +1252,10 @@ func (s *Session) stepCandidate(d int) {
 	s.openCandidates(0)
 }
 
-// unitStart／unitEnd：位置 pos 那個字所在的詞（現有分詞；原樣文字是 literalStep 的一格）的起點與終點。
+// unitStart／unitEnd：位置 pos 那一格（一個字；原樣文字是 literalStep 的一格）的起點與終點。
 func (s *Session) unitStart(pos int) int {
 	if s.literals[pos] {
 		return s.literalFloor(pos)
-	}
-	for _, g := range s.path {
-		if g.Start <= pos && pos < g.End {
-			return g.Start
-		}
 	}
 	return pos
 }
@@ -1311,11 +1263,6 @@ func (s *Session) unitStart(pos int) int {
 func (s *Session) unitEnd(pos int) int {
 	if s.literals[pos] {
 		return s.literalStep(s.literalFloor(pos), 1)
-	}
-	for _, g := range s.path {
-		if g.Start <= pos && pos < g.End {
-			return g.End
-		}
 	}
 	return pos + 1
 }
@@ -1335,49 +1282,18 @@ func (s *Session) candidateBefore() bool {
 	return s.CandidateBeforeCursor || s.cursor >= len(s.syls)
 }
 
-// openAnchored 保留查詢方向；切換詞長時不把前方模式的尾端當成詞首。
-// 詞長超過一個字時，詞的候選後面接著列游標那個字的單字（#161）：後方模式是詞的第一個字，
-// 前方模式是最後一個字，都是緊貼游標的那個字，Tab 換詞長時也不變。
+// openAnchored 保留查詢方向；切換詞長時不把前方模式的尾端當成詞首。每份清單只列這個詞長的候選
+// （拿掉官方 #161 接在詞後面的單字）。
 func (s *Session) openAnchored(anchor, length int, before bool) bool {
-	pos, single := anchor, anchor
+	pos := anchor
 	if before {
 		pos -= length
-		single = anchor - 1
 	}
 	if !s.openAt(pos, length) {
 		return false
 	}
-	if length > 1 {
-		s.appendSingles(single)
-	}
 	s.cand.before = before
 	return true
-}
-
-// appendSingles 把位置 at 的單字候選接在目前詞長的候選後面，成為一張清單（#161）。
-// 兩段各自查詢、各自算顯示原因，所以排序、近音附註、原始按鍵與原樣注音都與單獨開啟時相同。
-func (s *Session) appendSingles(at int) {
-	words := s.cand
-	if !s.openAt(at, 1) {
-		s.cand = words
-		return
-	}
-	singles := s.cand
-	s.cand = words
-	split := len(words.items)
-	if words.matched != nil || singles.matched != nil {
-		matched := make([]string, split+len(singles.items))
-		copy(matched, words.matched)
-		copy(matched[split:], singles.matched)
-		words.matched = matched
-	}
-	words.items = append(words.items, singles.items...)
-	words.labels = append(words.labels, singles.labels...)
-	for id, keys := range singles.keyLiterals {
-		words.keyLiterals[split+id] = keys
-	}
-	words.raw = singles.raw // 最後一項是單字的原樣注音
-	words.split, words.single = split, at
 }
 
 func (s *Session) openAt(pos, length int) bool {
@@ -1494,37 +1410,11 @@ func (s *Session) candidateAnchor(c *candState) (int, int) {
 	return c.start, min(decode.MaxLen(s.dec.Lex), len(s.syls)-c.start)
 }
 
-// moveHighlight 把反白往下（d=1）或往上（d=-1）移一項。各詞長的候選視為由長到短接在一起的
-// 一份清單：走過目前詞長的尾端就接到較短的詞長，走過開頭就回到較長的；頭尾相接，
-// 所以方向鍵永遠有反應（使用者回報：上下鍵不能移動，像是卡死）。
-// 混合清單已經含單字（#161），所以從多字詞長出發時跳過「只有單字」的詞長，往上回到較長詞長時
-// 停在它的最後一個詞，都不重複走一次單字。
+// moveHighlight 把反白往下（d=1）或往上（d=-1）移一項，在同一份清單裡頭尾繞圈、不跨詞長（P8；
+// 官方走過尾端會接到別的詞長）。換詞長用 Tab。
 func (s *Session) moveHighlight(d int) {
 	c := s.cand
-	if c.literal || c.mixed {
-		c.cursor = (c.cursor + d + len(c.items)) % len(c.items)
-		return
-	}
-	if n := c.cursor + d; n >= 0 && n < len(c.items) {
-		c.cursor = n
-		return
-	}
-	anchor, maxLen := s.candidateAnchor(c)
-	for i := 1; i <= maxLen; i++ { // i == maxLen 時回到原詞長：只有這一種詞長有候選
-		l := ((c.length-1-d*i)%maxLen+maxLen)%maxLen + 1
-		if l == 1 && c.split > 0 {
-			continue
-		}
-		if s.openAnchored(anchor, l, c.before) {
-			if d < 0 {
-				s.cand.cursor = len(s.cand.items) - 1
-				if s.cand.split > 0 {
-					s.cand.cursor = s.cand.split - 1 // 停在較長詞長的最後一個詞，不再走一次單字
-				}
-			}
-			return
-		}
-	}
+	c.cursor = (c.cursor + d + len(c.items)) % len(c.items)
 }
 
 // selectCandidate 鎖定選取的詞。手動選取是硬條件；被換掉的原區段記下來供學習使用。
@@ -1546,7 +1436,7 @@ func (s *Session) selectCandidate(id int) bool {
 	if s.cand.literal || s.cand.keyLiterals[id] != "" || s.cand.raw && id == len(s.cand.items)-1 {
 		return s.selectLiteral(id)
 	}
-	start, length := s.cand.span(id)
+	start, length := s.cand.start, s.cand.length
 	c, end := s.cand.items[id].Entry, start+length
 	lock := decode.Lock{Word: c.Surface, Len: length}
 	if id < len(s.cand.matched) {
@@ -1835,9 +1725,7 @@ func (s *Session) snapshot() proto.Snapshot {
 		tail(len([]rune(h.replace)), h.text) // 神經次佳候選，按 Tab 才接受
 	}
 	if s.cand != nil {
-		// 範圍跟著反白：混合清單反白單字時，外殼標示與標題都只指游標那個字（#161）。
-		start, length := s.cand.span(s.cand.cursor)
-		cl := &proto.CandidateList{Page: s.candidatePage(), Pages: s.pages(), Start: start, Length: length, Highlight: s.cand.cursor % s.pageSize(), Columns: s.candidateColumns(), Kind: s.cand.kind}
+		cl := &proto.CandidateList{Page: s.candidatePage(), Pages: s.pages(), Start: s.cand.start, Length: s.cand.length, Highlight: s.cand.cursor % s.pageSize(), Columns: s.candidateColumns(), Kind: s.cand.kind}
 		if cl.Columns == 1 {
 			cl.Columns = 0
 		}

@@ -91,9 +91,6 @@ func listCandidates(s *Session, from, length int) []proto.CandidateItem {
 	for p := 1; p < snap.Candidates.Pages; p++ {
 		items = append(items, s.Handle(proto.Request{Type: proto.Page, Index: p}).Candidates.Items...)
 	}
-	if s.cand.split > 0 {
-		items = items[:s.cand.split] // 只比對這個詞長的候選；混合清單接在後面的單字另有測試（#161）
-	}
 	return items
 }
 
