@@ -20,6 +20,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/input"
 	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/layout"
+	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/punct"
@@ -1353,6 +1354,13 @@ func (s *Session) openAt(pos, length int) bool {
 	if len(near) > 0 {
 		items, matched = mergeFuzzy(items, near, nearMatched)
 	}
+	// 第一個是畫面上的字、反白在它上面，↓ 直接 Enter 畫面不變；其他照統計（P8：官方照統計排，畫面上是神經選的字時不在第一個）。
+	// 畫面上的字不是詞時（說不上 的「說不」）只在畫面上同一個詞裡才補上，沒有詞的詞長（果事物）Tab 照舊跳過；
+	// 只有近音的詞長不補（開模糊音不改原音候選）。
+	exact := len(items) > 0 && (matched == nil || slices.Contains(matched, ""))
+	if shown, inWord, ok := s.shownWord(pos, length); ok && (exact || inWord) {
+		items, matched = shownFirst(items, matched, shown, s.syls[pos:pos+length])
+	}
 	// Keep physical keys recoverable without creating Chinese-word preferences.
 	// The ordinary raw-zhuyin candidate remains last for existing clients.
 	keyLiterals := map[int]string{}
@@ -1383,6 +1391,60 @@ func (s *Session) openAt(pos, length int) bool {
 	s.cand.labels = s.candidateLabels(s.cand)
 	s.labelSpatial(pos)
 	return true
+}
+
+// shownWord 是畫面上 [pos, pos+length) 的字，inWord 表示整段在畫面上同一個詞裡；跨音、修正、
+// 字數跟音節數不同（尾端補全）的詞不能照原樣鎖定，回 false。
+func (s *Session) shownWord(pos, length int) (shown string, inWord, ok bool) {
+	var text []rune
+	segs := 0
+	for _, g := range s.path {
+		if g.End <= pos || g.Start >= pos+length {
+			continue
+		}
+		word := []rune(g.Word)
+		if g.Correction || g.Matched != "" || len(word) != g.End-g.Start {
+			return "", false, false
+		}
+		text = append(text, word[max(0, pos-g.Start):min(len(word), pos+length-g.Start)]...)
+		segs++
+	}
+	return string(text), segs == 1, len(text) == length
+}
+
+// shownFirst 把畫面上的字 shown 移到第一個（有原音的那一項就用它，只有近音就用近音那一項）；
+// 不在清單裡（說不上 的「說不」不是詞）時補上。
+func shownFirst(items []decode.Candidate, matched []string, shown string, reading []zhuyin.Syllable) ([]decode.Candidate, []string) {
+	at := -1
+	for i, c := range items {
+		if c.Entry.Surface != shown {
+			continue
+		}
+		if at < 0 {
+			at = i
+		}
+		if i >= len(matched) || matched[i] == "" {
+			at = i
+			break
+		}
+	}
+	if at == 0 {
+		return items, matched
+	}
+	c, m := decode.Candidate{Entry: lexicon.Entry{Surface: shown, Reading: slices.Clone(reading)}}, ""
+	if at > 0 {
+		c = items[at]
+		items = slices.Delete(items, at, at+1)
+		if at < len(matched) {
+			m = matched[at]
+			matched = slices.Delete(matched, at, at+1)
+		}
+	}
+	items = slices.Insert(items, 0, c)
+	if matched != nil {
+		matched = slices.Insert(matched, 0, m)
+	}
+	return items, matched
 }
 
 func (s *Session) pages() int { return (len(s.cand.items) + s.pageSize() - 1) / s.pageSize() }

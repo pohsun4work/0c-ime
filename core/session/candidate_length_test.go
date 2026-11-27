@@ -262,3 +262,61 @@ func TestDownListsKeepNearNotes(t *testing.T) {
 		t.Fatalf("near singles keep their notes: %+v", allItems(s))
 	}
 }
+
+// 第一個是畫面上的字、反白在它上面，第二個是統計第一名：神經選了統計第二的「井」時，↓ 直接 Enter 畫面不變（官方照統計排，會換成「景」）。
+func TestDownListsShownCharacterFirst(t *testing.T) {
+	calls := 0
+	s := neuralSession(&calls)
+	typeSyl(s, "ㄨㄛˇ")
+	if got := typeSyl(s, "ㄐㄧㄥˇ").Text(); got != "我井" {
+		t.Fatalf("fixture %q", got)
+	}
+	snap := key(s, proto.KeyDown)
+	cursorRange(t, snap, 1, 1)
+	if got := texts(snap.Candidates.Items); len(got) < 2 || got[0] != "井" || got[1] != "景" || snap.Candidates.Highlight != 0 {
+		t.Fatalf("第一個要是畫面上的 井、第二個是統計第一的 景：%v", got)
+	}
+	if snap = key(s, proto.KeyEnter); snap.Text() != "我井" || snap.Candidates != nil {
+		t.Fatalf("↓ Enter 畫面不變：%+v", snap)
+	}
+}
+
+// 畫面上的字不是詞（說不上 的「說不」）時補在第一個；我｜說不上 ↓ 修改「說」、Tab「說不」、Tab「說不上」、Tab 回到「說」。
+func TestDownTabWalksSubspansOfShownWord(t *testing.T) {
+	lex, sys := lexicon.NewMem(), lm.NewMem()
+	for _, e := range []struct{ word, reading string }{
+		{"我", "ㄨㄛˇ"}, {"說", "ㄕㄨㄛ"}, {"縮", "ㄕㄨㄛ"}, {"不", "ㄅㄨˋ"}, {"部", "ㄅㄨˋ"}, {"上", "ㄕㄤˋ"},
+		{"說不上", "ㄕㄨㄛ ㄅㄨˋ ㄕㄤˋ"}, {"說部", "ㄕㄨㄛ ㄅㄨˋ"},
+	} {
+		lex.Add(lexicon.Entry{Surface: e.word, Reading: zhuyin.ParseReading(e.reading), PRW: 1})
+		sys.SetUni(e.word, .001)
+	}
+	sys.SetUni("說不上", .01)
+	s := New(personal.NewModel(lex, sys))
+	for _, y := range []string{"ㄨㄛˇ", "ㄕㄨㄛ", "ㄅㄨˋ", "ㄕㄤˋ"} {
+		symbolSyl(s, y)
+	}
+	if got := s.snapshot().Text(); got != "我說不上" {
+		t.Fatalf("fixture %q", got)
+	}
+	s.Handle(proto.Request{Type: proto.Cursor, To: 1})
+	for _, want := range []struct {
+		length int
+		first  string
+	}{{1, "說"}, {2, "說不"}, {3, "說不上"}, {1, "說"}} {
+		var snap proto.Snapshot
+		if s.cand == nil {
+			snap = key(s, proto.KeyDown)
+		} else {
+			snap = key(s, proto.KeyTab)
+		}
+		cursorRange(t, snap, 1, want.length)
+		if got := snap.Candidates.Items[0].Text; got != want.first {
+			t.Fatalf("修改 %d 個字的第一個 %q，要 %q：%v", want.length, got, want.first, texts(snap.Candidates.Items))
+		}
+	}
+	key(s, proto.KeyTab)
+	if snap := key(s, proto.KeyEnter); snap.Text() != "我說不上" {
+		t.Fatalf("選「說不」畫面不變：%q", snap.Text())
+	}
+}

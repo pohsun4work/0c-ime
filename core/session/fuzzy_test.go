@@ -749,7 +749,12 @@ func TestFuzzyOverlappingLockDoesNotChangeExactCandidateOrder(t *testing.T) {
 	want := exactOnly(listCandidates(fresh, 1, 1))
 	s := build()
 	fzSelect(t, s, 0, 2, "知世")
-	if got := exactOnly(listCandidates(s, 1, 1)); !slices.Equal(got, want) {
+	// 第一個是畫面上的字（P8）：比較時兩邊都拿掉它，其餘照統計的次序。
+	got := exactOnly(listCandidates(s, 1, 1))
+	shown := s.spanText(1, 1)
+	got = slices.DeleteFunc(got, func(w string) bool { return w == shown })
+	want = slices.DeleteFunc(want, func(w string) bool { return w == shown })
+	if !slices.Equal(got, want) {
 		t.Fatalf("鎖定重疊時原音候選次序不得受鎖定讀音影響\n%v\n%v", want, got)
 	}
 }
