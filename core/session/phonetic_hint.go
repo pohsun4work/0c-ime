@@ -172,7 +172,6 @@ func (s *Session) acceptPhonetic() bool {
 	}
 	matched := zhuyin.Key(h.entry.Reading)
 	s.locks[h.start] = decode.Lock{Word: h.entry.Surface, Len: len(h.entry.Reading), Completion: true, Matched: matched}
-	s.previewRewrite = false
 	s.refreshSelection(u.path, u.auto, decode.Seg{Word: h.entry.Surface, Start: h.start, End: len(s.syls), Matched: matched})
 	s.phoneticUndo = u
 	return true

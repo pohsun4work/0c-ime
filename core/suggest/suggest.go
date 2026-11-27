@@ -13,27 +13,23 @@ import (
 
 // Suggestion 是一個補全建議。
 type Suggestion struct {
-	Word    string            // 完整的詞
-	Start   int               // 該詞在組字區的起點（音節位置）
-	Rest    string            // 尚未輸入的部分
-	Syls    []zhuyin.Syllable // 尚未輸入的音節
-	Conf    float64
-	Replace string // 非空時為將被替換的已顯示前綴，必須清楚預覽後才接受
+	Word  string            // 完整的詞
+	Start int               // 該詞在組字區的起點（音節位置）
+	Rest  string            // 尚未輸入的部分
+	Syls  []zhuyin.Syllable // 尚未輸入的音節
+	Conf  float64
 }
 
 // Options 控制何時建議。寧可少建議，不要讓使用者養成忽略它的習慣。
 type Options struct {
-	MinConf        float64
-	MinSyllables   int
-	AttentionCost  float64 // 檢視建議的等效按鍵成本；0 停用效益門檻
-	RewritePrefix  bool    // 可明確預覽並替換未鎖定的同音尾端
-	MinRewriteConf float64 // 延伸詞間的條件信心門檻；另受 MinConf 限制
+	MinConf       float64
+	MinSyllables  int
+	AttentionCost float64 // 檢視建議的等效按鍵成本；0 停用效益門檻
 }
 
 // DefaultOptions 回傳補全信心與操作效益門檻。
 func DefaultOptions() Options {
-	// 同音改寫預設由使用者按 Tab 要求預覽。
-	return Options{MinConf: 0.4, MinSyllables: 1, AttentionCost: 0.5, MinRewriteConf: 0.7}
+	return Options{MinConf: 0.4, MinSyllables: 1, AttentionCost: 0.5}
 }
 
 // For 依解碼結果產生建議；沒有合格的建議時回傳 nil。
@@ -41,8 +37,7 @@ func For(d *decode.Decoder, lat input.Lattice, path []decode.Seg, o Options) *Su
 	return ForWithLocks(d, lat, path, nil, o)
 }
 
-// ForWithLocks 保留既有追加補全，沒有合格建議時才找同音替換。
-// 僅檢查解碼分段的邊界，最多 decode.MaxLen 音節（自訂詞可以更長），不跨手選詞。
+// ForWithLocks 只找往後補的建議，不改畫面上已有的字，不跨手選詞。
 func ForWithLocks(d *decode.Decoder, lat input.Lattice, path []decode.Seg, locks map[int]decode.Lock, o Options) *Suggestion {
 	if len(path) == 0 {
 		return nil
@@ -57,39 +52,7 @@ func ForWithLocks(d *decode.Decoder, lat input.Lattice, path []decode.Seg, locks
 	if x := crossAppend(d, lat, path, locks, o); x != nil && (g == nil || x.Conf > g.Conf) {
 		g = x
 	}
-	if g != nil {
-		return g
-	}
-	if !o.RewritePrefix {
-		return nil
-	}
-	var best *Suggestion
-	for i, seg := range path {
-		typed := len(lat) - seg.Start
-		if typed < 2 || typed >= decode.MaxLen(d.Lex) || overlaps(locks, seg.Start, len(lat)) {
-			continue
-		}
-		left := d.InitialLeft()
-		if i > 0 {
-			left = path[i-1].Word
-		}
-		c, ok := d.CompleteHomophones(lat, seg.Start, left)
-		if !ok || c.Conf < o.MinRewriteConf {
-			continue
-		}
-		var displayed string
-		for _, tail := range path[i:] {
-			displayed += tail.Word
-		}
-		if string([]rune(c.Entry.Surface)[:typed]) == displayed {
-			continue
-		}
-		g := completion(c, seg.Start, typed, o)
-		if g != nil && (best == nil || g.Conf > best.Conf) {
-			g.Replace, best = displayed, g
-		}
-	}
-	return best
+	return g
 }
 
 func overlaps(locks map[int]decode.Lock, start, end int) bool {

@@ -183,7 +183,7 @@ func (s *Session) mixedPending(text string) (zhuyin.Composer, bool) {
 }
 
 // mixedEraseAt 回傳退格要刪的待定按鍵位置。顯示成注音時跟一般注音一樣照畫面順序刪最後一個符號（#309：
-// i j 畫面 ㄨㄛ，退格剩 ㄨ），照字面顯示時刪最後按的。asTyped：這次退格才收回、畫面上還是原按鍵（nj ← → 退格剩 n）。
+// i j 畫面 ㄨㄛ，退格剩 ㄨ），照字面顯示時刪最後按的。asTyped：這次退格才收回、畫面上還是原按鍵（照原按鍵留下的 nj 退格剩 n）。
 func (s *Session) mixedEraseAt(asTyped bool) int {
 	raw := s.mixed.raw
 	at := len(raw) - 1
@@ -203,17 +203,26 @@ func (s *Session) mixedEraseAt(asTyped bool) int {
 	return at
 }
 
-// flushMixed 讓待定按鍵照畫面定案；顯示成還沒打完的注音時照原按鍵留下（insertPendingKeys），↓ 選過注音的照注音。
-func (s *Session) flushMixed() { s.settleMixed(false) }
+// flushMixed 讓待定按鍵定案（符號、數字鍵盤等）：型號的 0 連前面的字改回原按鍵（settleTokenAn）；
+// 顯示成還沒打完的注音時照原按鍵留下（insertPendingKeys），↓ 選過注音的照注音。
+func (s *Session) flushMixed() {
+	s.settleTokenAn()
+	s.settleMixed(false)
+}
 
-// settleMixed：keepZhuyin 時顯示成還沒打完的注音照注音留下（Enter 照畫面送出、點注音鍵接著組）。
-// 照空白的決定顯示的讀音（gjn 的 ㄙㄨ、20 的 ㄉㄢ）同樣照注音留下；
-// 符號、移動游標等其他定案照原按鍵，Tab 換成的（png 的 ㄕㄣ）照選的。
+// settleShown 讓待定按鍵照畫面定案（Enter、移動游標）：顯示成注音的照注音留下（gjn 的 ㄙㄨ、20 的 ㄉㄢ、型號的 GT版ㄢ），
+// 多鍵又怎樣都組不成字的照原按鍵（nm）。
+func (s *Session) settleShown() {
+	_, _, repaired := s.mixedRepairShown()
+	s.settleMixed(repaired || s.mixedKeepsZhuyin(s.mixed.raw))
+}
+
+// settleMixed：keepZhuyin 時顯示成還沒打完的注音照注音留下（settleShown、點注音鍵接著組），其他定案照原按鍵。
+// Tab 換成的（png 的 ㄕㄣ）照選的。
 func (s *Session) settleMixed(keepZhuyin bool) {
 	if s.mixed.raw == "" {
 		return
 	}
-	s.settleTokenAn()
 	raw, text := s.mixed.raw, s.mixedText()
 	cut, done, repaired := s.mixedRepairShown()
 	if repaired && s.mixed.choice == 0 && !keepZhuyin {
@@ -227,16 +236,17 @@ func (s *Session) settleMixed(keepZhuyin bool) {
 	previous, at := slices.Clone(s.path), s.cursor
 	before := len(s.syls)
 	assisted, explicit := s.mixed.accepted != "", s.mixed.choice == 1
-	assistedPrefix := s.mixed.assistedPrefix
+	pending, assistedPrefix := s.mixed, s.mixed.assistedPrefix
 	s.clearMixed()
 	switch {
 	case repaired:
 		s.insertMixedPrefix(raw[:cut], false, false)
 		s.comp = baseComposer(done)
-		s.insertPendingLiteral()
+		pending.raw, pending.assistedPrefix = raw[cut:], max(0, assistedPrefix-cut)
+		s.insertPendingZhuyin(pending)
 	case zhuyinText:
 		s.comp = c
-		s.insertPendingLiteral()
+		s.insertPendingZhuyin(pending)
 	case phonetic:
 		s.insertPendingKeys(raw)
 	default:
@@ -520,6 +530,26 @@ func (s *Session) openMixedCandidates() {
 	s.cand = c
 }
 
+// mixedRight：有待定按鍵時 → 是選原按鍵，同 ↓ 選原按鍵：選了就定，不換回去，游標不動（up 的 ㄧㄣ 按 → 是 up，再按空白是 up␣）。
+// 型號的 0（GT版ㄢ）連前面的字一起改回原按鍵（GT1030），Tab 收下的（hello）也回到原按鍵（hel）。
+// 已經是原按鍵（選過的、退格改過的）時照常移動游標；在最後面沒有地方可移，一樣吃掉。
+func (s *Session) mixedRight() bool {
+	p := s.mixed
+	if p.raw == "" {
+		return false
+	}
+	if p.choice == 1 && p.accepted == "" {
+		return s.cursor == len(s.syls)
+	}
+	s.settleTokenAn()
+	s.pickKeys()
+	return true
+}
+
+func (s *Session) pickKeys() {
+	s.mixed.accepted, s.mixed.choice, s.mixed.chosen, s.mixed.edited = "", 1, true, false
+}
+
 func (s *Session) selectMixed(id int) bool {
 	if s.cand == nil || id < 0 || id >= len(s.cand.items) {
 		return false
@@ -538,7 +568,7 @@ func (s *Session) selectMixed(id int) bool {
 		return true
 	}
 	text := s.cand.items[id].Entry.Surface
-	s.mixed.accepted, s.mixed.choice, s.mixed.chosen, s.mixed.edited = "", 1, true, false
+	s.pickKeys()
 	if text != s.mixed.raw {
 		if comp, ok := s.mixedComposer(s.mixed.raw); ok && text == comp.String() {
 			s.mixed.choice = 2
@@ -1688,10 +1718,10 @@ func (s *Session) reviseTokenDigits(k string) {
 }
 
 // settleTokenAn：tokenDigitWord 後面的 0 可能是型號（GT1030、GG1040），也可能是 ㄢ（Mac版安裝、CPI答案、AI大安站）。先照字面留在待定按鍵，
-// 聲調鍵或空白組成中文就由 finishMixedTone 正常出字；其他情況（再接數字、字母、標點、Enter、移動游標，或聲調組不成字）才走到這裡，
-// 是型號：把前面的字改回原按鍵，跟 0 接成一串。↓ 選過 0 的（choice）照選的。
+// 聲調鍵或空白組成中文就由 finishMixedTone 正常出字；再接數字、字母、標點，或聲調組不成字時才走到這裡，
+// 是型號：把前面的字改回原按鍵，跟 0 接成一串。按 → 選原按鍵也是（mixedRight）。Enter、移動游標照畫面（GT版ㄢ），↓ 選過 0 的（choice）照選的。
 // 取捨：接空白分不出 PC版安裝 和 GT1030 顯卡，不吃掉組好的字（PTT 全部與新聞兩個月重播：緊接英數的 X＋字＋ㄢ 211 次，一看到 0 就退回時全錯，
-// 現在 146 次對，其餘是本來就不切的前段；型號接空白 24 次有 9 次變成字，↓ 選回原按鍵或打完按 Enter 再打空白）。
+// 現在 146 次對，其餘是本來就不切的前段；型號接空白 24 次有 9 次變成字，打完按 → 選原按鍵再打空白）。
 func (s *Session) settleTokenAn() {
 	if s.mixed.raw != "0" || s.mixed.choice != 0 || s.mixed.accepted != "" || s.englishWord {
 		return

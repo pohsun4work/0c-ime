@@ -122,6 +122,92 @@ func TestMixedPickedStays(t *testing.T) {
 	}
 }
 
+// → 選原按鍵，同 ↓ 選原按鍵：選了就定，游標不動；空白是空白、接著打的另起一串、退格刪最後一鍵。
+// 再按 → 在最後面沒地方移。英文照樣補全（up〔upon〕）。
+func TestMixedRightPicksKeys(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		seq  []string
+		want string
+	}{
+		{"up", []string{proto.KeyRight}, "up"},
+		{"up", []string{proto.KeyRight, " "}, "up "},
+		{"up", []string{proto.KeyRight, proto.KeyRight, " "}, "up "},
+		{"up", []string{proto.KeyRight, "s", "u", "3"}, "up你"},
+		{"up", []string{proto.KeyRight, proto.KeyBackspace}, "u"},
+		{"up", []string{proto.KeyRight, proto.KeyBackspace, "p"}, "ㄧㄣ"}, // 退格改過再打：整串照一般打字判斷
+		{"gjn", []string{proto.KeyRight, " "}, "gjn "},
+		{"20", []string{proto.KeyRight, " "}, "20 "},
+		{"png", []string{proto.KeyTab, proto.KeyRight, " "}, "png "},
+		{"hel", []string{proto.KeyTab, proto.KeyRight}, "hel"},                      // Tab 收下的 hello 回到原按鍵
+		{"hel", []string{proto.KeyTab, proto.KeyBackspace, proto.KeyRight}, "hell"}, // 退格改過的本來就是原按鍵
+	} {
+		s := swapSession()
+		mixedType(s, tc.raw)
+		if snap := keys(s, tc.seq...); snap.Text() != tc.want {
+			t.Errorf("%s %q：%q，要 %q", tc.raw, tc.seq, snap.Text(), tc.want)
+		}
+	}
+	s := swapSession()
+	mixedType(s, "up")
+	if snap := key(s, proto.KeyRight); snap.Suggestion != "upon" {
+		t.Errorf("up → 小視窗 %q，要 upon", snap.Suggestion)
+	}
+}
+
+// ← Home End、點游標照畫面定案（同 Enter）：ㄧㄣ 留注音。
+func TestMixedCursorKeysKeepShown(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		seq  []string
+		want string
+	}{
+		{"up", []string{proto.KeyLeft}, "ㄧㄣ"},
+		{"up", []string{proto.KeyHome, proto.KeyEnd, " "}, "音"},
+		{"gjn", []string{proto.KeyLeft}, "ㄙㄨ"},
+		{"20", []string{proto.KeyLeft, proto.KeyRight}, "ㄉㄢ"},
+	} {
+		s := swapSession()
+		mixedType(s, tc.raw)
+		if snap := keys(s, tc.seq...); snap.Text() != tc.want {
+			t.Errorf("%s %q：%q，要 %q", tc.raw, tc.seq, snap.Text(), tc.want)
+		}
+	}
+}
+
+// 游標移走再回來，接著打字、退格跟沒移動一樣，Tab、↓ 選過的也是（up ← → 再打 on 是 upon、png Tab ← → 再打 x 是 pngx）。
+func TestMixedCursorRoundTripKeepsTyping(t *testing.T) {
+	pickZhuyin := func(t *testing.T, s *Session) {
+		key(s, proto.KeyDown)
+		pickText(t, s, "ㄧㄣ")
+	}
+	for _, tc := range []struct {
+		raw    string
+		before func(*testing.T, *Session)
+		after  []string
+	}{
+		{"up", nil, []string{"o", "n"}},
+		{"up", nil, []string{" "}},
+		{"up", nil, []string{proto.KeyBackspace}},
+		{"up", pickZhuyin, []string{"o"}},
+		{"gjn", nil, []string{" "}},
+		{"20", nil, []string{" "}},
+		{"png", func(_ *testing.T, s *Session) { key(s, proto.KeyTab) }, []string{"x"}},
+	} {
+		moved, still := swapSession(), swapSession()
+		for _, s := range []*Session{moved, still} {
+			mixedType(s, tc.raw)
+			if tc.before != nil {
+				tc.before(t, s)
+			}
+		}
+		keys(moved, proto.KeyLeft, proto.KeyRight)
+		if a, b := keys(moved, tc.after...).Text(), keys(still, tc.after...).Text(); a != b {
+			t.Errorf("%s ← → %q：%q，沒移動是 %q", tc.raw, tc.after, a, b)
+		}
+	}
+}
+
 // Tab 之後退格：收下的英文詞刪最後一個字母（hel Tab hello 退格 hell），換成的原按鍵刪最後一鍵；不跳小視窗，
 // 就此收尾時照字面（up Tab 退格空白是 u␣，不是 ㄧ）。接著打字母、數字時整串照一般打字判斷（hell 再打 o 是 hello、
 // hel 再打 pji3 是 help我）。沒退格時接著打的照舊另起一串（TestMixedTabLiteralStartsNewRun）。

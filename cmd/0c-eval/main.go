@@ -35,8 +35,6 @@ func main() {
 	mu := flag.Float64("mu", -1, "系統 bigram 與 unigram 的內插權重（預設用 personal.DefaultParams）")
 	minConf := flag.Float64("minconf", -1, "Tab 補全的信心門檻（預設用 suggest.DefaultOptions）")
 	attentionCost := flag.Float64("attention-cost", -1, "檢視補全的等效按鍵成本（0 停用效益門檻）")
-	rewritePrefix := flag.Bool("rewrite-prefix", false, "實驗：主動顯示同音替換預覽（預設只由 Tab 要求）")
-	rewriteConf := flag.Float64("rewrite-minconf", -1, "同音替換的條件信心門檻（預設用 suggest.DefaultOptions）")
 	beam := flag.Int("beam", -1, "每個位置展開的有上下文狀態上限（預設用 session.DefaultOptions）")
 	errFile := flag.String("errors", "", "把所有錯誤片段（參考、輸出、錯誤類型）寫到檔案")
 	cont := flag.Float64("continue", -1, "尾端「還會繼續打」的權重 γ（預設用 session.DefaultOptions）")
@@ -120,10 +118,6 @@ func main() {
 	}
 	if *attentionCost >= 0 {
 		eng.Session(ty.ID).Opt.Suggest.AttentionCost = *attentionCost
-	}
-	eng.Session(ty.ID).Opt.Suggest.RewritePrefix = *rewritePrefix
-	if *rewriteConf >= 0 {
-		eng.Session(ty.ID).Opt.Suggest.MinRewriteConf = *rewriteConf
 	}
 	if *beam >= 0 {
 		eng.Session(ty.ID).Opt.Beam = *beam

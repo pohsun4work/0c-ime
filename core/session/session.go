@@ -228,14 +228,13 @@ type Session struct {
 	autoLog         []AutoChange // 目前顯示路徑中的自動近音修正（診斷用，每次重新解碼時重建）
 	nearReading     bool         // 精確讀音解不出路徑，目前只因近音可成詞而收進組字；顯示保底（已顯示的字照舊，其餘原樣注音）
 
-	path           []decode.Seg
-	basePath       []decode.Seg // 不含暫時證據的路徑，鄰詞證據不得從自己的推測反覆累加
-	pathSig        string       // 產生 path 的輸入；輸入沒變就不重新解碼
-	pathGen        int          // 產生 path 時的個人模型世代（model.Gen）；Rescore 用它確認重解不會帶進之後的學習
-	sug            *suggest.Suggestion
-	previewRewrite bool // 使用者要求的同音替換預覽；下一個非 Tab 操作即清除
-	cand           *candState
-	rev            int
+	path     []decode.Seg
+	basePath []decode.Seg // 不含暫時證據的路徑，鄰詞證據不得從自己的推測反覆累加
+	pathSig  string       // 產生 path 的輸入；輸入沒變就不重新解碼
+	pathGen  int          // 產生 path 時的個人模型世代（model.Gen）；Rescore 用它確認重解不會帶進之後的學習
+	sug      *suggest.Suggestion
+	cand     *candState
+	rev      int
 }
 
 func New(m *personal.Model) *Session {
@@ -299,9 +298,6 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 	if s.allowRerank && s.mixedBusy > 0 {
 		s.mixedBusy--
 	}
-	if !(r.Type == proto.Key && (r.Key == proto.KeyTab || r.Key == proto.KeyEscape)) && r.Type != proto.Accept {
-		s.previewRewrite = false
-	}
 	if !s.composing() {
 		s.private = r.Private
 	} else {
@@ -341,6 +337,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		handled, commit = s.key(r.Key)
 		s.revisitMixed()
 	case proto.Symbol:
+		s.settleTokenAn()
 		s.settleMixed(true) // 顯示成注音的待定按鍵交給注音接著組（nj 再點 ㄅ 是 ㄅㄨ）
 		for _, sym := range r.Symbol {
 			handled = s.symbolNear(sym, r.Near) && handled
@@ -351,7 +348,7 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.cand = nil
 		handled = s.backspace()
 	case proto.Cursor:
-		s.flushMixed()
+		s.settleShown()
 		s.moveTo(r.To)
 	case proto.Candidates:
 		s.openCandidates(r.Length)
@@ -655,7 +652,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		if !s.composing() {
 			return false, ""
 		}
-		s.flushMixed()
+		s.settleShown()
 		s.insertPendingLiteral()
 		at := s.cursor
 		s.cursor = s.literalStep(at, 1)
@@ -675,10 +672,6 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		if s.mixed.accepted != "" {
 			s.mixed.accepted = ""
 			return true, ""
-		}
-		if s.previewRewrite {
-			s.previewRewrite = false
-			return true, "" // 先關掉明確要求的替換預覽，保留組字
 		}
 		// 未打完的注音先單獨清掉，已組好的字留著；再按一次才依設定清除整段。
 		if s.mixed.raw != "" {
@@ -710,16 +703,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		if s.hint != nil && s.cursor == len(s.syls) && s.comp.Empty() && s.cand == nil {
 			return s.acceptHint() || s.composing(), ""
 		}
-		// 沒有自動建議時可要求同音替換；先預覽，第二次 Tab 才接受。
-		if s.cursor == len(s.syls) && s.comp.Empty() {
-			s.previewRewrite = true
-			s.refresh()
-			if s.sug != nil {
-				return true, ""
-			}
-			s.previewRewrite = false
-		}
-		return s.composing(), "" // 沒有合格補全：組字中吃掉，沒有組字才交還應用程式
+		return s.composing(), "" // 沒有小視窗：組字中吃掉，沒有組字才交還應用程式
 	case proto.KeyUp, proto.KeyPageUp, proto.KeyPageDown, proto.KeyBackTab:
 		// 候選沒開時這些鍵在組字中沒有作用；吃掉不動作，免得應用程式的游標或焦點離開組字區（#106）。
 		// 沒有組字時交還應用程式。
@@ -728,7 +712,10 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		if !s.composing() {
 			return false, ""
 		}
-		s.flushMixed()
+		if k == proto.KeyRight && s.mixedRight() {
+			return true, ""
+		}
+		s.settleShown()
 		if s.english {
 			// 英文模式按畫面字元移動，不能被尚未完成的注音卡住。
 			s.insertPendingLiteral()
@@ -1172,9 +1159,6 @@ func (s *Session) sugKey() string {
 	b.WriteString(strconv.Itoa(s.model.Gen))
 	b.WriteByte('|')
 	b.WriteString(strconv.FormatInt(s.model.Store.Time, 10))
-	if s.previewRewrite {
-		b.WriteString("|pr")
-	}
 	b.WriteByte('|')
 	b.WriteString(strconv.Itoa(s.cursor))
 	return b.String()
@@ -1663,7 +1647,6 @@ func (s *Session) accept() bool {
 	s.syls = append(s.syls, g.Syls...)
 	s.locks[g.Start] = decode.Lock{Word: g.Word, Len: len(s.syls) - g.Start, Completion: true}
 	s.cursor = len(s.syls)
-	s.previewRewrite = false
 	return true
 }
 
@@ -1678,9 +1661,7 @@ func (s *Session) commitComposed() string {
 }
 
 func (s *Session) commit() string {
-	// Resolve pending English exactly as displayed; never accept a suggestion on Enter.
-	_, _, repaired := s.mixedRepairShown() // 顯示修正讀音的（gjn 的 ㄙㄨ）照畫面留下注音
-	s.settleMixed(repaired || s.mixedKeepsZhuyin(s.mixed.raw))
+	s.settleShown()   // never accept a suggestion on Enter
 	s.finishUntoned() // 聲調選填：最後一個沒打聲調的音節也照解碼結果送出（#150）
 	if s.Rerank.Scorer == nil {
 		s.refresh()
@@ -1768,7 +1749,6 @@ func (s *Session) reset() {
 	s.sugPrev, s.sugPrevKey = nil, ""
 	s.hint = nil
 	s.shownPath, s.shownSyls = nil, nil
-	s.previewRewrite = false
 	s.private = false
 	s.localBlocked = false
 	s.learningCleared = false
@@ -1850,11 +1830,7 @@ func (s *Session) snapshot() proto.Snapshot {
 	if h := s.phonetic; h != nil {
 		tail(len([]rune(h.replace)), h.entry.Surface)
 	} else if g := s.sug; g != nil {
-		if g.Replace != "" {
-			tail(len([]rune(g.Replace)), g.Word)
-		} else {
-			tail(len([]rune(g.Word))-len([]rune(g.Rest)), g.Word)
-		}
+		tail(len([]rune(g.Word))-len([]rune(g.Rest)), g.Word)
 	} else if h := s.hint; h != nil && s.mixed.raw == "" && s.cursor == len(s.syls) && s.comp.Empty() && s.cand == nil {
 		tail(len([]rune(h.replace)), h.text) // 神經次佳候選，按 Tab 才接受
 	}

@@ -57,6 +57,11 @@ tab-08	up{Down}{pick:up}␣	up␣	P7.5：照順序組得成字的英文詞，↓
 tab-09	cpu{Enter}	cpu	P6：怎麼補都組不成音節的照英文顯示；官方 ㄏㄧㄣ
 tab-10	gjn{Tab}␣	蘇	P7.5：有把握、沒有小視窗時 Tab 不動
 tab-11	20{Enter}	ㄉㄢ	P7.5：數字的讀音 Enter 也照畫面送出
+tab-12	vul3xj/6{Tab}{Enter}	小龍	P7.5：沒有小視窗時 Tab 不動；官方第一次 Tab 預覽同音替換〔小籠包〕
+tab-13	up{Right}␣	up␣	P7.5：→ 選原按鍵，選了就定
+tab-14	ji3up{Left}{Right}4	我印	P7.5：← 照畫面留下注音，回來補聲調接著組
+tab-15	GT1030{Enter}	GT版ㄢ	P7.5：Enter 照畫面；官方 GT1030（#241）
+tab-16	GT1030{Right}{Enter}	GT1030	P7.5：→ 選原按鍵，型號的 0 連前面的字改回原按鍵
 sym-01	<	<	P4：Shift+, 打半形
 sym-02	[	[	P4；官方預設「
 sym-03	]	]	P4；官方預設」

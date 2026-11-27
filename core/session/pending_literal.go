@@ -20,8 +20,10 @@ import (
 type pendingLiteral struct {
 	start    int
 	composer zhuyin.Composer
-	keys     string // 非空：照原按鍵留下的混打待定按鍵（insertPendingKeys），還原成 s.mixed.raw
-	// fullWidth：keys 留下時的字寬。切換過字寬就不收回，照切換前的字寬定案。
+	// mixed：混打留下的待定按鍵，混打接著打字、退格時還原成 s.mixed，跟沒定案一樣。composer 是空的時畫面是原按鍵
+	// （insertPendingKeys），否則畫面是注音（settleShown）。
+	mixed pendingKeys
+	// fullWidth：留下時的字寬。切換過字寬就不收回成待定按鍵：照原按鍵的照切換前的字寬定案，注音照注音接著組。
 	fullWidth bool
 	tone      int // 0：一般暫存注音；1–5：原樣留下的完整音節
 	// prefix：音節本身沒有字、只是某個更長的詞的開頭，因此原樣留下（#107 的 ㄟ）。
@@ -34,8 +36,8 @@ type pendingLiteral struct {
 }
 
 func (p pendingLiteral) end() int {
-	if p.keys != "" {
-		return p.start + len([]rune(p.keys))
+	if p.composer.Empty() {
+		return p.start + len([]rune(p.mixed.raw))
 	}
 	return p.start + len([]rune(p.composer.String()))
 }
@@ -84,35 +86,36 @@ func (s *Session) shiftPendingLiterals(at, delta int) {
 // restorePendingLiteral 收回游標前暫存的未打完注音（注音鍵、聲調鍵用），照原按鍵留下的不收。
 func (s *Session) restorePendingLiteral() { s.restorePending(false) }
 
-// restorePending：keys 時也收回照原按鍵留下的混打待定按鍵（混打的按鍵、退格用）；英文模式、切換過字寬時不收。
-// 回報是否收回了照原按鍵留下的。
+// restorePending：keys 時也收回混打留下的待定按鍵（混打的按鍵、退格用）；英文模式、切換過字寬時不收。
+// 回報是否收回了照原按鍵留下的（畫面上是原按鍵）。
 func (s *Session) restorePending(keys bool) bool {
 	if !s.comp.Empty() || s.mixed.raw != "" {
 		return false
 	}
 	for i, p := range s.pendingLiterals {
-		if p.tone != 0 || p.end() != s.cursor || p.keys != "" && (!keys || s.english || p.fullWidth != s.fullWidth) {
+		mixed := keys && !s.english && p.fullWidth == s.fullWidth
+		if p.tone != 0 || p.end() != s.cursor || p.composer.Empty() && !mixed {
 			continue
 		}
 		s.pendingLiterals = append(s.pendingLiterals[:i:i], s.pendingLiterals[i+1:]...)
 		for s.cursor > p.start {
 			s.eraseBeforeCursor()
 		}
-		if p.keys == "" {
+		if !mixed || p.mixed.raw == "" {
 			s.comp = p.composer
 			return false
 		}
-		s.mixed.raw = p.keys
+		s.mixed = p.mixed
 		s.refresh() // 同一鍵可能接著定案（ji→ 再打 <），keepMixedDisplay 要拿刪掉之後的分詞
-		return true
+		return p.composer.Empty()
 	}
 	return false
 }
 
-// insertPendingKeys：顯示成還沒打完的注音的待定按鍵定案時（符號、數字鍵盤、移動游標，Enter 見 settleMixed）照原按鍵留下，
+// insertPendingKeys：顯示成還沒打完的注音的待定按鍵定案時（符號、數字鍵盤；Enter、移動游標見 settleShown）照原按鍵留下，
 // 按過的鍵不丟（e( 是 e(、e 數字鍵盤 2 e 是 e2e）。緊接著打字或退格回到它後面時收回接著組（ji 數字鍵盤 1 退格再打 3 是 我）。
 func (s *Session) insertPendingKeys(keys string) {
-	p := pendingLiteral{start: s.cursor, keys: keys, fullWidth: s.fullWidth}
+	p := pendingLiteral{start: s.cursor, mixed: pendingKeys{raw: keys}, fullWidth: s.fullWidth}
 	s.insertMixedLiteral(keys, false, false)
 	s.pendingLiterals = append(s.pendingLiterals, p)
 }
