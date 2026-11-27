@@ -1,7 +1,6 @@
 package session
 
 import (
-	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -35,7 +34,7 @@ type flipPick struct {
 	keep       bool
 }
 
-// markJudged 把 [from, s.cursor) 裡混打組成的音節記成神經判過的（mixedNeuralWanted）；prefix 是同一串按鍵照字面留在
+// markJudged 把 [from, s.cursor) 裡混打組成的音節記成神經判過的；prefix 是同一串按鍵照字面留在
 // 第一個音節前面的前段（2萬 的 2）。
 func (s *Session) markJudged(from int, prefix string) {
 	for at := max(0, from); at < s.cursor; at++ {
@@ -52,31 +51,48 @@ func (s *Session) markJudged(from int, prefix string) {
 	}
 }
 
-// judgedFlips：pos 是神經判過、還沒改過讀音的字時，同一串按鍵的其他切法：前段沒有或是詞、數字、標點（mixedWordPrefix），
-// 後段有字母、照順序組成一個音節（斷 的 2萬、第 的 2億、2萬 的 斷；八 的 1啊 只有數字鍵，要的是 18）。前段被改過時只看這格自己的按鍵。
-// keysFirst：原按鍵排在畫面上的字後面（趴 的 q8、r萬 的 j04）；整串是數字鍵開頭、照順序打的注音（斷 和 2萬 的 2j04、邊 的 1u0）
-// 只因為數字鍵開頭而問神經，原按鍵不是另一邊，照舊。
-func (s *Session) judgedFlips(pos int) (flips []flipPick, keysFirst bool) {
+// judgedKeys：pos 是神經判過、還沒改過讀音的字時，同一串按鍵從 start 開始，all 是前段照字面的文字加上這格的按鍵，
+// cut 是前段的長度。前段被改過時只看這格自己的按鍵。
+func (s *Session) judgedKeys(pos int) (start int, all string, cut int, ok bool) {
 	o, keys := s.mixedOrigins[pos], s.mixedKeys[pos]
 	if o.judged == "" || keys == "" || s.literals[pos] || s.syls[pos] != o.judged {
-		return nil, false
+		return 0, "", 0, false
 	}
-	start := pos - utf8.RuneCountInString(o.prefix)
+	start = pos - utf8.RuneCountInString(o.prefix)
 	if !s.literalTextIs(start, pos, o.prefix) {
 		start, o.prefix = pos, ""
 	}
-	all := o.prefix + keys
+	return start, o.prefix + keys, len(o.prefix), true
+}
+
+// judgedFlips：同一串按鍵的其他切法：前段沒有或是詞、數字、標點（mixedWordPrefix），後段有字母、照順序組成一個音節
+// （斷 的 2萬、第 的 2億、2萬 的 斷；八 的 1啊 只有數字鍵，要的是 18）。
+func (s *Session) judgedFlips(pos int) []flipPick {
+	start, all, cut, ok := s.judgedKeys(pos)
+	if !ok {
+		return nil
+	}
+	var flips []flipPick
 	for at := range len(all) {
-		if at == len(o.prefix) || at > 0 && !s.mixedWordPrefix(all[:at]) || !strings.ContainsFunc(all[at:], unicode.IsLetter) {
+		if at == cut || at > 0 && !s.mixedWordPrefix(all[:at]) || !strings.ContainsFunc(all[at:], unicode.IsLetter) {
 			continue
 		}
 		if syls, ok := s.strictSyllables(all[at:]); ok && len(syls) == 1 {
 			flips = append(flips, flipPick{start: start, end: pos + 1, prefix: all[:at], syl: syls[0], keys: all[at:]})
 		}
 	}
-	whole, ok := s.strictSyllables(all)
-	digitHead := isASCIIDigit(all[0]) && ok && len(whole) == 1
-	return s.chooseFlipChars(flips), !digitHead
+	return s.chooseFlipChars(flips)
+}
+
+// judgedKeysSecond：神經判過的字，原按鍵排在畫面上的字後面（趴 的 q8、r萬 的 j04）。整串是數字鍵開頭、照順序打的注音
+// （斷 和 2萬 的 2j04、邊 的 1u0）只因為數字鍵開頭而問神經，原按鍵不是另一邊，照舊。
+func (s *Session) judgedKeysSecond(pos int) bool {
+	_, all, _, ok := s.judgedKeys(pos)
+	if !ok {
+		return false
+	}
+	whole, strict := s.strictSyllables(all)
+	return !('0' <= all[0] && all[0] <= '9' && strict && len(whole) == 1)
 }
 
 // literalTextIs：[start, end) 都是字面文字，內容是 text（全形時是它的全形）。
@@ -94,11 +110,10 @@ func (s *Session) literalTextIs(start, end int, text string) bool {
 	return b.String() == text || b.String() == s.fullWidthText(text)
 }
 
-// chooseFlipChars 替每種切法選字：能問神經時帶前文與後文（flipFollowRunes）比同音字，問不到時取最常用的；沒有字的切法拿掉。
-// 問得到神經時也跟畫面上的樣子比，不帶後文（後文是照畫面上的字解的：賺快錢 的 快錢 對 5萬 不公平）差 flipMargin 以上的
-// 切法不列（翻邊 的 1u0␣ 不列 1煙、多 不列 2窩）。
+// chooseFlipChars 替每種切法選字：神經帶前文與後文（flipFollowRunes）比同音字；也跟畫面上的樣子比，不帶後文（後文是照畫面上的字
+// 解的：賺快錢 的 快錢 對 5萬 不公平）差 flipMargin 以上的切法不列（翻邊 的 1u0␣ 不列 1煙、多 不列 2窩）。問不到神經時都不列。
 func (s *Session) chooseFlipChars(flips []flipPick) []flipPick {
-	if len(flips) == 0 {
+	if len(flips) == 0 || s.Rerank.Texts == nil || s.private || s.paused || s.english || s.mixedBusy > 0 {
 		return nil
 	}
 	start, end := flips[0].start, flips[0].end
@@ -118,12 +133,11 @@ func (s *Session) chooseFlipChars(flips []flipPick) []flipPick {
 	}
 	shown := s.spanText(start, end-start)
 	shownAt := add(shown)
-	add(shown + follow)
 	type option struct {
 		char       string
 		with, bare int // texts 的索引：帶後文、不帶後文；-1 是送不出去
 	}
-	limit := min(mixedNeuralNBest, (rerank.MaxTexts-2)/(2*len(flips)))
+	limit := min(mixedNeuralNBest, (rerank.MaxTexts-1)/(2*len(flips)))
 	dec := &decode.Decoder{Lex: s.model.Source(), Score: s.model}
 	options := make([][]option, len(flips))
 	for i, f := range flips {
@@ -131,31 +145,30 @@ func (s *Session) chooseFlipChars(flips []flipPick) []flipPick {
 			if len(options[i]) == limit {
 				break
 			}
-			t := f.prefix + c.Entry.Surface
+			t := s.mixedLiteralText(f.prefix) + c.Entry.Surface
 			options[i] = append(options[i], option{c.Entry.Surface, add(t + follow), add(t)})
 		}
 	}
-	var scores []float64
-	if s.Rerank.Texts != nil && !s.private && !s.paused && !s.english && s.mixedBusy == 0 && shownAt >= 0 && len(texts) > 1 {
-		if got, err := s.scoreTexts(texts, start, mixedNeuralDeadline); err == nil {
-			scores = got
-		}
+	if shownAt < 0 || len(texts) < 2 {
+		return nil
+	}
+	scores, err := s.scoreTexts(texts, start, mixedNeuralDeadline)
+	if err != nil {
+		return nil
 	}
 	out := flips[:0]
 	for i, f := range flips {
 		if len(options[i]) == 0 {
 			continue
 		}
-		best := options[i][0] // 問不到神經時是最常用的
-		if scores != nil {
-			for _, o := range options[i][1:] {
-				if o.with >= 0 && (best.with < 0 || scores[o.with] > scores[best.with]) {
-					best = o
-				}
+		best := options[i][0]
+		for _, o := range options[i][1:] {
+			if o.with >= 0 && (best.with < 0 || scores[o.with] > scores[best.with]) {
+				best = o
 			}
-			if best.bare < 0 || scores[best.bare] < scores[shownAt]-flipMargin {
-				continue
-			}
+		}
+		if best.bare < 0 || scores[best.bare] < scores[shownAt]-flipMargin {
+			continue
 		}
 		f.char = best.char
 		out = append(out, f)
@@ -171,7 +184,8 @@ func (s *Session) openRunFlips(pos int) bool {
 	if !ok {
 		return false
 	}
-	run := s.spanText(a, b-a)
+	shown := s.spanText(a, b-a)
+	run := strings.Map(asciiOf, shown)
 	body, key, tone := run, " ", zhuyin.Tone1
 	if sym, ok := layout.Standard.Symbol(rune(run[len(run)-1])); ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
 		body, key, tone = run[:len(run)-1], run[len(run)-1:], sym // mp3 的 3 是聲調
@@ -186,10 +200,10 @@ func (s *Session) openRunFlips(pos int) bool {
 		return false
 	}
 	end, keys := b, run
-	if key == " " && b < len(s.syls) && s.syls[b] == " " && s.literals[b] {
+	if key == " " && s.spaceAt(b) {
 		end, keys = b+1, run+" "
 	}
-	items := []string{run}
+	items := []string{shown}
 	flips := map[int]flipPick{0: {keep: true}}
 	pick := flipPick{start: a, end: end, syl: syl, keys: keys}
 	for _, char := range s.syllableChars(syl, a) {
@@ -208,33 +222,61 @@ func (s *Session) openRunFlips(pos int) bool {
 	return true
 }
 
-// typedRun：pos（或 pos 是緊接著的空白時它前面）那一串使用者打的英數 [a, b)，至少兩個字、有字母。
+// typedRun：pos（或 pos 是緊接著的空白時它前面）那一串使用者打的英數 [a, b)（全形時是全形），至少兩個字、有字母。
 func (s *Session) typedRun(pos int) (a, b int, ok bool) {
-	typed := func(at int) bool {
+	key := func(at int) rune {
 		if at < 0 || at >= len(s.syls) || !s.literals[at] {
-			return false
+			return 0
 		}
-		_, ok := s.mixedOrigins[at]
-		t := string(s.syls[at])
-		return ok && len(t) == 1 && (isASCIIDigit(t[0]) || asciiLetters(t))
+		rs := []rune(string(s.syls[at]))
+		if _, typed := s.mixedOrigins[at]; !typed || len(rs) != 1 {
+			return 0
+		}
+		return asciiOf(rs[0])
 	}
-	if !typed(pos) {
-		if s.syls[pos] != " " || !typed(pos-1) {
+	alnum := func(at int) bool {
+		r := key(at)
+		return '0' <= r && r <= '9' || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z'
+	}
+	if !alnum(pos) {
+		if !s.spaceAt(pos) || !alnum(pos-1) {
 			return 0, 0, false
 		}
 		pos--
 	}
 	a, b = pos, pos+1
-	for typed(a - 1) {
+	for alnum(a - 1) {
 		a--
 	}
-	for typed(b) {
+	for alnum(b) {
 		b++
 	}
-	return a, b, b-a >= 2 && strings.ContainsFunc(s.spanText(a, b-a), func(r rune) bool { return r > '9' })
+	letter := false
+	for at := a; at < b; at++ {
+		letter = letter || key(at) > '9'
+	}
+	return a, b, b-a >= 2 && letter
 }
 
-func isASCIIDigit(c byte) bool { return '0' <= c && c <= '9' }
+func (s *Session) spaceAt(at int) bool {
+	return at < len(s.syls) && s.literals[at] && (s.syls[at] == " " || s.syls[at] == "　")
+}
+
+// asciiOf：全形的英數與符號（ｓ、２）轉回半形按鍵。
+func asciiOf(r rune) rune {
+	if 0xFF01 <= r && r <= 0xFF5E {
+		return r - 0xFEE0
+	}
+	return r
+}
+
+// mixedLiteralText：insertMixedLiteral 插入 text 時畫面上的樣子（全形時混打照常，英數轉全形）。
+func (s *Session) mixedLiteralText(text string) string {
+	if s.fullWidth && !s.english {
+		return s.fullWidthText(text)
+	}
+	return text
+}
 
 // selectFlip 照 f 換掉組字區 [f.start, f.end)：前段照字面，後段的音節鎖定成選的字（char 空字串時原樣留下注音），原按鍵記在音節上，
 // 選了字的記成神經判過的，再按 ↓ 翻得回去。改的是按鍵怎麼切，不只是選字：換完其餘的字照常重排（選了 5萬 之後 快錢 → 塊錢）。
@@ -243,7 +285,8 @@ func (s *Session) selectFlip(f flipPick) bool {
 	if f.keep {
 		return true
 	}
-	cursor := s.cursor
+	cursor, allow := s.cursor, s.allowRerank
+	s.allowRerank = false // 換到一半時不評分，換完整句重解評分一次（同 replaceMixed）
 	s.cursor = f.end
 	for s.cursor > f.start {
 		s.eraseBeforeCursor()
@@ -261,6 +304,7 @@ func (s *Session) selectFlip(f flipPick) bool {
 		s.locks[pos] = decode.Lock{Word: f.char, Len: 1}
 		s.markJudged(pos, f.prefix)
 	}
+	s.allowRerank = allow
 	if delta := s.cursor - f.end; !s.AdvanceAfterSelect {
 		switch {
 		case cursor >= f.end:
@@ -269,23 +313,8 @@ func (s *Session) selectFlip(f flipPick) bool {
 			s.cursor = cursor
 		}
 	}
-	s.refresh()
-	s.Rescore()
+	if !s.Rescore() {
+		s.refresh()
+	}
 	return true
-}
-
-// insertFlips 把切法 flips 插在 items 的 head 之後，回傳插好的 items、matched 與各項的換法。
-func insertFlips(items []decode.Candidate, matched []string, head int, flips []flipPick) ([]decode.Candidate, []string, map[int]flipPick) {
-	if len(flips) == 0 {
-		return items, matched, nil
-	}
-	at := map[int]flipPick{}
-	for i, f := range flips {
-		items = slices.Insert(items, head+i, rawCandidate(f.prefix+f.char))
-		if matched != nil {
-			matched = slices.Insert(matched, min(head+i, len(matched)), "")
-		}
-		at[head+i] = f
-	}
-	return items, matched, at
 }

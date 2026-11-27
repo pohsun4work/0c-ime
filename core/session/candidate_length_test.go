@@ -316,7 +316,7 @@ func TestDownTabWalksSubspansOfShownWord(t *testing.T) {
 		}
 	}
 	key(s, proto.KeyTab)
-	if snap := key(s, proto.KeyEnter); snap.Text() != "我說不上" {
-		t.Fatalf("選「說不」畫面不變：%q", snap.Text())
+	if snap := key(s, proto.KeyEnter); snap.Text() != "我說不上" || len(s.locks) != 0 {
+		t.Fatalf("選「說不」畫面不變、不是詞不鎖定：%q %v", snap.Text(), s.locks)
 	}
 }

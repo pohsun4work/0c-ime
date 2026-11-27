@@ -730,18 +730,20 @@ func (s *Session) finishMixedTone(key string) bool {
 	if key == " " && s.zhuyinKeyHabit(raw) && s.mixedKeepable(2, sym) {
 		return s.applyMixedTone(mixedToneAction{kind: mixedToneKeep, choice: 2, mark: zhuyinKeyApplied}, key, sym)
 	}
-	var rule, act mixedToneAction
+	var act mixedToneAction
 	var visit *mixedRevisit
+	var gap float64
 	if key == " " && s.mixed.choice == 0 {
-		rule, act, visit = s.mixedSpaceAction() // 組字區照著顯示的那個決定
+		_, act, visit = s.mixedSpaceAction() // 組字區照著顯示的那個決定
+		gap = s.spaceMemo.gap
 	} else {
-		rule = s.decideMixedTone(raw, key, sym)
-		act, visit, _, _ = s.neuralMixedTone(rule, raw, key, sym)
+		act, visit, gap, _ = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
 	}
 	if visit != nil && act.kind == mixedToneLiteral {
 		act = mixedToneAction{kind: mixedToneSpace} // 照原樣接空白（同 mixedKey）在這裡打，才記得到回頭比的位置
 	}
-	judged := act.kind == mixedToneSyllable && s.mixedNeuralWanted(rule, raw, key)
+	// 神經比過兩種以上的切法（gap 是有限的正數；規則自己決定的是 +Inf，沒問到的是 0）才算判過，↓ 才翻邊。
+	judged := act.kind == mixedToneSyllable && gap > 0 && !math.IsInf(gap, 1)
 	before := len(s.syls)
 	if !s.applyMixedTone(act, key, sym) {
 		return false
@@ -1987,10 +1989,7 @@ type mixedOrigin struct {
 
 func (s *Session) insertMixedLiteral(text string, assisted, explicit bool) {
 	at := s.cursor
-	if s.fullWidth && !s.english {
-		text = s.fullWidthText(text) // 全形時混打照常，英數與空白照微軟打全形（hello␣ → ｈｅｌｌｏ　）
-	}
-	s.insertLiteral(text)
+	s.insertLiteral(s.mixedLiteralText(text)) // 全形時英數與空白照微軟打全形（hello␣ → ｈｅｌｌｏ　）
 	if s.mixedOrigins == nil {
 		s.mixedOrigins = map[int]mixedOrigin{}
 	}

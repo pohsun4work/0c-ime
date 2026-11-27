@@ -96,7 +96,7 @@ func (s *Session) rerankAllowed() bool {
 // 有跨音手選的段照統計：鎖住的詞不是打出的讀音，近音不送進評分器（F33）。
 func (s *Session) rerankable(start, end int) bool {
 	n := end - start
-	if (n < 2 || n > 32) && (n != 1 || s.Rerank.TextWeight <= 0) || !s.Rerank.Readable(s.syls[start:end]) {
+	if !(n >= 2 && n <= 32 || n == 1 && s.Rerank.TextWeight > 0) || !s.Rerank.Readable(s.syls[start:end]) {
 		return false
 	}
 	for _, l := range s.locksIn(start, end) {
@@ -282,7 +282,8 @@ func (s *Session) rerankSegmentBody(lat input.Lattice, start, end int, shown, be
 		s.rerankCache[key] = entry
 	}
 	decision := entry.decision
-	if end == len(s.syls) && opt.HintGap > 0 && decision.second >= 0 && decision.gap < opt.HintGap && plainSegments(rows[decision.second].Segments) {
+	// 段裡有鎖時不給提示：提示涵蓋整段，接受時不能跨越手選（acceptHint）。
+	if end == len(s.syls) && opt.HintGap > 0 && decision.second >= 0 && decision.gap < opt.HintGap && plainSegments(rows[decision.second].Segments) && len(locks) == 0 {
 		hint := &neuralHint{text: rows[decision.second].Text, replace: rows[decision.winner].Text}
 		for _, g := range rows[decision.second].Segments {
 			g.Start += start

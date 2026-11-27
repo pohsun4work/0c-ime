@@ -1206,14 +1206,14 @@ func (s *Session) openCandidates(length int) {
 			s.openSyllableLiteral(p)
 			return
 		}
+		if s.openRunFlips(pos) {
+			return
+		}
 		start := s.literalFloor(pos)
 		end := s.literalStep(start, 1)
 		var text strings.Builder
 		for _, r := range s.syls[start:end] {
 			text.WriteString(string(r))
-		}
-		if s.openRunFlips(pos) {
-			return
 		}
 		alternatives := literalAlternatives(text.String())
 		s.openSymbols(s.literalKeyAlternatives(alternatives, start, end-start), start, end-start, false)
@@ -1248,28 +1248,13 @@ func (s *Session) stepCandidate(d int) {
 	case d < 0 && s.CandidateBeforeCursor:
 		s.cursor = start
 	case d < 0:
-		s.cursor = s.unitStart(start - 1)
+		s.cursor = s.literalFloor(start - 1)
 	case s.CandidateBeforeCursor:
-		s.cursor = s.unitEnd(end)
+		s.cursor = s.literalStep(s.literalFloor(end), 1)
 	default:
 		s.cursor = end
 	}
 	s.openCandidates(0)
-}
-
-// unitStart／unitEnd：位置 pos 那一格（一個字；原樣文字是 literalStep 的一格）的起點與終點。
-func (s *Session) unitStart(pos int) int {
-	if s.literals[pos] {
-		return s.literalFloor(pos)
-	}
-	return pos
-}
-
-func (s *Session) unitEnd(pos int) int {
-	if s.literals[pos] {
-		return s.literalStep(s.literalFloor(pos), 1)
-	}
-	return pos + 1
 }
 
 // canStepCandidate：目前的候選是改字的候選，j／k 會換前後一個字（stepCandidate）。快照的 StepKeys 也依它判斷，
@@ -1362,43 +1347,46 @@ func (s *Session) openAt(pos, length int) bool {
 	// 畫面上的字不是詞時（說不上 的「說不」）只在畫面上同一個詞裡才補上，沒有詞的詞長（果事物）Tab 照舊跳過；
 	// 只有近音的詞長不補（開模糊音不改原音候選）。
 	exact := len(items) > 0 && (matched == nil || slices.Contains(matched, ""))
+	added := false // 補上的不是詞（說不）：選了照畫面不動，不鎖也不學
 	if shown, inWord, ok := s.shownWord(pos, length); ok && (exact || inWord) {
-		items, matched = shownFirst(items, matched, shown, s.syls[pos:pos+length])
+		items, matched, added = shownFirst(items, matched, shown, s.syls[pos:pos+length])
 	}
 	// Keep physical keys recoverable without creating Chinese-word preferences.
 	// The ordinary raw-zhuyin candidate remains last for existing clients.
 	// 排在畫面上的字後面的：神經判過的字（趴 的 q8、教 的 url，P8 翻邊）；只用數字鍵出的字（#134 的 5 之、#162 的 20 單）
 	// 要數字的人多；照位置組出的字（#274：i16 博、k27 的、u2/4 定）是引擎替使用者改的順序，同音字多時原按鍵在最後一頁找不到；
 	// 型號後面數字鍵開頭的字（#249：h264 的、Q2 的）前面的數字也可能還是型號。再來是神經判過的字的其他切法（斷 → 2萬 → 段…）。
-	head := min(1, len(items))
-	var flips []flipPick
-	keysFirst := false
-	if length == 1 {
-		flips, keysFirst = s.judgedFlips(pos)
-	}
-	keyLiterals := map[int]string{}
-	keys := s.originalMixedKeys(pos, length)
-	front := keys != "" && (keysFirst || length == 1 && (s.digitWordKeys(pos) || s.digitAfterAlnumKeys(pos)) || s.positionalKeysIn(pos, length))
-	insertKeys := func(at int) {
-		keyLiterals[at] = keys
-		items = slices.Insert(items, at, rawCandidate(keys))
+	insertRaw := func(at int, text string) {
+		items = slices.Insert(items, at, rawCandidate(text))
 		if matched != nil {
 			matched = slices.Insert(matched, min(at, len(matched)), "")
 		}
 	}
+	head := min(1, len(items))
+	keyLiterals, flipAt := map[int]string{}, map[int]flipPick{}
+	if added {
+		flipAt[0] = flipPick{keep: true}
+	}
+	keys := s.originalMixedKeys(pos, length)
+	front := keys != "" && (length == 1 && (s.judgedKeysSecond(pos) || s.digitWordKeys(pos) || s.digitAfterAlnumKeys(pos)) || s.positionalKeysIn(pos, length))
 	if front {
-		insertKeys(head)
+		keyLiterals[head] = keys
+		insertRaw(head, keys)
 		head++
 	}
-	items, matched, flipAt := insertFlips(items, matched, head, flips)
+	if length == 1 {
+		for _, f := range s.judgedFlips(pos) {
+			flipAt[head] = f
+			insertRaw(head, s.mixedLiteralText(f.prefix)+f.char)
+			head++
+		}
+	}
 	if keys != "" && !front {
-		insertKeys(len(items))
+		keyLiterals[len(items)] = keys
+		insertRaw(len(items), keys)
 	}
 	if length == 1 {
-		items = append(items, rawCandidate(s.syls[pos].Text()))
-		if matched != nil {
-			matched = append(matched, "")
-		}
+		insertRaw(len(items), s.syls[pos].Text())
 	}
 	if len(items) == 0 {
 		return false
@@ -1429,8 +1417,8 @@ func (s *Session) shownWord(pos, length int) (shown string, inWord, ok bool) {
 }
 
 // shownFirst 把畫面上的字 shown 移到第一個（有原音的那一項就用它，只有近音就用近音那一項）；
-// 不在清單裡（說不上 的「說不」不是詞）時補上。
-func shownFirst(items []decode.Candidate, matched []string, shown string, reading []zhuyin.Syllable) ([]decode.Candidate, []string) {
+// 不在清單裡（說不上 的「說不」不是詞）時補上，added 是 true。
+func shownFirst(items []decode.Candidate, matched []string, shown string, reading []zhuyin.Syllable) (_ []decode.Candidate, _ []string, added bool) {
 	at := -1
 	for i, c := range items {
 		if c.Entry.Surface != shown {
@@ -1445,7 +1433,7 @@ func shownFirst(items []decode.Candidate, matched []string, shown string, readin
 		}
 	}
 	if at == 0 {
-		return items, matched
+		return items, matched, false
 	}
 	c, m := decode.Candidate{Entry: lexicon.Entry{Surface: shown, Reading: slices.Clone(reading)}}, ""
 	if at > 0 {
@@ -1460,7 +1448,7 @@ func shownFirst(items []decode.Candidate, matched []string, shown string, readin
 	if matched != nil {
 		matched = slices.Insert(matched, 0, m)
 	}
-	return items, matched
+	return items, matched, at < 0
 }
 
 func (s *Session) pages() int { return (len(s.cand.items) + s.pageSize() - 1) / s.pageSize() }
@@ -1741,8 +1729,8 @@ func (s *Session) snapshot() proto.Snapshot {
 		pending = s.mixedText()
 	}
 	split := pending != ""
-	if s.mixed.raw != "" && s.fullWidth && !s.english {
-		pending = s.fullWidthText(pending) // 全形時打到一半的英數也照全形顯示（insertMixedLiteral）
+	if s.mixed.raw != "" {
+		pending = s.mixedLiteralText(pending) // 全形時打到一半的英數也照全形顯示（insertMixedLiteral）
 	}
 	pendingSegment := proto.Segment{Text: pending, Style: proto.StylePending}
 	for _, g := range s.path {

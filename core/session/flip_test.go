@@ -68,3 +68,26 @@ func TestDownEnglishRunWithoutReading(t *testing.T) {
 		t.Fatalf("hello 的 o 按 ↓ 不該開英數翻邊：%q", got)
 	}
 }
+
+// 問不到神經時不翻邊：規則出的字照舊，清單裡沒有切法。
+func TestDownJudgedNeedsNeural(t *testing.T) {
+	s := splitSession(nil, nil)
+	mixedType(s, "ji32j04")
+	if got := itemTexts(key(s, proto.KeyDown)); len(got) == 0 || got[0] != "斷" || slices.Contains(got, "2萬") {
+		t.Errorf("沒有評分器時 ↓ 不列切法：%q", got)
+	}
+}
+
+// 全形時混打照常：全形的英數一樣列得出組得出的字，選了連全形空白一起換掉。
+func TestDownEnglishRunFullWidth(t *testing.T) {
+	s := splitSession(map[string]float64{"up": 0, "音": -10, "go": 0}, nil)
+	s.fullWidth = true
+	mixedType(s, "go up ")
+	if got := itemTexts(key(s, proto.KeyDown)); !slices.Equal(got, []string{"ｕｐ", "音", "因", "ㄧㄣ"}) {
+		t.Fatalf("全形 go up␣ 按 ↓：%q", got)
+	}
+	s.Handle(proto.Request{Type: proto.Select, Index: 1})
+	if commit := key(s, proto.KeyEnter).Commit; commit != "ｇｏ　音" {
+		t.Errorf("選 音 送出 %q", commit)
+	}
+}
