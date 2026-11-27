@@ -135,23 +135,20 @@ func TestMixedPunctuationKeyRightAfterEnglishWord(t *testing.T) {
 	}
 }
 
-// #187：打字時顯示空白會變成的讀音，跟 #162 的數字鍵一樣；不會變成中文的標點沒有提示。
-func TestMixedPunctuationKeyWordHint(t *testing.T) {
+// #187：空白會變成中文的標點鍵，打字時直接顯示讀音（跟數字鍵一樣），Enter 照樣出標點；不會變成中文的照字面。
+func TestMixedPunctuationKeyWordShowsReading(t *testing.T) {
 	for _, tc := range []struct {
-		keys string
-		want string
+		keys, want, enter string
 	}{
-		{".", "ㄡ"}, {",", "ㄝ"}, {"hello .", "ㄡ"}, {"ji3.", "ㄡ"},
-		{";", ""}, {"/", ""}, {"-", ""}, {"3.", ""}, {"..", ""},
+		{".", "ㄡ", "."}, {",", "ㄝ", ","}, {"hello .", "hello ㄡ", "hello ."}, {"ji3.", "我ㄡ", "我."},
+		{";", ";", ";"}, {"/", "/", "/"}, {"-", "-", "-"}, {"3.", "3.", "3."}, {"..", "..", ".."},
 	} {
 		s := punctKeySession()
-		snap := mixedType(s, tc.keys)
-		got := ""
-		if snap.ReadingHint != nil {
-			got = snap.ReadingHint.Text
+		if got := mixedType(s, tc.keys).Text(); got != tc.want {
+			t.Errorf("%q 顯示 %q，要 %q", tc.keys, got, tc.want)
 		}
-		if got != tc.want {
-			t.Errorf("%q 讀音提示 %q，要 %q", tc.keys, got, tc.want)
+		if got := key(s, proto.KeyEnter).Commit; got != tc.enter {
+			t.Errorf("%q Enter %q，要 %q", tc.keys, got, tc.enter)
 		}
 	}
 }

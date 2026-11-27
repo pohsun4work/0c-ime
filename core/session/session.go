@@ -962,11 +962,12 @@ func (s *Session) backspace() bool {
 	asTyped := s.restorePending(true)
 	if s.mixed.raw != "" {
 		if s.mixed.accepted != "" {
-			s.mixed.accepted = ""
+			s.trimAccepted()
 		} else if asTyped || !s.eraseRepaired() {
 			at := s.mixedEraseAt(asTyped)
 			s.mixed.raw = s.mixed.raw[:at] + s.mixed.raw[at+1:]
 			s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, at)
+			s.mixed.edited = s.mixed.choice == 1
 		}
 		if s.mixed.raw == "" {
 			s.clearMixed()
@@ -1154,6 +1155,9 @@ func (s *Session) refresh() {
 		} else {
 			s.sug = s.suggestAfterLiteral()
 			s.sugPrev, s.sugPrevKey = s.sug, key
+		}
+		if s.sug != nil && s.revisitAwaits(s.sug.Start) {
+			s.sug = nil // up␣ 的 因 不補成 因為：那個字之後可能換回 up
 		}
 	}
 	s.refreshPhoneticHint()
@@ -1786,21 +1790,10 @@ func (s *Session) snapshot() proto.Snapshot {
 		pending = s.mixedText()
 	}
 	split := pending != ""
-	// 中英混打照字面顯示、按空白會組成中文的數字按鍵（#162）：那段組字以 StyleReading 畫，另附讀音提示。
-	hintAt, hintSyl, hinted := s.mixedSpaceReading()
-	if s.mixed.raw != "" && s.fullWidth && !s.english && !hinted {
+	if s.mixed.raw != "" && s.fullWidth && !s.english {
 		pending = s.fullWidthText(pending) // 全形時打到一半的英數也照全形顯示（insertMixedLiteral）
 	}
-	pendingSegments := func() []proto.Segment {
-		if !hinted {
-			return []proto.Segment{{Text: pending, Style: proto.StylePending}}
-		}
-		var out []proto.Segment
-		if hintAt > 0 {
-			out = append(out, proto.Segment{Text: pending[:hintAt], Style: proto.StylePending})
-		}
-		return append(out, proto.Segment{Text: pending[hintAt:], Style: proto.StyleReading})
-	}
+	pendingSegment := proto.Segment{Text: pending, Style: proto.StylePending}
 	for _, g := range s.path {
 		style := proto.StyleNormal
 		switch l, locked := s.locks[g.Start]; {
@@ -1817,7 +1810,7 @@ func (s *Session) snapshot() proto.Snapshot {
 			if k > 0 {
 				snap.Preedit = append(snap.Preedit, proto.Segment{Text: string(runes[:k]), Style: style})
 			}
-			snap.Preedit = append(snap.Preedit, pendingSegments()...)
+			snap.Preedit = append(snap.Preedit, pendingSegment)
 			snap.Preedit = append(snap.Preedit, proto.Segment{Text: string(runes[k:]), Style: style})
 			split = false
 			continue
@@ -1832,7 +1825,7 @@ func (s *Session) snapshot() proto.Snapshot {
 		for i, y := range s.syls {
 			text, style := s.fallbackDisplay(i, y)
 			if split && i == s.cursor {
-				snap.Preedit = append(snap.Preedit, pendingSegments()...)
+				snap.Preedit = append(snap.Preedit, pendingSegment)
 				split = false
 			}
 			if i < s.cursor {
@@ -1842,7 +1835,7 @@ func (s *Session) snapshot() proto.Snapshot {
 		}
 	}
 	if split {
-		snap.Preedit = append(snap.Preedit, pendingSegments()...)
+		snap.Preedit = append(snap.Preedit, pendingSegment)
 	}
 	if start, end := s.markRange(); start < end && pending == "" {
 		snap.Preedit = markSegments(snap.Preedit, start, end) // 沒有未完成注音時，音節與字元一一對應
@@ -1851,10 +1844,6 @@ func (s *Session) snapshot() proto.Snapshot {
 	runes := []rune(snap.Text())
 	snap.Cursor.Rune = min(before+len([]rune(pending)), len(runes))
 	snap.Cursor.UTF16 = len(utf16.Encode(runes[:snap.Cursor.Rune]))
-	if hinted {
-		length := len([]rune(pending)) - hintAt
-		snap.ReadingHint = &proto.ReadingHint{Start: snap.Cursor.Rune - length, Length: length, Text: string(hintSyl)}
-	}
 	// 小視窗的 Tab 提示是按了之後組字區結尾變成的樣子（另 → 另外、png → ㄕㄣ），SuggestionEdit 是被換掉的範圍。
 	// 前方可能含多字元原樣注音，不能直接把音節位置當顯示字元位置，一律從結尾往回算。
 	tail := func(n int, text string) { snap.SetSuggestion(len(runes)-n, n, text) }

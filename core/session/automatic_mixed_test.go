@@ -60,12 +60,18 @@ func TestMixedCompletionCorrectionAndUndo(t *testing.T) {
 			t.Fatalf("undo: %+v", snap)
 		}
 		key(s, proto.KeyTab)
-		if snap := key(s, proto.KeyBackspace); snap.Text() != "我"+tc.raw {
-			t.Fatalf("backspace undo: %+v", snap)
-		}
-		key(s, proto.KeyTab)
 		if snap := key(s, proto.KeyEnter); snap.Commit != "我"+tc.word {
 			t.Fatalf("commit: %+v", snap)
+		}
+		// 退格刪收下的詞的最後一個字母，不退回原按鍵；Tab 不再換。
+		mixedType(s, tc.raw)
+		key(s, proto.KeyTab)
+		trimmed := tc.word[:len(tc.word)-1]
+		if snap := key(s, proto.KeyBackspace); snap.Text() != trimmed || snap.Suggestion != "" {
+			t.Fatalf("backspace trims: %+v", snap)
+		}
+		if snap := key(s, proto.KeyTab); snap.Text() != trimmed {
+			t.Fatalf("Tab after trim: %+v", snap)
 		}
 		if s.model.Store.Uni[tc.raw] != 0 || s.model.Store.Uni[tc.word] != 0 {
 			t.Fatal("prototype English must not poison Chinese learning")

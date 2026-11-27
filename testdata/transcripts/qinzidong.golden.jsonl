@@ -1,6 +1,6 @@
 # docs/12：親子丼。第一次要手選；第二次自動正確；單打 ㄐㄧㄥˇ 不受污染
 {"revision":1,"handled":true,"preedit":[{"text":"ㄑ","style":"pending"}],"cursor":{"rune":1,"utf16":1},"mode":"zhuyin"}
-{"revision":2,"handled":true,"preedit":[{"text":"fu","style":"pending"}],"cursor":{"rune":2,"utf16":2},"suggestion":"function","suggestion_edit":{"start":0,"length":2,"text":"function"},"mode":"zhuyin"}
+{"revision":2,"handled":true,"preedit":[{"text":"fu","style":"pending"}],"cursor":{"rune":2,"utf16":2},"mode":"zhuyin"}
 {"revision":3,"handled":true,"preedit":[{"text":"ㄑㄧㄣ","style":"pending"}],"cursor":{"rune":3,"utf16":3},"mode":"zhuyin"}
 {"revision":4,"handled":true,"preedit":[{"text":"親","style":"normal"}],"cursor":{"rune":1,"utf16":1},"mode":"zhuyin"}
 {"revision":5,"handled":true,"preedit":[{"text":"親","style":"normal"},{"text":"ㄗ","style":"pending"}],"cursor":{"rune":2,"utf16":2},"mode":"zhuyin"}
@@ -15,7 +15,7 @@
 {"revision":14,"handled":true,"commit":"親子丼","cursor":{"rune":0,"utf16":0},"mode":"zhuyin"}
 # 第二次：自動轉換即為 親子丼
 {"revision":15,"handled":true,"preedit":[{"text":"ㄑ","style":"pending"}],"cursor":{"rune":1,"utf16":1},"mode":"zhuyin"}
-{"revision":16,"handled":true,"preedit":[{"text":"fu","style":"pending"}],"cursor":{"rune":2,"utf16":2},"suggestion":"function","suggestion_edit":{"start":0,"length":2,"text":"function"},"mode":"zhuyin"}
+{"revision":16,"handled":true,"preedit":[{"text":"fu","style":"pending"}],"cursor":{"rune":2,"utf16":2},"mode":"zhuyin"}
 {"revision":17,"handled":true,"preedit":[{"text":"ㄑㄧㄣ","style":"pending"}],"cursor":{"rune":3,"utf16":3},"mode":"zhuyin"}
 {"revision":18,"handled":true,"preedit":[{"text":"親","style":"partial"}],"cursor":{"rune":1,"utf16":1},"mode":"zhuyin"}
 {"revision":19,"handled":true,"preedit":[{"text":"親","style":"partial"},{"text":"ㄗ","style":"pending"}],"cursor":{"rune":2,"utf16":2},"mode":"zhuyin"}

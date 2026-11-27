@@ -338,8 +338,8 @@ func TestMixedDigitReadingsSurviveUnrelatedLearning(t *testing.T) {
 				key(s, string(k))
 			}
 			if tc.keys == "593" {
-				if hint := s.snapshot().ReadingHint; hint == nil || hint.Text != "ㄓㄞ" {
-					t.Fatalf("59 reading hint: %+v", hint)
+				if got := s.snapshot().Text(); got != "ㄓㄞ" {
+					t.Fatalf("59 display: %q", got)
 				}
 			}
 			if got := key(s, tc.keys[len(tc.keys)-1:]).Text(); got != tc.want {

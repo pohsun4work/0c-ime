@@ -64,7 +64,7 @@ func (s *Session) englishKey(k string) (handled bool, commit string, active bool
 			}
 		case proto.KeyBackspace:
 			if s.mixed.accepted != "" {
-				s.mixed.accepted = ""
+				s.trimAccepted()
 			} else {
 				s.mixed.raw = s.mixed.raw[:len(s.mixed.raw)-1]
 				s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, len(s.mixed.raw))

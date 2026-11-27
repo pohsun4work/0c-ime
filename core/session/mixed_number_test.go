@@ -164,7 +164,7 @@ func TestMixedDeferredNumberKeepsPhysicalKeys(t *testing.T) {
 
 // 句首或空白、英文、數字之後，數字鍵能組成注音字時按空白出字；單鍵與兩位數遵守相同規則。
 // 要保留數字須按 Enter；後接量詞、英文或數字不會將已組出的中文字改回原按鍵。
-// 單獨組不成字的鍵、小數與時間仍按數字處理；reading_hint 提示空白將組成的讀音。
+// 單獨組不成字的鍵、小數與時間仍按數字處理；組得成字的數字直接顯示空白將組成的讀音。
 func TestMixedSingleKeyWord(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		{"5 ", "之"},
@@ -261,7 +261,7 @@ func TestMixedSingleKeyWordNumberNeedsEnter(t *testing.T) {
 }
 
 // #162 規則一致後，單鍵字後面接英文或拼不成字的數字也照樣是中文；要還原只能回到那個字上按 ↓ 選原按鍵（第二個），
-// 選了要還原成原按鍵、後面的英文和數字不動。後面那段拼不成字的數字照舊沒有讀音提示。
+// 選了要還原成原按鍵、後面的英文和數字不動。後面那段拼不成字的數字照字面顯示。
 func TestMixedSingleKeyWordRestoreAfterFollowing(t *testing.T) {
 	for _, tc := range []struct{ keys, shown, restored string }{
 		{"5 hello ", "之hello ", "5 hello "},
@@ -281,7 +281,7 @@ func TestMixedSingleKeyWordRestoreAfterFollowing(t *testing.T) {
 		}
 	}
 	s := deferredNumberSession()
-	if snap := mixedType(s, "5 15"); snap.ReadingHint != nil {
-		t.Fatalf("之後面的 15 拼不成字，不該有讀音提示：%+v", snap.ReadingHint)
+	if snap := mixedType(s, "5 15"); snap.Text() != "之15" {
+		t.Fatalf("之後面的 15 拼不成字，照字面顯示：%q", snap.Text())
 	}
 }

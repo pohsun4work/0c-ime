@@ -30,7 +30,7 @@ func TestMixedDisplayIsSpaceResult(t *testing.T) {
 	for _, tc := range []struct{ keys, shown, space string }{
 		{"gjn", "ㄙㄨ", "蘇"}, {"wu//", "ㄊㄧㄥ", "聽"}, {"5wu0", "5ㄊㄧㄢ", "5天"}, {"1qu0", "1ㄆㄧㄢ", "1篇"},
 		{"cpu", "cpu", "cpu "}, {"png", "png", "png "}, // 組不成音節的、字典收的縮寫照英文
-		{"20", "20", "單"}, // 數字照字面顯示，讀音另外提示（#162）
+		{"20", "ㄉㄢ", "單"}, // 數字也是（#162），Enter 照樣送出 20
 	} {
 		s := swapSession()
 		if got := mixedType(s, tc.keys).Text(); got != tc.shown {
@@ -42,20 +42,19 @@ func TestMixedDisplayIsSpaceResult(t *testing.T) {
 	}
 }
 
-// Tab 換成小視窗顯示的另一個：修正讀音、數字換成原按鍵（之後的空白就是空白），字典收的縮寫換成修正讀音；
-// 照順序組的注音不是英文詞時沒有提示。
+// Tab 換成另一個：修正讀音、數字換成原按鍵（之後的空白就是空白），字典收的縮寫換成修正讀音；
+// 照順序組的注音不是英文詞時不換。照空白的決定顯示的，決定有把握才不跳小視窗（gjn 不必問神經）；
+// 要問神經卻問不到的（20，這裡沒有神經）算沒把握。Tab 都照樣換。
 func TestMixedTabSwapsToTheOther(t *testing.T) {
-	for _, tc := range []struct{ keys, popup, space string }{
-		{"gjn", "gjn", "gjn "}, {"20", "20", "20 "}, {"png", "ㄕㄣ", "深"}, {"wu0", "", "天"},
+	for _, tc := range []struct{ keys, popup, tab, space string }{
+		{"gjn", "", "gjn", "gjn "}, {"20", "20", "20", "20 "}, {"png", "ㄕㄣ", "ㄕㄣ", "深"}, {"wu0", "", "ㄊㄧㄢ", "天"},
 	} {
 		s := swapSession()
 		if got := mixedType(s, tc.keys); got.Suggestion != tc.popup || tc.popup != "" && got.SuggestedText() != tc.popup {
 			t.Errorf("%s 的 Tab 提示 %q（%q），要 %q", tc.keys, got.Suggestion, got.SuggestedText(), tc.popup)
 		}
-		if tc.popup != "" {
-			if got := key(s, proto.KeyTab).Text(); got != tc.popup {
-				t.Errorf("%s Tab 是 %q，要 %q", tc.keys, got, tc.popup)
-			}
+		if got := key(s, proto.KeyTab).Text(); got != tc.tab {
+			t.Errorf("%s Tab 是 %q，要 %q", tc.keys, got, tc.tab)
 		}
 		if got := key(s, " ").Text(); got != tc.space {
 			t.Errorf("%s Tab␣ 是 %q，要 %q", tc.keys, got, tc.space)
@@ -81,29 +80,77 @@ func TestMixedTabCompletionStays(t *testing.T) {
 	}
 }
 
-// Tab 換來的再按 Tab 換回原樣：up 換成原按鍵後不再換成補全 upon；
-// 數字換成原按鍵後跟原樣看起來一樣，之後在原按鍵與照順序的注音之間換。小視窗一律顯示下一個。
-func TestMixedTabTogglesBack(t *testing.T) {
+// Tab 是使用者主動選的，換了就定了：不再跳小視窗，再按 Tab 不動（up 換成原按鍵後不換回 ㄧㄣ、也不換成補全 upon）。
+func TestMixedTabStays(t *testing.T) {
 	for _, want := range [][]string{
-		{"up", "ㄧㄣ", "up", "ㄧㄣ"},
-		{"gjn", "ㄙㄨ", "gjn", "ㄙㄨ"},
-		{"png", "png", "ㄕㄣ", "png"},
-		{"20", "20", "20", "ㄉㄢ", "20"},
+		{"up", "ㄧㄣ", "up", "up"},
+		{"gjn", "ㄙㄨ", "gjn", "gjn"},
+		{"png", "png", "ㄕㄣ", "ㄕㄣ"},
+		{"20", "ㄉㄢ", "20", "20"},
 	} {
 		s := swapSession()
-		snap := mixedType(s, want[0])
-		got := []string{snap.Text()}
+		got := []string{mixedType(s, want[0]).Text()}
 		for range want[2:] {
-			hint := snap.Suggestion
-			snap = key(s, proto.KeyTab)
-			if hint != snap.Text() {
-				t.Errorf("%s：小視窗是 %q，Tab 之後是 %q", want[0], hint, snap.Text())
+			snap := key(s, proto.KeyTab)
+			if snap.Suggestion != "" {
+				t.Errorf("%s Tab 之後還有小視窗 %q", want[0], snap.Suggestion)
 			}
 			got = append(got, snap.Text())
 		}
 		if !slices.Equal(got, want[1:]) {
 			t.Errorf("%s 連按 Tab：%q，要 %q", want[0], got, want[1:])
 		}
+	}
+}
+
+// Tab 之後退格：收下的英文詞刪最後一個字母（hel Tab hello 退格 hell），換成的原按鍵刪最後一鍵；不跳小視窗，
+// 就此收尾時照字面（up Tab 退格空白是 u␣，不是 ㄧ）。接著打字母、數字時整串照一般打字判斷（hell 再打 o 是 hello、
+// hel 再打 pji3 是 help我）。沒退格時接著打的照舊另起一串（TestMixedTabLiteralStartsNewRun）。
+func TestMixedTabBackspaceTrims(t *testing.T) {
+	for _, tc := range []struct {
+		keys         string
+		erase        int
+		erased, more string
+		space        string
+	}{
+		{"hel", 1, "hell", "", "hell "},
+		{"hel", 1, "hell", "o", "hello "},
+		{"hel", 2, "hel", "pji3", "help我 "},
+		{"up", 1, "u", "", "u "},
+		{"gjn", 1, "gj", "", "gj "},
+	} {
+		s := swapSession()
+		mixedType(s, tc.keys)
+		key(s, proto.KeyTab)
+		var snap proto.Snapshot
+		for range tc.erase {
+			snap = key(s, proto.KeyBackspace)
+		}
+		if snap.Text() != tc.erased || snap.Suggestion != "" {
+			t.Errorf("%s Tab 退格 %d 次：%q 小視窗 %q，要 %q", tc.keys, tc.erase, snap.Text(), snap.Suggestion, tc.erased)
+			continue
+		}
+		mixedType(s, tc.more)
+		if got := key(s, " ").Text(); got != tc.space {
+			t.Errorf("%s Tab 退格 %s␣：%q，要 %q", tc.keys, tc.more, got, tc.space)
+		}
+	}
+}
+
+// ↓ 選了原按鍵、退格改過（跟 Tab 一樣不跳小視窗），再用 ↓ 選一次原按鍵：又是選好的，接著打的另起一串
+// （s 再打 u3 是 s以，不是併成 su3 的 你）。
+func TestMixedReselectAfterEditStartsNewRun(t *testing.T) {
+	s := swapSession()
+	mixedType(s, "su")
+	key(s, proto.KeyDown)
+	pickText(t, s, "su")
+	if snap := key(s, proto.KeyBackspace); snap.Suggestion != "" {
+		t.Fatalf("選過再退格還有小視窗 %q", snap.Suggestion)
+	}
+	key(s, proto.KeyDown)
+	pickText(t, s, "s")
+	if got := mixedType(s, "u3").Text(); got != "s以" {
+		t.Fatalf("重選後接著打：%q", got)
 	}
 }
 
@@ -166,8 +213,26 @@ func TestMixedTabHintFollowsWidth(t *testing.T) {
 	s := swapSession()
 	s.InputStyle.ShiftSpace = inputstyle.ShiftSpaceFullWidth
 	key(s, proto.KeyShiftSpace)
-	snap := mixedType(s, "gjn")
-	if after := key(s, proto.KeyTab); snap.Suggestion != "ｇｊｎ" || after.Text() != snap.Suggestion {
+	snap := mixedType(s, "hel")
+	if after := key(s, proto.KeyTab); snap.Suggestion != "ｈｅｌｌｏ" || after.Text() != snap.Suggestion {
 		t.Fatalf("提示 %q，Tab 之後 %q", snap.Suggestion, after.Text())
+	}
+}
+
+// 不給的英文：大小寫混著的不修正（iPhone 不換 phone，全小寫的 iphone 照換）、只去掉結尾幾鍵的修正（helloj 是 hello
+// 接著打中文）、照順序是注音又不是英文詞的不補全（ao 是 ㄇㄟ，不補 aortic；so 是英文詞，照補 some）。
+func TestMixedTabSkipsUnwantedEnglish(t *testing.T) {
+	var words []english.Word
+	for _, w := range []string{"hello", "phone", "aortic", "so", "some"} {
+		words = append(words, english.Word{Text: w, Weight: 65})
+	}
+	for _, tc := range []struct{ keys, popup string }{
+		{"iPhone", ""}, {"iphone", "phone"}, {"helloj", ""}, {"ao", ""}, {"so", "some"}, {"aor", "aortic"},
+	} {
+		s := splitSession(nil, nil)
+		s.English = english.New(words)
+		if got := mixedType(s, tc.keys).Suggestion; got != tc.popup {
+			t.Errorf("%s 小視窗 %q，要 %q", tc.keys, got, tc.popup)
+		}
 	}
 }

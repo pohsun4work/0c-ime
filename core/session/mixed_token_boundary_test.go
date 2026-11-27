@@ -203,10 +203,10 @@ func TestMixedTokenDigitsThenAn(t *testing.T) {
 	}
 }
 
-// 0 還在待定時：畫面上中文字留著；Enter、移動游標都改回型號；退格只退 0。
+// 0 還在待定時：畫面上中文字留著、0 顯示空白會出的 ㄢ；Enter、移動游標都改回型號；退格只退 0。
 func TestMixedTokenDigitsPendingAn(t *testing.T) {
 	s := tokenBoundarySession()
-	if got := mixedType(s, "GT1030").Text(); got != "GT版0" {
+	if got := mixedType(s, "GT1030").Text(); got != "GT版ㄢ" {
 		t.Errorf("0 待定時畫面：%q", got)
 	}
 	if got := key(s, proto.KeyEnter).Commit; got != "GT1030" {
@@ -228,12 +228,6 @@ func TestMixedTokenDigitsPendingAn(t *testing.T) {
 	}
 	if got := mixedType(s, "04").Text(); got != "hello版案" {
 		t.Errorf("退格後重打：%q", got)
-	}
-
-	// 按空白會出字，讀音提示要有。
-	s = tokenBoundarySession()
-	if snap := mixedType(s, "GT1030"); snap.ReadingHint == nil || snap.ReadingHint.Text != "ㄢ" {
-		t.Errorf("讀音提示：%+v", snap.ReadingHint)
 	}
 
 	// 選過的字不改回按鍵；↓ 選了原按鍵 0 也不再改動。

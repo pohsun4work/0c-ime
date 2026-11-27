@@ -146,7 +146,7 @@ type repairMemo struct {
 }
 
 // mixedRepairShown：組字區顯示修正讀音時，回傳切點與修正後的音節，切點前照字面。沒選過的（choice 0）照接空白的結果
-// （spaceShown：gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ、aq8 是 aㄆㄚ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
+// （spaceShown：gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ、aq8 是 aㄆㄚ、20 是 ㄉㄢ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
 func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	p := s.mixed
 	if p.raw == "" || p.accepted != "" || s.english || s.englishWord || p.choice == 1 || p.choice == 2 {
@@ -168,8 +168,18 @@ func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	return at, done, ok
 }
 
-// mixedShowsZhuyin：待定按鍵在組字區顯示成還沒打完的注音（照順序組的 ㄋㄧ，或修正讀音的 ㄙㄨ）。
+// keysReading：顯示的讀音來自沒有字母的數字、標點鍵（20 的 ㄉㄢ、. 的 ㄡ），只是空白的預覽：
+// 空白以外的定案（Enter、失焦、切英文、點注音鍵）照按鍵（#162、#187）。
+func (s *Session) keysReading() bool {
+	at, _, ok := s.mixedRepairShown()
+	return ok && s.mixed.choice == 0 && !strings.ContainsFunc(s.mixed.raw[at:], unicode.IsLetter)
+}
+
+// mixedShowsZhuyin：待定按鍵在組字區顯示成還沒打完的注音（照順序組的 ㄋㄧ，或修正讀音的 ㄙㄨ）；數字、標點鍵的讀音不算。
 func (s *Session) mixedShowsZhuyin() bool {
+	if s.keysReading() {
+		return false
+	}
 	if _, phonetic := s.mixedPending(s.mixedText()); phonetic {
 		return true
 	}
