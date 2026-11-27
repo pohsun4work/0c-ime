@@ -290,6 +290,35 @@ func (s *Session) rerankSegmentBody(lat input.Lattice, start, end int, shown, be
 	return chosen, true
 }
 
+// variantOf 把寫法不同、意思一樣的字換成同一個（周 → 週）：只差這些字的（下週／下周）不當神經次佳（decide）。
+var variantOf = func() map[rune]rune {
+	m := map[rune]rune{}
+	rs := []rune("週周姐姊台臺裡裏著着線綫群羣汙污峰峯床牀鉤鈎嘆歎豔艷麵麪啟啓眾衆為爲祕秘溼濕恆恒敘敍冊册盃杯")
+	for i := 0; i+1 < len(rs); i += 2 {
+		m[rs[i+1]] = rs[i]
+	}
+	return m
+}()
+
+func variantOnly(a, b string) bool {
+	ra, rb := []rune(a), []rune(b)
+	if a == b || len(ra) != len(rb) {
+		return false
+	}
+	canon := func(r rune) rune {
+		if c, ok := variantOf[r]; ok {
+			return c
+		}
+		return r
+	}
+	for i := range ra {
+		if canon(ra[i]) != canon(rb[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // extendShownK 是每組鎖定另取的候選數：延伸部分的首選與一個替代。
 const extendShownK = 2
 
@@ -742,7 +771,7 @@ func decide(rows []decode.Hypothesis, scores []float64, weight, margin float64, 
 		}
 	}
 	for i := range rows {
-		if i != d.winner && (d.second < 0 || fused[i] > fused[d.second]) {
+		if i != d.winner && !variantOnly(rows[i].Text, rows[d.winner].Text) && (d.second < 0 || fused[i] > fused[d.second]) {
 			d.second = i
 		}
 	}

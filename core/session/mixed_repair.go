@@ -146,7 +146,7 @@ type repairMemo struct {
 }
 
 // mixedRepairShown：組字區顯示修正讀音時，回傳切點與修正後的音節，切點前照字面。沒選過的（choice 0）照接空白的結果
-// （spaceShown：gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ、aq8 是 aㄆㄚ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
+// （spaceShown：gjn 是 ㄙㄨ、5wu0 是 5ㄊㄧㄢ、aq8 是 aㄆㄚ、20 是 ㄉㄢ）；Tab 換成修正讀音的（choice 3，字典收的 png 是 ㄕㄣ）照修正。
 func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	p := s.mixed
 	if p.raw == "" || p.accepted != "" || s.english || s.englishWord || p.choice == 1 || p.choice == 2 {
@@ -168,7 +168,7 @@ func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	return at, done, ok
 }
 
-// mixedShowsZhuyin：待定按鍵在組字區顯示成還沒打完的注音（照順序組的 ㄋㄧ，或修正讀音的 ㄙㄨ）。
+// mixedShowsZhuyin：待定按鍵在組字區顯示成還沒打完的注音（照順序組的 ㄋㄧ，或照空白的決定顯示的 ㄙㄨ、20 的 ㄉㄢ）。
 func (s *Session) mixedShowsZhuyin() bool {
 	if _, phonetic := s.mixedPending(s.mixedText()); phonetic {
 		return true
@@ -190,7 +190,7 @@ func (s *Session) eraseRepaired() bool {
 		k, _ := layout.Standard.Key(sym)
 		keys = append(keys, k)
 	}
-	s.mixed.raw, s.mixed.choice = string(keys), 0
+	s.mixed.raw, s.mixed.choice, s.mixed.edited = string(keys), 0, s.mixed.chosen // Tab、↓ 選過的退格改過：不跳小視窗
 	s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, at)
 	return true
 }

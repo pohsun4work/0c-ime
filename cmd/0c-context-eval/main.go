@@ -140,17 +140,11 @@ func main() {
 			top = append(top, c.Entry.Surface)
 		}
 		accepted := ""
-		preview := ""
 		tabKeys := 0
 		if row[6] != "" {
 			after := e.Session(id).Handle(proto.Request{Type: proto.Key, Key: proto.KeyTab})
 			if after.Handled {
 				tabKeys++
-				if after.Suggestion != "" && after.Text() == shown { // 第一次 Tab 只預覽同音替換
-					preview = after.Suggestion
-					after = e.Session(id).Handle(proto.Request{Type: proto.Key, Key: proto.KeyTab})
-					tabKeys++
-				}
 				accepted = after.Text()
 			}
 		}
@@ -193,7 +187,7 @@ func main() {
 			"left_only_rank": rank(old), "context_rank": rank(context), "context_top5": top, "candidate_us": elapsed,
 			"suggestion": suggestion, "accepted": accepted, "expected_completion": row[6],
 			"homophone_best": homophone.Entry.Surface, "homophone_conf": homophone.Conf, "has_homophone": hasHomophone,
-			"requested_preview": preview, "tab_keys": tabKeys,
+			"tab_keys":            tabKeys,
 			"candidate_p95_us_30": times[28], "candidate_p99_us_30": times[29],
 			"forced_target_text": forcedText, "target_score_delta": scoreDelta,
 			"unbounded_decode":                        unboundedText,

@@ -226,7 +226,7 @@ func render(s proto.Snapshot) {
 			open, close = "~", "~"
 		case proto.StylePartial:
 			close = "…"
-		case proto.StylePending, proto.StyleReading:
+		case proto.StylePending:
 			open, close = "(", ")"
 		}
 		b.WriteString(open)
@@ -241,9 +241,6 @@ func render(s proto.Snapshot) {
 	}
 	if pos == s.Cursor.Rune {
 		b.WriteString("｜")
-	}
-	if h := s.ReadingHint; h != nil { // #162：空白出中文的讀音，Enter 留數字
-		b.WriteString("  [空白 " + h.Text + "]")
 	}
 	if s.Suggestion != "" {
 		b.WriteString("  [Tab] " + s.Suggestion + "  (:tab 換成這個)")

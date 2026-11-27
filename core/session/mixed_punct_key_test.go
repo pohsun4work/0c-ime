@@ -33,7 +33,7 @@ func punctKeySession() *Session {
 	return s
 }
 
-// #187：句首或接在空白後的 . ㄡ、, ㄝ 單獨一鍵接空白，跟 #162 的 18 八一樣出一聲的字，要標點按 Enter。
+// #187：句首或接在空白後的 . ㄡ、, ㄝ 單獨一鍵接空白，跟 #162 的 18 八一樣出一聲的字，要標點按 ↓ 選原按鍵。
 // 其他情況照舊：; / 是程式碼與「A / B」的標點，- 是條列，3. 1. 是編號，緊接在英文字後面的 . 是句點。
 func TestMixedPunctuationKeyWord(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
@@ -68,14 +68,9 @@ func TestMixedPunctuationKeyWord(t *testing.T) {
 	}
 }
 
-// #187：Enter 照字面送出標點；出字後 ↓ 第二個候選是原按鍵，選了變回標點。
+// #187：出字後 ↓ 第二個候選是原按鍵，選了變回標點。
 func TestMixedPunctuationKeyWordKeepsKey(t *testing.T) {
 	s := punctKeySession()
-	mixedType(s, ".")
-	if got := key(s, proto.KeyEnter).Commit; got != "." {
-		t.Fatalf(". Enter 提交 %q", got)
-	}
-	s = punctKeySession()
 	mixedType(s, ". ")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	snap := s.Handle(proto.Request{Type: proto.Candidates, Length: 1})
@@ -135,23 +130,19 @@ func TestMixedPunctuationKeyRightAfterEnglishWord(t *testing.T) {
 	}
 }
 
-// #187：打字時顯示空白會變成的讀音，跟 #162 的數字鍵一樣；不會變成中文的標點沒有提示。
-func TestMixedPunctuationKeyWordHint(t *testing.T) {
-	for _, tc := range []struct {
-		keys string
-		want string
-	}{
-		{".", "ㄡ"}, {",", "ㄝ"}, {"hello .", "ㄡ"}, {"ji3.", "ㄡ"},
-		{";", ""}, {"/", ""}, {"-", ""}, {"3.", ""}, {"..", ""},
+// #187：空白會變成中文的標點鍵，打字時直接顯示讀音（跟數字鍵一樣），Enter 照畫面送出；不會變成中文的照字面。
+// 要標點按 ↓ 選原按鍵。
+func TestMixedPunctuationKeyWordShowsReading(t *testing.T) {
+	for _, tc := range []struct{ keys, want string }{
+		{".", "ㄡ"}, {",", "ㄝ"}, {"hello .", "hello ㄡ"}, {"ji3.", "我ㄡ"},
+		{";", ";"}, {"/", "/"}, {"-", "-"}, {"3.", "3."}, {"..", ".."},
 	} {
 		s := punctKeySession()
-		snap := mixedType(s, tc.keys)
-		got := ""
-		if snap.ReadingHint != nil {
-			got = snap.ReadingHint.Text
+		if got := mixedType(s, tc.keys).Text(); got != tc.want {
+			t.Errorf("%q 顯示 %q，要 %q", tc.keys, got, tc.want)
 		}
-		if got != tc.want {
-			t.Errorf("%q 讀音提示 %q，要 %q", tc.keys, got, tc.want)
+		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
+			t.Errorf("%q Enter %q，要 %q", tc.keys, got, tc.want)
 		}
 	}
 }

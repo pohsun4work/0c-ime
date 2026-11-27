@@ -41,24 +41,6 @@ func TestMixedDigitWordAnywhere(t *testing.T) {
 	}
 }
 
-// 要數字按 Enter：還沒按空白的數字照字面送出，組字區裡前面的字一起送出。
-func TestMixedDigitWordEnterSendsNumber(t *testing.T) {
-	for _, tc := range []struct{ keys, want string }{
-		{"20", "20"},
-		{"18", "18"},
-		{"ji3u.3 20", "我有 20"},
-		{"hello 20", "hello 20"},
-	} {
-		s := deferredNumberSession()
-		if snap := mixedType(s, tc.keys); snap.Text() != tc.want {
-			t.Errorf("%q 顯示 %q，要 %q", tc.keys, snap.Text(), tc.want)
-		}
-		if got := key(s, proto.KeyEnter).Commit; got != tc.want {
-			t.Errorf("%q 提交 %q，要 %q", tc.keys, got, tc.want)
-		}
-	}
-}
-
 // 出字後按 ↓，第一個是目前的字，第二個是原按鍵（數字連同空白），選了變回數字；不論出字的位置，
 // 也不論是不是接著打了別的字（游標移回那個字上）。
 func TestMixedDigitWordDownOffersNumberSecond(t *testing.T) {

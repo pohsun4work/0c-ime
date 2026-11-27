@@ -82,7 +82,7 @@ func TestMixedUnknownTokenStaysLiteral(t *testing.T) {
 		"A87", "T87", "H87", "Z87", "AE86", "GT86", "MA87", "KD84", "PE84", "MP3", "PS4", "AK47", "RSI84",
 		"F104", "T184", "F16", "M16", "A320", "B787",
 		"GPT-4", "GPT-4o", "CVN-68", "GDP-30%",
-		"RTX4090", "RTX3070", "GTX1060", "GTX1070", "GT1030", "PCB2030", "GG1040", "GG1960", "SC18400",
+		"RTX4090", "RTX3070", "GTX1060", "GTX1070", "SC18400",
 		"MA20 ", "GT20 ", "RX100 ", "ABC1, ", "PayPal ", "Model3", "mp3", "h264", "u2", "gpt4o ", "ps4u ", "i7", "abc3",
 		"EPS:2.46", "YOY+103%",
 	} {
@@ -159,11 +159,11 @@ func TestMixedTokenDigitsTurnBackOnNextDigit(t *testing.T) {
 	}
 	s.Handle(proto.Request{Type: proto.Select, Index: snap.Candidates.Items[id].ID})
 	mixedType(s, "0")
-	if got := key(s, proto.KeyEnter).Commit; got != "GT版0" {
+	if got := key(s, proto.KeyEnter).Commit; got != "GT版ㄢ" { // 0 照畫面的讀音送出
 		t.Errorf("選過的字不改回按鍵：%q", got)
 	}
 	for _, tc := range []struct{ keys, want string }{
-		{"GT1030", "GT1030"}, {"GG1040", "GG1040"}, {"GG1960", "GG1960"}, {"AB1037", "AB1037"}, {"AB1034", "AB1034"},
+		{"AB1037", "AB1037"}, {"AB1034", "AB1034"},
 		{"GCP187@x", "GCP187@x"}, {"GCP187_x", "GCP187_x"},
 		{"AI2842k7", "AI大的"},
 	} {
@@ -176,7 +176,7 @@ func TestMixedTokenDigitsTurnBackOnNextDigit(t *testing.T) {
 }
 
 // 英文後面只用數字鍵打出的字，下一鍵是 ㄢ 的 0 時還不能判斷：接聲調鍵或空白組成中文就留著（Mac版安裝），
-// 接別的鍵、Enter 或結束才是型號，回頭改成原按鍵。0.2.7 之後 #241 一看到 0 就退回，吃掉組好的字。
+// 接別的鍵才是型號，回頭改成原按鍵（Enter 照畫面，見 TestMixedTokenDigitsPendingAn）。0.2.7 之後 #241 一看到 0 就退回，吃掉組好的字。
 func TestMixedTokenDigitsThenAn(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		// 接聲調鍵：案、俺
@@ -203,21 +203,33 @@ func TestMixedTokenDigitsThenAn(t *testing.T) {
 	}
 }
 
-// 0 還在待定時：畫面上中文字留著；Enter、移動游標都改回型號；退格只退 0。
+// 0 還在待定時：畫面上中文字留著、0 顯示空白會出的 ㄢ；Enter、移動游標照畫面，按 → 選原按鍵才是型號；退格只退 0。
 func TestMixedTokenDigitsPendingAn(t *testing.T) {
-	s := tokenBoundarySession()
-	if got := mixedType(s, "GT1030").Text(); got != "GT版0" {
-		t.Errorf("0 待定時畫面：%q", got)
-	}
-	if got := key(s, proto.KeyEnter).Commit; got != "GT1030" {
-		t.Errorf("Enter：%q", got)
+	for _, tc := range []struct{ keys, shown string }{
+		{"GT1030", "GT版ㄢ"}, {"PCB2030", "PCB膽ㄢ"}, {"GG1040", "GG半ㄢ"}, {"GG1960", "GG白ㄢ"},
+	} {
+		s := tokenBoundarySession()
+		if got := mixedType(s, tc.keys).Text(); got != tc.shown {
+			t.Errorf("%s 0 待定時畫面：%q，要 %q", tc.keys, got, tc.shown)
+		}
+		if got := key(s, proto.KeyEnter).Commit; got != tc.shown {
+			t.Errorf("%s Enter：%q，要 %q", tc.keys, got, tc.shown)
+		}
+		s = tokenBoundarySession()
+		mixedType(s, tc.keys)
+		if got := key(s, proto.KeyRight).Text(); got != tc.keys {
+			t.Errorf("%s →：%q", tc.keys, got)
+		}
+		if got := key(s, proto.KeyEnter).Commit; got != tc.keys {
+			t.Errorf("%s → Enter：%q", tc.keys, got)
+		}
 	}
 
-	s = tokenBoundarySession()
+	s := tokenBoundarySession()
 	mixedType(s, "GT1030")
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	s.Handle(proto.Request{Type: proto.Cursor, To: 1 << 30})
-	if got := key(s, proto.KeyEnter).Commit; got != "GT1030" {
+	if got := key(s, proto.KeyEnter).Commit; got != "GT版ㄢ" {
 		t.Errorf("移動游標：%q", got)
 	}
 
@@ -228,12 +240,6 @@ func TestMixedTokenDigitsPendingAn(t *testing.T) {
 	}
 	if got := mixedType(s, "04").Text(); got != "hello版案" {
 		t.Errorf("退格後重打：%q", got)
-	}
-
-	// 按空白會出字，讀音提示要有。
-	s = tokenBoundarySession()
-	if snap := mixedType(s, "GT1030"); snap.ReadingHint == nil || snap.ReadingHint.Text != "ㄢ" {
-		t.Errorf("讀音提示：%+v", snap.ReadingHint)
 	}
 
 	// 選過的字不改回按鍵；↓ 選了原按鍵 0 也不再改動。
@@ -253,7 +259,7 @@ func TestMixedTokenDigitsPendingAn(t *testing.T) {
 	}
 }
 
-// 取捨：GT1030 接空白分不出是不是 PC版安裝，不吃掉組好的字；要型號在兩個字上各按一次 ↓ 選原按鍵，或打完 1030 先按 Enter 再打空白。
+// 取捨：GT1030 接空白分不出是不是 PC版安裝，不吃掉組好的字；要型號在兩個字上各按一次 ↓ 選原按鍵，或打完 1030 先按 → 再打空白。
 func TestMixedTokenDigitsThenSpaceRecoverable(t *testing.T) {
 	s := tokenBoundarySession()
 	if got := mixedType(s, "GT1030 ").Text(); got != "GT版安" {

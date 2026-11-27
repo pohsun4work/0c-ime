@@ -1,12 +1,10 @@
-//! 組字區五種顯示屬性：一般細實線、使用者選字粗實線、自動修正點線、加詞標示（#123）的反白粗線，
-//! 以及中英混打時按空白會組成中文的數字（#162）的灰字灰點線。
+//! 組字區四種顯示屬性：一般細實線、使用者選字粗實線、自動修正點線、加詞標示（#123）的反白粗線。
 //! 前三種的底線先沿用宿主文字色，背景深淺判斷好後換成白線或黑線版（見 Line、tone.rs）；
-//! 標示用系統的選取色（COLOR_HIGHLIGHT／COLOR_HIGHLIGHTTEXT），讀音數字用系統的灰字色（COLOR_GRAYTEXT），
-//! 適應深色與高對比主題。
+//! 標示用系統的選取色（COLOR_HIGHLIGHT／COLOR_HIGHLIGHTTEXT），適應深色與高對比主題。
 use std::cell::Cell;
 
 use windows::Win32::Foundation::COLORREF;
-use windows::Win32::Graphics::Gdi::{GetSysColor, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT};
+use windows::Win32::Graphics::Gdi::{GetSysColor, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT};
 use windows::Win32::UI::TextServices::{
     IEnumTfDisplayAttributeInfo, IEnumTfDisplayAttributeInfo_Impl, ITfDisplayAttributeInfo,
     ITfDisplayAttributeInfo_Impl, TF_ATTR_CONVERTED, TF_ATTR_INPUT, TF_ATTR_TARGET_CONVERTED,
@@ -17,7 +15,7 @@ use windows_core::{implement, ComObject, BSTR, GUID};
 use crate::guids::{
     GUID_DISPLAY_ATTR_CORRECTED, GUID_DISPLAY_ATTR_CORRECTED_BLACK, GUID_DISPLAY_ATTR_CORRECTED_WHITE,
     GUID_DISPLAY_ATTR_INPUT, GUID_DISPLAY_ATTR_INPUT_BLACK, GUID_DISPLAY_ATTR_INPUT_WHITE, GUID_DISPLAY_ATTR_LOCKED,
-    GUID_DISPLAY_ATTR_LOCKED_BLACK, GUID_DISPLAY_ATTR_LOCKED_WHITE, GUID_DISPLAY_ATTR_MARKED, GUID_DISPLAY_ATTR_READING,
+    GUID_DISPLAY_ATTR_LOCKED_BLACK, GUID_DISPLAY_ATTR_LOCKED_WHITE, GUID_DISPLAY_ATTR_MARKED,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,8 +25,6 @@ pub enum Kind {
     Corrected,
     /// 組字中用 Shift＋←／→ 標示、要加入詞庫的範圍（核心樣式 marked，#123）。
     Marked,
-    /// 中英混打時照字面顯示、按空白會組成中文的數字（核心樣式 reading，#162）。
-    Reading,
 }
 impl Kind {
     fn attributes(self) -> TF_DISPLAYATTRIBUTE {
@@ -36,18 +32,6 @@ impl Kind {
             r#type: TF_CT_COLORREF,
             Anonymous: TF_DA_COLOR_0 { cr: COLORREF(unsafe { GetSysColor(index) }) },
         };
-        if self == Self::Reading {
-            // 比照常見注音輸入法：數字畫成灰字、灰色點線底線，看得出還沒定案（讀音 ㄉㄢ 由候選窗顯示）。
-            // 會畫文字色的宿主（記事本）是灰字；只畫底線的宿主（WPF、Chromium）至少是灰色點線，
-            // 和自動修正的黑色點線分得開。
-            return TF_DISPLAYATTRIBUTE {
-                crText: color(COLOR_GRAYTEXT),
-                crLine: color(COLOR_GRAYTEXT),
-                lsStyle: TF_LS_DOT,
-                bAttr: TF_ATTR_INPUT,
-                ..Default::default()
-            };
-        }
         if self == Self::Marked {
             // 反白（系統選取色）加上選取色的粗底線：會畫背景的宿主（記事本、Word）反白，只畫底線的宿主
             // （WPF、Chromium）也看得出和已選字（黑色粗線）不同。顏色在查詢時才讀系統設定，跟著主題與高對比；
@@ -93,13 +77,13 @@ pub enum Line {
     Black,
 }
 
-/// 一種顯示屬性：樣式加上底線顏色。加詞標示與讀音數字已有自己的顏色，一律是 Host。
+/// 一種顯示屬性：樣式加上底線顏色。加詞標示已有自己的顏色，一律是 Host。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attr {
     kind: Kind,
     line: Line,
 }
-pub const ATTRS: [Attr; 11] = {
+pub const ATTRS: [Attr; 10] = {
     use Kind::*;
     use Line::*;
     const fn a(kind: Kind, line: Line) -> Attr {
@@ -110,7 +94,6 @@ pub const ATTRS: [Attr; 11] = {
         a(Locked, Host),
         a(Corrected, Host),
         a(Marked, Host),
-        a(Reading, Host),
         a(Input, White),
         a(Locked, White),
         a(Corrected, White),
@@ -121,7 +104,7 @@ pub const ATTRS: [Attr; 11] = {
 };
 impl Attr {
     pub fn new(kind: Kind, line: Line) -> Attr {
-        let line = if matches!(kind, Kind::Marked | Kind::Reading) { Line::Host } else { line };
+        let line = if kind == Kind::Marked { Line::Host } else { line };
         Attr { kind, line }
     }
     /// 在 ATTRS 的位置（atom 陣列依此存取）。
@@ -129,8 +112,8 @@ impl Attr {
         self.kind as usize
             + match self.line {
                 Line::Host => 0,
-                Line::White => 5,
-                Line::Black => 8,
+                Line::White => 4,
+                Line::Black => 7,
             }
     }
     pub fn guid(self) -> GUID {
@@ -147,7 +130,6 @@ impl Attr {
             (Locked, Black) => GUID_DISPLAY_ATTR_LOCKED_BLACK,
             (Corrected, Black) => GUID_DISPLAY_ATTR_CORRECTED_BLACK,
             (Marked, _) => GUID_DISPLAY_ATTR_MARKED,
-            (Reading, _) => GUID_DISPLAY_ATTR_READING,
         }
     }
     fn description(self) -> &'static str {
@@ -164,7 +146,6 @@ impl Attr {
             (Locked, Black) => "靈犀注音：已選字（淺色背景）",
             (Corrected, Black) => "靈犀注音：自動修正（淺色背景）",
             (Marked, _) => "靈犀注音：加入詞庫的範圍",
-            (Reading, _) => "靈犀注音：按空白會變成中文的數字",
         }
     }
     fn attributes(self) -> TF_DISPLAYATTRIBUTE {
@@ -197,7 +178,6 @@ pub fn style_ranges(segments: &[crate::session::Segment]) -> Option<Vec<StyledRa
                 "locked" => Kind::Locked,
                 "corrected" => Kind::Corrected,
                 "marked" => Kind::Marked,
-                "reading" => Kind::Reading,
                 _ => Kind::Input,
             };
             ranges.push(StyledRange { start, end, kind });
@@ -353,7 +333,6 @@ mod tests {
             ("ㄋ", "pending"),
             ("a", "future"),
             ("世傑", "marked"),
-            ("20", "reading"),
         ]
         .into_iter()
         .map(|(text, style)| Segment {
@@ -373,8 +352,7 @@ mod tests {
                 (3, 4, Kind::Corrected),
                 (4, 5, Kind::Input),
                 (5, 6, Kind::Input),
-                (6, 8, Kind::Marked),
-                (8, 10, Kind::Reading)
+                (6, 8, Kind::Marked)
             ]
         );
         let marked = Kind::Marked.attributes();
@@ -387,14 +365,6 @@ mod tests {
         assert_eq!(unsafe { marked.crBk.Anonymous.cr.0 }, unsafe { GetSysColor(COLOR_HIGHLIGHT) });
         assert_eq!(unsafe { marked.crLine.Anonymous.cr.0 }, unsafe { GetSysColor(COLOR_HIGHLIGHT) });
         assert_eq!(unsafe { marked.crText.Anonymous.cr.0 }, unsafe { GetSysColor(COLOR_HIGHLIGHTTEXT) });
-        // #162：按空白會組成中文的數字是灰字、灰色細點線，一般輸入屬性。
-        let reading = Kind::Reading.attributes();
-        assert_eq!(reading.lsStyle, TF_LS_DOT);
-        assert!(!reading.fBoldLine.as_bool());
-        assert_eq!(reading.bAttr, TF_ATTR_INPUT);
-        assert_eq!(reading.crText.r#type, TF_CT_COLORREF);
-        assert_eq!(unsafe { reading.crText.Anonymous.cr.0 }, unsafe { GetSysColor(COLOR_GRAYTEXT) });
-        assert_eq!(unsafe { reading.crLine.Anonymous.cr.0 }, unsafe { GetSysColor(COLOR_GRAYTEXT) });
         // 各種屬性的 GUID 各不相同，索引就是在 ATTRS 的位置（atom 陣列依此存取）。
         for (i, attr) in ATTRS.into_iter().enumerate() {
             assert_eq!(attr.index(), i);
@@ -419,11 +389,9 @@ mod tests {
                 assert_eq!(da.crText.r#type, TF_CT_NONE);
             }
         }
-        // 加詞標示與讀音數字已有自己的顏色：不分深淺。
-        for kind in [Kind::Marked, Kind::Reading] {
-            assert_eq!(Attr::new(kind, Line::White), Attr::new(kind, Line::Host));
-            assert_eq!(Attr::new(kind, Line::Black), Attr::new(kind, Line::Host));
-        }
+        // 加詞標示已有自己的顏色：不分深淺。
+        assert_eq!(Attr::new(Kind::Marked, Line::White), Attr::new(Kind::Marked, Line::Host));
+        assert_eq!(Attr::new(Kind::Marked, Line::Black), Attr::new(Kind::Marked, Line::Host));
     }
     #[test]
     fn attribute_enumerator_batches_clones_and_reports_end() {
@@ -456,11 +424,11 @@ mod tests {
             );
             assert_eq!(
                 rest[3].as_ref().unwrap().GetGUID().unwrap(),
-                Attr::new(Kind::Reading, Line::Host).guid()
+                Attr::new(Kind::Input, Line::White).guid()
             );
             assert_eq!(
                 rest[4].as_ref().unwrap().GetGUID().unwrap(),
-                Attr::new(Kind::Input, Line::White).guid()
+                Attr::new(Kind::Locked, Line::White).guid()
             );
             list.Next(&mut first, &mut fetched).unwrap();
             assert_eq!(

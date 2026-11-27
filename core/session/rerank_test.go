@@ -416,3 +416,18 @@ func TestNeuralKeepsShownChoicesWhenNBestOverflows(t *testing.T) {
 		t.Fatalf("commit %q want %q", got, want)
 	}
 }
+
+// 神經次佳跟首選只差異體字（下週／下周）時不跳小視窗，其他同音字照跳。
+func TestVariantOnly(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"下週", "下周", true}, {"姐姐", "姊姊", true}, {"台灣", "臺灣", true},
+		{"下週", "下週", false}, {"再見", "在見", false}, {"週末", "周末一", false}, {"台週", "臺周", true},
+	} {
+		if got := variantOnly(tc.a, tc.b); got != tc.want {
+			t.Errorf("%s／%s：%v", tc.a, tc.b, got)
+		}
+	}
+}

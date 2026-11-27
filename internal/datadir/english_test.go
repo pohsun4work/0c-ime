@@ -68,7 +68,7 @@ func TestFullEnglishPackMixedInputAndValidSpellings(t *testing.T) {
 		if accepted.Text() != tc.want {
 			t.Fatalf("full pack suggestion: %+v", accepted)
 		}
-		restored, _ := e.Do(id, proto.Request{Type: proto.Key, Key: proto.KeyBackspace})
+		restored, _ := e.Do(id, proto.Request{Type: proto.Key, Key: proto.KeyEscape})
 		if restored.Text() != tc.typed {
 			t.Fatalf("full pack undo: %+v", restored)
 		}

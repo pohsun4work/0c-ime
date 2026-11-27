@@ -298,10 +298,10 @@ func TestEnglishAutocompleteAssistedCharactersSurviveMaterialization(t *testing.
 	if end := key(s, proto.KeyEnter); end.Commit != "hellos" || len(s.model.Store.English) != 0 {
 		t.Fatalf("materialized completion confirmed: %+v %+v", end, s.model.Store.English)
 	}
-	// 撤銷接受會還原實際按鍵，之後自行輸入的字仍能正常累積確認。
+	// Esc 撤銷接受會還原實際按鍵，之後自行輸入的字仍能正常累積確認。
 	mixedType(s, "hel")
 	key(s, proto.KeyTab)
-	key(s, proto.KeyBackspace)
+	key(s, proto.KeyEscape)
 	key(s, "m")
 	key(s, " ")
 	if e := s.model.Store.English["helm"]; e.Confirmed != 1 {
@@ -355,16 +355,17 @@ func TestEnglishAutocompleteSpellingCorrectionRequiresAcceptance(t *testing.T) {
 	}
 }
 
+// Esc 撤銷修正還原原拼法；退格刪收下的詞的最後一個字母（Tab 是使用者選的）。
 func TestEnglishAutocompleteSpellingCorrectionCanBeUndone(t *testing.T) {
-	for _, undo := range []string{proto.KeyEscape, proto.KeyBackspace} {
+	for _, tc := range []struct{ key, want string }{{proto.KeyEscape, "recieve"}, {proto.KeyBackspace, "receiv"}} {
 		s := autocompleteSession()
 		s.English = english.Prototype()
 		mixedType(s, "recieve")
 		key(s, proto.KeyTab)
-		if snap := key(s, undo); snap.Text() != "recieve" {
-			t.Fatalf("%s did not restore spelling: %+v", undo, snap)
+		if snap := key(s, tc.key); snap.Text() != tc.want {
+			t.Fatalf("%s：%+v", tc.key, snap)
 		}
-		if snap := key(s, proto.KeyEnter); snap.Commit != "recieve" || !snap.Handled {
+		if snap := key(s, proto.KeyEnter); snap.Commit != tc.want || !snap.Handled {
 			t.Fatal(snap)
 		}
 	}

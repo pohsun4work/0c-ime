@@ -153,9 +153,6 @@ const (
 	StylePartial   = "partial"   // 尾端：某個更長的詞的前綴
 	StylePending   = "pending"   // 尚未完成的注音符號
 	StyleMarked    = "marked"    // 組字中用 Shift＋←／→ 標示、要加入詞庫的範圍（#123）
-	// StyleReading 是中英混打時照字面顯示、按空白會組成中文的數字按鍵（#162，見 ReadingHint）。
-	// 外殼以低調的樣式（灰字、點線）畫；舊外殼不認得時當一般組字。
-	StyleReading = "reading"
 )
 
 type Segment struct {
@@ -214,15 +211,6 @@ type SuggestionEdit struct {
 	Text   string `json:"text"`
 }
 
-// ReadingHint（#162）：中英混打時照字面顯示的數字按鍵（20），按空白會組成中文時的讀音提示。
-// Start、Length 是那段按鍵在組字文字中的位置（顯示字元），那段組字的樣式是 StyleReading；Text 是讀音（ㄉㄢ）。
-// 按鍵一定在游標前面，外殼把 Text 畫在游標附近；按 Enter 照字面送出數字。舊外殼忽略這個欄位。
-type ReadingHint struct {
-	Start  int    `json:"start"`
-	Length int    `json:"length"`
-	Text   string `json:"text"`
-}
-
 type Snapshot struct {
 	FullWidth           bool            `json:"full_width,omitempty"`
 	EnglishAutocomplete bool            `json:"english_autocomplete,omitempty"`
@@ -242,7 +230,6 @@ type Snapshot struct {
 	Candidates          *CandidateList  `json:"candidates,omitempty"` //
 	Notices             []string        `json:"notices,omitempty"`    //
 	Mode                string          `json:"mode"`                 // zhuyin 或 english
-	ReadingHint         *ReadingHint    `json:"reading_hint,omitempty"`
 }
 
 // SetSuggestion 設定 Tab 提示：組字區從 start 起 length 個字元按 Tab 後換成 text。

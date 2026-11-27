@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"slices"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/rerank"
+	"github.com/0c-biggo/0c-ime/core/suggest"
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
@@ -225,7 +227,7 @@ func TestMixedDisplayFollowsSpace(t *testing.T) {
 		}
 	}
 	var seen []rerank.TextsRequest
-	s := splitSession(map[string]float64{"up": 0, "音": -10}, &seen)
+	s := splitSession(map[string]float64{"up": 0, "音": -1}, &seen) // 沒把握，有小視窗 Tab 才換
 	if got := mixedType(s, "up").Text(); got != "up" {
 		t.Fatalf("神經判成英文：顯示 %q", got)
 	}
@@ -236,14 +238,14 @@ func TestMixedDisplayFollowsSpace(t *testing.T) {
 	if got := key(s, proto.KeyTab).Text(); got != "ㄧㄣ" {
 		t.Errorf("Tab 換成規則的注音：%q", got)
 	}
-	for i, want := range []string{"up", "ㄧㄣ", "up"} { // 只在兩個之間換，不換到英文補全
-		if got := key(s, proto.KeyTab).Text(); got != want {
-			t.Errorf("第 %d 次 Tab：%q，要 %q", i+2, got, want)
+	for i := range 3 { // Tab 換了就定了，再按不動
+		if got := key(s, proto.KeyTab).Text(); got != "ㄧㄣ" {
+			t.Errorf("第 %d 次 Tab：%q", i+2, got)
 		}
 	}
 	n := len(seen)
-	if got := key(s, " "); got.Text() != "up " || len(seen) != n {
-		t.Errorf("空白照顯示的決定、不再問神經：%q，多問了 %d 次", got.Text(), len(seen)-n)
+	if got := key(s, " "); got.Text() != "音" || len(seen) != n {
+		t.Errorf("空白照 Tab 選的、不再問神經：%q，多問了 %d 次", got.Text(), len(seen)-n)
 	}
 }
 
@@ -337,26 +339,90 @@ func TestMixedNeuralRevisitWaitsAskedKey(t *testing.T) {
 	}
 }
 
-// 數字的讀音提示與 Tab 照空白的決定：神經判成數字時沒有提示，Tab 換成注音、再按換回；判成中文時照 #162 提示 ㄅㄢ、Tab 固定成數字。
-func TestMixedDigitsHintFollowsSpace(t *testing.T) {
-	s := splitSession(map[string]float64{"10": 0, "班": -10}, nil)
-	if snap := mixedType(s, "10"); snap.Text() != "10" || snap.ReadingHint != nil || snap.Suggestion != "ㄅㄢ" {
-		t.Fatalf("判成數字：顯示 %q、提示 %+v、小視窗 %q", snap.Text(), snap.ReadingHint, snap.Suggestion)
-	}
-	for i, want := range []string{"ㄅㄢ", "10", "ㄅㄢ"} {
-		if got := key(s, proto.KeyTab).Text(); got != want {
-			t.Errorf("第 %d 次 Tab：%q，要 %q", i+1, got, want)
+// 數字照空白的決定顯示：判成數字顯示 10、判成中文直接顯示注音 ㄅㄢ（Enter 照畫面送出）。決定有把握時不跳小視窗、
+// Tab 不動；沒把握時跳，Tab 換成另一個，換了就定了、再按不動。
+func TestMixedDigitsDisplayFollowsSpace(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scores map[string]float64
+		shown  string
+	}{
+		{"判成數字", map[string]float64{"10": 0, "班": -10}, "10"},
+		{"判成中文", map[string]float64{"班": 0, "10": -10}, "ㄅㄢ"},
+	} {
+		s := splitSession(tc.scores, nil)
+		if snap := mixedType(s, "10"); snap.Text() != tc.shown || snap.Suggestion != "" {
+			t.Errorf("%s：顯示 %q、小視窗 %q", tc.name, snap.Text(), snap.Suggestion)
+		}
+		if got := key(s, proto.KeyTab).Text(); got != tc.shown {
+			t.Errorf("%s：沒有小視窗時 Tab %q", tc.name, got)
+		}
+		if got := key(s, proto.KeyEnter).Commit; got != tc.shown {
+			t.Errorf("%s：Enter %q", tc.name, got)
 		}
 	}
-	if got := key(s, " ").Text(); got != "班" {
-		t.Errorf("Tab 換成注音後空白：%q", got)
-	}
 
-	s = splitSession(map[string]float64{"班": 0, "10": -10}, nil)
-	if snap := mixedType(s, "10"); snap.ReadingHint == nil || snap.ReadingHint.Text != "ㄅㄢ" || snap.Suggestion != "10" {
-		t.Fatalf("判成中文：提示 %+v、小視窗 %q", snap.ReadingHint, snap.Suggestion)
+	s := splitSession(map[string]float64{"班": 0, "10": -1}, nil)
+	if snap := mixedType(s, "10"); snap.Text() != "ㄅㄢ" || snap.Suggestion != "10" {
+		t.Fatalf("沒把握：顯示 %q、小視窗 %q", snap.Text(), snap.Suggestion)
 	}
-	if got := key(s, proto.KeyTab); got.Text() != "10" || got.ReadingHint != nil {
-		t.Errorf("Tab 固定成數字：%q %+v", got.Text(), got.ReadingHint)
+	for i := range 2 {
+		if got := key(s, proto.KeyTab); got.Text() != "10" || got.Suggestion != "" {
+			t.Errorf("第 %d 次 Tab：%q、小視窗 %q", i+1, got.Text(), got.Suggestion)
+		}
+	}
+	if got := key(s, " ").Text(); got != "10 " {
+		t.Errorf("Tab 換成數字後空白：%q", got)
+	}
+}
+
+// 神經判成英文照英文顯示（up）：贏規則的注音夠多時不跳小視窗（補全 upon 也不給：多半是打到一半的注音）、Tab 不動，
+// 差不多時才跳、Tab 換成注音。
+func TestMixedPopupOnlyWhenUnsure(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scores map[string]float64
+		popup  string
+	}{
+		{"有把握", map[string]float64{"up": 0, "音": -10}, ""},
+		{"沒把握", map[string]float64{"up": 0, "音": -1}, "ㄧㄣ"},
+	} {
+		s := splitSession(tc.scores, nil)
+		if snap := mixedType(s, "up"); snap.Text() != "up" || snap.Suggestion != tc.popup {
+			t.Errorf("%s：顯示 %q、小視窗 %q，要 %q", tc.name, snap.Text(), snap.Suggestion, tc.popup)
+		}
+		if got, want := key(s, proto.KeyTab).Text(), cmp.Or(tc.popup, "up"); got != want {
+			t.Errorf("%s：Tab %q，要 %q", tc.name, got, want)
+		}
+	}
+}
+
+// 神經判成英文、換不回注音的（hep 規則切成 he嗯）照常補全，有把握也跳（hepatic）；換得回注音的見 TestMixedPopupOnlyWhenUnsure。
+func TestMixedSureEnglishStillCompletes(t *testing.T) {
+	s := splitSession(map[string]float64{"hep": 0, "he嗯": -10}, nil)
+	s.English = english.New([]english.Word{{Text: "hepatic", Weight: 65}})
+	if snap := mixedType(s, "hep"); snap.Text() != "hep" || snap.Suggestion != "hepatic" {
+		t.Fatalf("顯示 %q、小視窗 %q", snap.Text(), snap.Suggestion)
+	}
+}
+
+// 混打剛決定、還在等後文回頭比的字（我up␣ 的 音）不給官方補全（音樂）：之後可能換回 up。決定有把握的照補。
+func TestMixedRevisitSkipsCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scores map[string]float64
+		popup  string
+	}{
+		{"等回頭比", map[string]float64{"音": 0, "up": -5}, ""},
+		{"有把握", map[string]float64{"音": 0, "up": -20}, "音樂"},
+	} {
+		s := splitSession(tc.scores, nil)
+		s.Opt.Suggest = suggest.DefaultOptions()
+		s.Opt.Suggest.AttentionCost = 0
+		s.model.Lex.(*lexicon.Mem).Add(lexicon.Entry{Surface: "音樂", Reading: zhuyin.ParseReading("ㄧㄣ ㄩㄝˋ"), PRW: 1})
+		s.model.LM.(*lm.Mem).SetUni("音樂", 0.01)
+		if snap := mixedType(s, "ji3up "); snap.Text() != "我音" || snap.Suggestion != tc.popup {
+			t.Errorf("%s：%q 小視窗 %q，要 %q", tc.name, snap.Text(), snap.Suggestion, tc.popup)
+		}
 	}
 }

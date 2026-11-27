@@ -64,12 +64,10 @@ func TestMixedDeferredNumberBecomesChineseWord(t *testing.T) {
 }
 
 // #78 的數字不能退步：拼不成一聲字的數字（15、12、2024）、小數、時間、條列接空白都維持數字，後面接的中文照常；
-// 拼得成字的數字（#162 的 20 單）要數字時按 Enter，組字區裡的其他字一起送出。
+// 拼得成字的數字（#162 的 20 單）顯示讀音，要數字按 ↓ 選原按鍵（TestMixedDigitsShowReading）。
 func TestMixedDeferredNumberStaysNumber(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		{"15 ", "15 "},
-		{"20", "20"}, // 沒按空白就按 Enter：照字面送出數字
-		{"ji3u.3 20", "我有 20"},
 		{"1. ", "1. "},   // 條列編號：ㄅㄡ 組不成音節
 		{"10. ", "10. "}, // ㄅㄢㄡ 組不成音節
 		{"1, ", "1, "},
@@ -121,7 +119,6 @@ func TestMixedPunctuatedDigitsAreNotNumbers(t *testing.T) {
 		{",2; ", ",當"},
 		{",20 ", ",20 "}, // 標點後面的數字照舊
 		{"ji3,3.5 ", "我,3.5 "},
-		{"2;", "2;"},   // 還沒按空白：照字面顯示與提交
 		{";  ", ";  "}, // 沒有數字的標點照舊
 	} {
 		s := deferredNumberSession()
@@ -163,8 +160,8 @@ func TestMixedDeferredNumberKeepsPhysicalKeys(t *testing.T) {
 }
 
 // 句首或空白、英文、數字之後，數字鍵能組成注音字時按空白出字；單鍵與兩位數遵守相同規則。
-// 要保留數字須按 Enter；後接量詞、英文或數字不會將已組出的中文字改回原按鍵。
-// 單獨組不成字的鍵、小數與時間仍按數字處理；reading_hint 提示空白將組成的讀音。
+// 要保留數字須按 ↓ 選原按鍵；後接量詞、英文或數字不會將已組出的中文字改回原按鍵。
+// 單獨組不成字的鍵、小數與時間仍按數字處理；組得成字的數字直接顯示空白將組成的讀音。
 func TestMixedSingleKeyWord(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		{"5 ", "之"},
@@ -176,14 +173,14 @@ func TestMixedSingleKeyWord(t *testing.T) {
 		{". ", ". "},
 		{"1 ", "1 "}, // ㄅ 單獨組不成字
 		{"2 ", "2 "},
-		{"5 ek4", "之個"},  // 量詞也不改回數字（#162）：要數字按 Enter
+		{"5 ek4", "之個"},  // 量詞也不改回數字（#162）：要數字按 ↓ 選原按鍵
 		{"8 2u03", "啊點"}, // ㄉㄧㄢˇ
 		{"0 su06", "安年"},
 		{"5 jo4", "之位"},
 		{"5 c.4", "之後"},  // 組成詞：照舊是中文
 		{"8 ji3", "啊我"},  // 一般的字：照常
 		{"20 ", "單"},     // #162：兩位數拼得成字也出字
-		{"20 ek4", "單個"}, // 要「20 個」按 Enter
+		{"20 ek4", "單個"}, // 要「20 個」按 ↓ 選原按鍵
 		{"2024 su06", "2024 年"},
 		{"20 c.4", "單後"},
 		{"hello 5 ", "hello 之"},
@@ -192,7 +189,7 @@ func TestMixedSingleKeyWord(t *testing.T) {
 		{"15 5 ", "15 之"},
 		{"ji35 ", "我之"}, // 前面是中文：本來就是注音
 		{"ji35 ek4", "我之個"},
-		{"5 hello ", "之hello "}, // 跟 20 hello 一樣：要數字按 Enter
+		{"5 hello ", "之hello "}, // 跟 20 hello 一樣：要數字按 ↓ 選原按鍵
 		{"- hello ", "- hello "},
 		{"hello - hello ", "hello - hello "},
 		{"5 20 ", "之單"},   // #162：拼得成字的照常出字
@@ -241,12 +238,14 @@ func TestMixedSingleKeyWordKeepsPhysicalKeys(t *testing.T) {
 	}
 }
 
-// #162：單鍵字後面接量詞不再改回數字。要「5 個」先按 Enter 送出 5，或不空格打 5ek4（數字照字面、量詞以數字當語境）。
-func TestMixedSingleKeyWordNumberNeedsEnter(t *testing.T) {
+// #162：單鍵字後面接量詞不再改回數字。要「5 個」先按 ↓ 選原按鍵 5，或不空格打 5ek4（數字照字面、量詞以數字當語境）。
+func TestMixedSingleKeyWordNumberNeedsPick(t *testing.T) {
 	s := deferredNumberSession()
 	mixedType(s, "5")
-	if got := key(s, proto.KeyEnter).Commit; got != "5" {
-		t.Fatalf("5 Enter 提交 %q", got)
+	key(s, proto.KeyDown)
+	pickText(t, s, "5")
+	if got := mixedType(s, " ek4").Text(); got != "5 個" {
+		t.Fatalf("5 ↓ 選 5 再打 ␣ek4：%q", got)
 	}
 	s = deferredNumberSession()
 	if snap := mixedType(s, "5ek4"); snap.Text() != "5個" {
@@ -261,7 +260,7 @@ func TestMixedSingleKeyWordNumberNeedsEnter(t *testing.T) {
 }
 
 // #162 規則一致後，單鍵字後面接英文或拼不成字的數字也照樣是中文；要還原只能回到那個字上按 ↓ 選原按鍵（第二個），
-// 選了要還原成原按鍵、後面的英文和數字不動。後面那段拼不成字的數字照舊沒有讀音提示。
+// 選了要還原成原按鍵、後面的英文和數字不動。後面那段拼不成字的數字照字面顯示。
 func TestMixedSingleKeyWordRestoreAfterFollowing(t *testing.T) {
 	for _, tc := range []struct{ keys, shown, restored string }{
 		{"5 hello ", "之hello ", "5 hello "},
@@ -281,7 +280,7 @@ func TestMixedSingleKeyWordRestoreAfterFollowing(t *testing.T) {
 		}
 	}
 	s := deferredNumberSession()
-	if snap := mixedType(s, "5 15"); snap.ReadingHint != nil {
-		t.Fatalf("之後面的 15 拼不成字，不該有讀音提示：%+v", snap.ReadingHint)
+	if snap := mixedType(s, "5 15"); snap.Text() != "之15" {
+		t.Fatalf("之後面的 15 拼不成字，照字面顯示：%q", snap.Text())
 	}
 }

@@ -209,11 +209,14 @@ func (s *Session) insertPunctKey(k string) {
 	}
 }
 
-func (s *Session) insertPendingLiteral() {
+func (s *Session) insertPendingLiteral() { s.insertPendingZhuyin(pendingKeys{}) }
+
+// insertPendingZhuyin：mixed 是這段注音的混打待定按鍵（settleShown），回到後面接著打字時還原。
+func (s *Session) insertPendingZhuyin(mixed pendingKeys) {
 	if s.comp.Empty() || s.finishUntoned() { // 聲調選填：已是完整音節的注音不打聲調就完成，不留成符號（#150）
 		return
 	}
-	pending := pendingLiteral{start: s.cursor, composer: s.comp}
+	pending := pendingLiteral{start: s.cursor, composer: s.comp, mixed: mixed, fullWidth: s.fullWidth}
 	text := s.comp.String()
 	s.comp.Reset()
 	s.insertLiteral(text)
@@ -339,8 +342,6 @@ func (s *Session) decodeWithLiterals() []decode.Seg {
 }
 
 func (s *Session) suggestAfterLiteral() *suggest.Suggestion {
-	opts := s.Opt.Suggest
-	opts.RewritePrefix = opts.RewritePrefix || s.previewRewrite
 	start := 0
 	for pos := range s.literals {
 		start = max(start, pos+1)
@@ -349,7 +350,7 @@ func (s *Session) suggestAfterLiteral() *suggest.Suggestion {
 	s.configureCorrections(start, len(s.syls), true)
 	s.dec.CorrectionUsage = s.model.CorrectionUsage(s.syls[start:])
 	if start == 0 {
-		return suggest.ForWithLocks(s.dec, s.lattice(), s.path, s.locks, opts)
+		return suggest.ForWithLocks(s.dec, s.lattice(), s.path, s.locks, s.Opt.Suggest)
 	}
 	var path []decode.Seg
 	for _, seg := range s.path {
@@ -364,7 +365,7 @@ func (s *Session) suggestAfterLiteral() *suggest.Suggestion {
 			locks[at-start] = lock
 		}
 	}
-	g := suggest.ForWithLocks(s.dec, s.lattice()[start:], path, locks, opts)
+	g := suggest.ForWithLocks(s.dec, s.lattice()[start:], path, locks, s.Opt.Suggest)
 	if g != nil {
 		g.Start += start
 	}
