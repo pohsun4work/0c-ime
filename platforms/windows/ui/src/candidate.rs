@@ -117,7 +117,7 @@ struct Theme {
     pad: i32,
     row: i32,
     small_row: i32,
-    /// 提示、讀音提示、Tab 提示的列高；一般版面同 common::notice_row，命中測試才對得上。
+    /// 提示、Tab 提示的列高；一般版面同 common::notice_row，命中測試才對得上。
     heading_row: i32,
     badge_height: i32,
     /// 小按鍵圓角的直徑（RoundRect 的 ellipse）。
@@ -406,12 +406,11 @@ unsafe fn draw_badge(hdc: HDC, t: &Theme, label: &str, x: i32, y: i32, row: i32)
     x + badge_advance(hdc, t, label)
 }
 
-/// 直排候選窗的一列是什麼：提示（一般字級、強調色）、讀音提示（一般字級、一般文字色，前面畫「空白」小按鍵，#162）、
-/// Tab 提示（一般字級，前面畫「Tab」小按鍵，#118）、小字（標題、頁碼）、候選。
+/// 直排候選窗的一列是什麼：提示（一般字級、強調色）、Tab 提示（一般字級，前面畫「Tab」小按鍵，#118）、
+/// 小字（標題、頁碼）、候選。
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Row {
     Notice,
-    Reading,
     Suggestion,
     Small,
     Candidate { highlighted: bool },
@@ -421,16 +420,14 @@ impl Row {
     /// 列高；提示列與 common::header_height 用同一個值，命中測試才對得上。
     fn height(self, t: &Theme) -> i32 {
         match self {
-            Row::Notice | Row::Reading | Row::Suggestion => t.heading_row,
+            Row::Notice | Row::Suggestion => t.heading_row,
             Row::Small => t.small_row,
             Row::Candidate { .. } => t.row,
         }
     }
-    /// 列開頭的小按鍵：小字畫在圓角底色上，像鍵盤上的鍵。讀音提示後面是按空白之後的讀音（20 的 ㄉㄢ），
-    /// Tab 提示後面是按 Tab 之後的樣子（另外、ㄕㄣ）。
+    /// 列開頭的小按鍵：小字畫在圓角底色上，像鍵盤上的鍵。Tab 提示後面是按 Tab 之後的樣子（另外、ㄕㄣ）。
     fn badge(self) -> Option<&'static str> {
         match self {
-            Row::Reading => Some("空白"),
             Row::Suggestion => Some("Tab"),
             _ => None,
         }
@@ -456,8 +453,6 @@ impl Row {
 fn heading_row(m: &UiMessage, heading: &str) -> Row {
     if !m.notice.is_empty() && heading == m.notice {
         Row::Notice
-    } else if !m.reading.is_empty() && heading == m.reading {
-        Row::Reading
     } else if heading == m.suggestion {
         Row::Suggestion
     } else {
@@ -1109,31 +1104,15 @@ mod tests {
     }
 
     #[test]
-    fn reading_hint_is_a_single_regular_row() {
-        // #162：中英混打打 20 時只有一列讀音 ㄉㄢ（一般字級、一般文字色），不是補全那種小字。
+    fn tab_row_starts_with_key_badge() {
+        // ㄉㄢ：〔Tab〕20；只有提示、沒有候選時用精簡版面。
         let m = UiMessage {
             show: true,
-            reading: "ㄉㄢ".into(),
-            ..Default::default()
-        };
-        let rows = lines(&m);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(String::from_utf16(&rows[0].0).unwrap(), "ㄉㄢ");
-        assert_eq!(rows[0].1, Row::Reading);
-        assert!(without_notice(m).show, "提示收起不影響讀音提示");
-    }
-
-    #[test]
-    fn reading_and_tab_rows_start_with_key_badges() {
-        // 20：〔空白〕ㄉㄢ／〔Tab〕20；只有提示、沒有候選時用精簡版面。
-        let m = UiMessage {
-            show: true,
-            reading: "ㄉㄢ".into(),
             suggestion: "20".into(),
             ..Default::default()
         };
         let badges: Vec<_> = lines(&m).iter().map(|(_, row)| row.badge()).collect();
-        assert_eq!(badges, [Some("空白"), Some("Tab")]);
+        assert_eq!(badges, [Some("Tab")]);
         assert!(compact(&m));
         assert_eq!(Row::Notice.badge(), None);
     }

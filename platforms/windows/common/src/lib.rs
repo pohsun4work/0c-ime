@@ -151,10 +151,6 @@ pub struct UiMessage {
     /// 留到標示結束，不自動收起。舊 DLL 沒送時為 false（照舊幾秒後收起）。
     #[serde(default)]
     pub marking: bool,
-    /// 讀音提示（#162）：中英混打時照字面顯示的數字按空白會組成的注音（20 → ㄉㄢ），畫在游標下方；
-    /// Enter 留數字。舊 DLL 沒送時為空字串；舊 0c-ui 不認得時忽略。
-    #[serde(default)]
-    pub reading: String,
     /// 送出者（宿主行程 ID）；不同宿主的訊息互相取代。
     pub owner: u32,
     /// 同一宿主 TSF 執行緒的訊息視窗；舊 UI 可忽略，舊 DLL 預設不接受滑鼠操作。
@@ -167,32 +163,30 @@ pub struct UiMessage {
 /// UI → TSF：wParam 是畫面版本，lParam 是候選 ID；不傳文字或指標。
 pub const WM_SELECT_CANDIDATE: u32 = 0x8000 + 55;
 
-/// 候選之前的列：提示（notice）、讀音提示（reading）、補全提示（suggestion）、標題（title），依此順序。
+/// 候選之前的列：提示（notice）、補全提示（suggestion）、標題（title），依此順序。
 /// 提示優先：有提示時取代標題，下一個快照沒有提示（或提示到時收起）標題就回來。
-/// 讀音提示只在沒有候選時出現（核心開候選時不送）。
 pub fn header_lines(m: &UiMessage) -> Vec<&str> {
     let title = if m.notice.is_empty() { m.title.as_str() } else { "" };
-    [m.notice.as_str(), m.reading.as_str(), m.suggestion.as_str(), title]
+    [m.notice.as_str(), m.suggestion.as_str(), title]
         .into_iter()
         .filter(|s| !s.is_empty())
         .collect()
 }
 
-/// 提示列的高度：提示、讀音提示與補全提示用一般字級（比標題的小字大），列高跟著放大。
+/// 提示列的高度：提示與補全提示用一般字級（比標題的小字大），列高跟著放大。
 /// 繪製與命中測試都用這個值，兩者的位置才會一致。
 pub fn notice_row(small_row: i32) -> i32 {
     small_row * 7 / 5
 }
 
-/// 這一列是不是用一般字級畫（提示、讀音提示、Tab 提示），標題是小字。
+/// 這一列是不是用一般字級畫（提示、Tab 提示），標題是小字。
 /// Tab 提示跟候選同字級，小字看不清楚（#118）。
 pub fn large_heading(m: &UiMessage, heading: &str) -> bool {
     !m.notice.is_empty() && heading == m.notice
-        || !m.reading.is_empty() && heading == m.reading
         || !m.suggestion.is_empty() && heading == m.suggestion
 }
 
-/// 候選之前所有列的總高度（提示、讀音提示與補全提示每列 notice_row，標題 small_row）。
+/// 候選之前所有列的總高度（提示與補全提示每列 notice_row，標題 small_row）。
 pub fn header_height(m: &UiMessage, small_row: i32) -> i32 {
     header_lines(m)
         .iter()
@@ -208,9 +202,9 @@ pub fn notice_expires(m: &UiMessage) -> bool {
     !m.notice.is_empty() && !m.marking
 }
 
-/// 呈現訊息是否有東西可畫（候選、補全提示、提示或讀音提示）。
+/// 呈現訊息是否有東西可畫（候選、補全提示或提示）。
 pub fn has_content(m: &UiMessage) -> bool {
-    !m.candidates.is_empty() || !m.suggestion.is_empty() || !m.notice.is_empty() || !m.reading.is_empty()
+    !m.candidates.is_empty() || !m.suggestion.is_empty() || !m.notice.is_empty()
 }
 
 /// 與繪製一致的候選列命中；提示、頁碼、邊距不會選字。
@@ -428,31 +422,6 @@ mod tests {
             assert_eq!(hit_candidate(&m, first + 28, 8, 28, 20), Some(42));
             assert_eq!(hit_candidate(&m, first + 56, 8, 28, 20), None);
         }
-    }
-
-    #[test]
-    fn reading_hint_is_optional_and_draws_alone() {
-        let old: UiMessage = serde_json::from_str(
-            r#"{"show":true,"x":0,"y":0,"w":0,"h":0,"candidates":[],"highlight":0,"page":1,"pages":1,"suggestion":"","owner":1}"#,
-        )
-        .unwrap();
-        assert_eq!(old.reading, "", "舊 DLL 不送 reading 時仍可解析");
-        // #162：只有讀音提示（20 → ㄉㄢ）時也要畫，一般字級一列；不計時收起（組字還在就留著）。
-        let m = UiMessage {
-            show: true,
-            reading: "ㄉㄢ".into(),
-            ..Default::default()
-        };
-        assert!(has_content(&m));
-        assert_eq!(header_lines(&m), vec!["ㄉㄢ"]);
-        assert_eq!(header_height(&m, 20), 28);
-        assert!(!notice_expires(&m));
-        // 提示優先，讀音提示在補全提示之前。
-        let both = UiMessage { notice: "已加入詞庫：世傑".into(), suggestion: "補全".into(), ..m.clone() };
-        assert_eq!(header_lines(&both), vec!["已加入詞庫：世傑", "ㄉㄢ", "補全"]);
-        assert_eq!(header_height(&both, 20), 28 + 28 + 28);
-        let back: UiMessage = serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
-        assert_eq!(back, m);
     }
 
     #[test]

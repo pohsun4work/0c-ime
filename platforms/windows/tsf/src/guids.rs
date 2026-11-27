@@ -13,8 +13,6 @@ pub const GUID_DISPLAY_ATTR_CORRECTED: GUID =
     GUID::from_u128(0x923cdd42_5c7e_4781_8fbe_12232f607742);
 /// 加詞標示（#123）。
 pub const GUID_DISPLAY_ATTR_MARKED: GUID = GUID::from_u128(0x7f850af6_4e7a_4b41_a24f_baeca02ce683);
-/// 中英混打時按空白會組成中文的數字（#162）。
-pub const GUID_DISPLAY_ATTR_READING: GUID = GUID::from_u128(0xcbedd798_5d14_4f4d_9917_26b934dfa003);
 /// 組字、已選字、自動修正在深色背景的白線版與淺色背景的黑線版（tone.rs）。
 pub const GUID_DISPLAY_ATTR_INPUT_WHITE: GUID = GUID::from_u128(0x4f9db93a_373d_4a1c_be43_4a59ea6697fa);
 pub const GUID_DISPLAY_ATTR_LOCKED_WHITE: GUID = GUID::from_u128(0xf285fdde_9513_4648_94ad_9ad16396d2d5);

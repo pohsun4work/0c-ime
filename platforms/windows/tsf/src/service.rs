@@ -531,10 +531,7 @@ impl TextService_Impl {
         // 提示（#123「已加入詞庫：…」等）跟候選一起顯示；沒有候選時單獨顯示，下一鍵的快照沒有提示就收起。
         // 自行繪製候選的宿主（UI-less，例如遊戲）不另外跳出提示視窗。
         let notice = if ui_less { String::new() } else { snapshot.notice() };
-        // 讀音提示（#162，中英混打打 20 時的 ㄉㄢ）同理：UI-less 宿主不另外跳出視窗。
-        let reading = if ui_less { String::new() } else { snapshot.reading_hint.clone() };
-        let show = snapshot.composing()
-            && (!snapshot.candidates.is_empty() || !snapshot.suggestion.is_empty() || !reading.is_empty())
+        let show = snapshot.composing() && (!snapshot.candidates.is_empty() || !snapshot.suggestion.is_empty())
             || !notice.is_empty();
         let applied = match ctx {
             Some(ctx) => {
@@ -615,7 +612,6 @@ impl TextService_Impl {
             suggestion: snapshot.suggestion.clone(),
             notice,
             marking: snapshot.marking(),
-            reading,
             owner: std::process::id(),
             target,
             revision,
@@ -1089,7 +1085,6 @@ impl TextService_Impl {
         shown.candidate_notes.clear();
         shown.candidate_keys.clear();
         shown.suggestion.clear();
-        shown.reading_hint.clear();
         shown.notices.clear();
         self.present(ctx, &shown);
         let cuas = self.state.borrow().cuas.clone();
