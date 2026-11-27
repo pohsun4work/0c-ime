@@ -70,7 +70,7 @@ func TestMixedAlnumTokenSplitKeeps(t *testing.T) {
 }
 
 // #249＋#274：型號後面數字鍵開頭的字（h264 的 2k7），前面的數字可能還是型號，↓ 第二個是原按鍵，比照 #241 的 RX104 辦；
-// 字母開頭的（h264 我 的 ji3）照順序打，原按鍵照舊在後面。
+// 字母開頭的（h264 我 的 ji3）是神經判過的字，原按鍵也排第二（P8 翻邊）。
 func TestMixedDigitAfterAlnumKeysSecond(t *testing.T) {
 	s := alnumSplitSession()
 	mixedType(s, "h2642k7")
@@ -83,7 +83,7 @@ func TestMixedDigitAfterAlnumKeysSecond(t *testing.T) {
 	}
 	s = alnumSplitSession()
 	mixedType(s, "h264ji3")
-	if got := itemTexts(key(s, proto.KeyDown)); len(got) > 1 && got[1] == "ji3" {
-		t.Errorf("h264ji3 按 ↓：%q，照順序打的原按鍵不必排第二", got)
+	if got := itemTexts(key(s, proto.KeyDown)); len(got) < 2 || got[0] != "我" || got[1] != "ji3" {
+		t.Errorf("h264ji3 按 ↓：%q，要第一個 我、第二個 ji3", got)
 	}
 }

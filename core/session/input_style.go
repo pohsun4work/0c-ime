@@ -278,7 +278,7 @@ func (s *Session) cycleChoices(c *candState) (ids []int, at int) {
 	at = -1
 	for id := range c.items {
 		text := c.items[id].Entry.Surface
-		if c.keyLiterals[id] != "" || c.raw && id == len(c.items)-1 || c.literal && !fullWidthSymbol(text) {
+		if _, flip := c.flips[id]; flip || c.keyLiterals[id] != "" || c.raw && id == len(c.items)-1 || c.literal && !fullWidthSymbol(text) {
 			continue
 		}
 		if text == current && at < 0 {

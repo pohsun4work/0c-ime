@@ -730,21 +730,27 @@ func (s *Session) finishMixedTone(key string) bool {
 	if key == " " && s.zhuyinKeyHabit(raw) && s.mixedKeepable(2, sym) {
 		return s.applyMixedTone(mixedToneAction{kind: mixedToneKeep, choice: 2, mark: zhuyinKeyApplied}, key, sym)
 	}
-	var act mixedToneAction
+	var rule, act mixedToneAction
 	var visit *mixedRevisit
 	if key == " " && s.mixed.choice == 0 {
-		_, act, visit = s.mixedSpaceAction() // 組字區照著顯示的那個決定
+		rule, act, visit = s.mixedSpaceAction() // 組字區照著顯示的那個決定
 	} else {
-		act, visit, _, _ = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
+		rule = s.decideMixedTone(raw, key, sym)
+		act, visit, _, _ = s.neuralMixedTone(rule, raw, key, sym)
 	}
 	if visit != nil && act.kind == mixedToneLiteral {
 		act = mixedToneAction{kind: mixedToneSpace} // 照原樣接空白（同 mixedKey）在這裡打，才記得到回頭比的位置
 	}
+	judged := act.kind == mixedToneSyllable && s.mixedNeuralWanted(rule, raw, key)
 	before := len(s.syls)
 	if !s.applyMixedTone(act, key, sym) {
 		return false
 	}
-	if added := len(s.syls) - before; visit != nil && added > 0 && s.cursor == len(s.syls) {
+	added := len(s.syls) - before
+	if judged {
+		s.markJudged(s.cursor-added, raw[:act.at])
+	}
+	if visit != nil && added > 0 && s.cursor == len(s.syls) {
 		v := *visit // spaceMemo 留著的那份不跟著改
 		v.start, v.syls, v.checked = s.cursor-added, slices.Clone(s.syls[s.cursor-added:]), len(s.syls)
 		s.keepRevisit(&v)
@@ -1971,9 +1977,12 @@ func (s *Session) englishCorrections(text string, limit int) []english.Candidate
 }
 
 // zhuyinKey 非零時，這格是單一注音鍵＋空白留下的注音符號，提交時據以更新選過的注音文（zhuyin_keys.go，#208）。
+// judged 非空時，這格是神經判過的混打音節（判定時的讀音），prefix 是同一串按鍵照字面留在它前面的前段，↓ 據以列其他切法（flip.go）。
 type mixedOrigin struct {
 	assisted, explicit bool
 	zhuyinKey          zhuyinKeyOrigin
+	judged             zhuyin.Syllable
+	prefix             string
 }
 
 func (s *Session) insertMixedLiteral(text string, assisted, explicit bool) {

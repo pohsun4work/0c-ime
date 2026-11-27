@@ -307,6 +307,7 @@ func (s *Session) replaceMixed(v *mixedRevisit, sp mixedSplit) {
 	} else {
 		s.insertMixedPrefix(v.raw[:sp.at], false, false)
 		s.insertMixedSyllables(sp.syls, v.raw[sp.at:]+v.key)
+		s.markJudged(v.start, v.raw[:sp.at])
 	}
 	s.allowRerank = allow
 	for _, o := range s.mixedRevisits {

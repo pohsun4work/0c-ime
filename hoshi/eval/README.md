@@ -43,7 +43,7 @@ build\hoshi-eval\hoshi-eval.exe report -new build\hoshi-eval\fork.json -base bui
 
 | 檔案 | 句數 | 內容 | 怎麼算對 |
 |---|---:|---|---|
-| `spec.tsv` | 65 | 規格裡寫得成按鍵的例子，備註寫官方的行為與對應的 Phase | 跟 want 一樣 |
+| `spec.tsv` | 82 | 規格裡寫得成按鍵的例子，備註寫官方的行為與對應的 Phase | 跟 want 一樣 |
 | `spec-fullwidth.tsv` | 2 | 全形時混打（設定 `fullwidth`） | 跟 want 一樣 |
 | `zh-habit1.tsv` | 200 | 純中文，全形標點（習慣一） | **跟官方逐字一樣**（`# match: baseline`） |
 | `zh-habit2.tsv` | 200 | 純中文，不打標點、用空白斷句（習慣二） | **跟官方逐字一樣** |

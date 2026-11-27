@@ -35,20 +35,21 @@ type candState struct {
 	start, length int
 	before        bool // 前方模式：詞長變動仍以原來的尾端為界，向左延伸
 	items         []decode.Candidate
-	cursor        int             // 反白的候選（items 的索引）；頁碼由它推得
-	literal       bool            // 符號候選：插入或替換字面文字，不作為詞彙學習
-	pending       bool            // 選取後消耗尚未完成的注音；取消時保留
-	raw           bool            // 一音節漢字候選的最後一項是原樣注音
-	matched       []string        // 與 items 等長（或 nil）：近音候選在詞庫中的讀音，原音為空字串
-	labels        []string        // 開啟候選時算一次的顯示原因；不隨反白或翻頁改變
-	english       bool            // 英文模式的自動補字候選
-	mixed         bool            // 尚未定案的中英按鍵候選，保留原始按鍵
-	keyLiterals   map[int]string  // candidate index → original physical keys for a phonetic span
-	mixedChars    map[int]string  // 中英按鍵候選裡的中文字（#146）：candidate index → 字，讀音是 mixedSyl
-	mixedAt       int             // mixedChars 的按鍵從待定按鍵的這個位置起，前段照字面
-	mixedSyl      zhuyin.Syllable // mixedChars 的讀音
-	syllable      *pendingLiteral // 原樣留下的音節（#109）：選項是同讀音的各聲調，選入後仍是原樣音節
-	chars         int             // 原樣音節自己有字時（#296），items[chars:] 是這個讀音的字，選了換回一般的字；0 表示沒有
+	cursor        int              // 反白的候選（items 的索引）；頁碼由它推得
+	literal       bool             // 符號候選：插入或替換字面文字，不作為詞彙學習
+	pending       bool             // 選取後消耗尚未完成的注音；取消時保留
+	raw           bool             // 一音節漢字候選的最後一項是原樣注音
+	matched       []string         // 與 items 等長（或 nil）：近音候選在詞庫中的讀音，原音為空字串
+	labels        []string         // 開啟候選時算一次的顯示原因；不隨反白或翻頁改變
+	english       bool             // 英文模式的自動補字候選
+	mixed         bool             // 尚未定案的中英按鍵候選，保留原始按鍵
+	keyLiterals   map[int]string   // candidate index → original physical keys for a phonetic span
+	mixedChars    map[int]string   // 中英按鍵候選裡的中文字（#146）：candidate index → 字，讀音是 mixedSyl
+	mixedAt       int              // mixedChars 的按鍵從待定按鍵的這個位置起，前段照字面
+	mixedSyl      zhuyin.Syllable  // mixedChars 的讀音
+	syllable      *pendingLiteral  // 原樣留下的音節（#109）：選項是同讀音的各聲調，選入後仍是原樣音節
+	chars         int              // 原樣音節自己有字時（#296），items[chars:] 是這個讀音的字，選了換回一般的字；0 表示沒有
+	flips         map[int]flipPick // ↓ 翻邊（P8）：candidate index → 換法（切法 2萬、英數組得出的 孬）
 	kind          string
 	direct        bool  // empty composition: selection commits once.
 	ids           []int // stable palette IDs, independent of recent order.
@@ -125,7 +126,7 @@ type Session struct {
 	englishSpaceCommit    bool // 英文模式這個字是按空白送出的：後面還會接著打，不是單獨打完的一串（#328）
 	mixed                 pendingKeys
 	mixedKeys             map[int]string      // completed phonetic position → original keys, retained until edited/committed
-	mixedOrigins          map[int]mixedOrigin // literal positions: independently typed vs system-assisted
+	mixedOrigins          map[int]mixedOrigin // 字面文字：使用者打的或系統補的；音節：選過的注音文、神經判過的（P8）
 	mixedRevisits         []*mixedRevisit     // 神經比過、之後帶著後文再比一次的混打決定（P7，最多 mixedRevisitSlots 個）
 	mixedSpent            time.Duration       // 這個請求裡 P7 花掉的時間（每鍵預算 mixedNeuralDeadline）
 	mixedAsked            bool                // 這個請求裡已經為決定問過神經：回頭比留到下一鍵
@@ -1211,6 +1212,9 @@ func (s *Session) openCandidates(length int) {
 		for _, r := range s.syls[start:end] {
 			text.WriteString(string(r))
 		}
+		if s.openRunFlips(pos) {
+			return
+		}
 		alternatives := literalAlternatives(text.String())
 		s.openSymbols(s.literalKeyAlternatives(alternatives, start, end-start), start, end-start, false)
 		return
@@ -1363,20 +1367,32 @@ func (s *Session) openAt(pos, length int) bool {
 	}
 	// Keep physical keys recoverable without creating Chinese-word preferences.
 	// The ordinary raw-zhuyin candidate remains last for existing clients.
+	// 排在畫面上的字後面的：神經判過的字（趴 的 q8、教 的 url，P8 翻邊）；只用數字鍵出的字（#134 的 5 之、#162 的 20 單）
+	// 要數字的人多；照位置組出的字（#274：i16 博、k27 的、u2/4 定）是引擎替使用者改的順序，同音字多時原按鍵在最後一頁找不到；
+	// 型號後面數字鍵開頭的字（#249：h264 的、Q2 的）前面的數字也可能還是型號。再來是神經判過的字的其他切法（斷 → 2萬 → 段…）。
+	head := min(1, len(items))
+	var flips []flipPick
+	keysFirst := false
+	if length == 1 {
+		flips, keysFirst = s.judgedFlips(pos)
+	}
 	keyLiterals := map[int]string{}
-	if keys := s.originalMixedKeys(pos, length); keys != "" {
-		// 只用數字鍵出的字（#134 的 5 之、#162 的 20 單）要數字的人多；照位置組出的字（#274：i16 博、k27 的、u2/4 定）
-		// 是引擎替使用者改的順序，同音字多時原按鍵在最後一頁找不到；型號後面數字鍵開頭的字（#249：h264 的、Q2 的）
-		// 前面的數字也可能還是型號。這些原按鍵都排第二個，第一個仍是目前的字。
-		at := len(items)
-		if at > 1 && (length == 1 && (s.digitWordKeys(pos) || s.digitAfterAlnumKeys(pos)) || s.positionalKeysIn(pos, length)) {
-			at = 1
-		}
+	keys := s.originalMixedKeys(pos, length)
+	front := keys != "" && (keysFirst || length == 1 && (s.digitWordKeys(pos) || s.digitAfterAlnumKeys(pos)) || s.positionalKeysIn(pos, length))
+	insertKeys := func(at int) {
 		keyLiterals[at] = keys
 		items = slices.Insert(items, at, rawCandidate(keys))
 		if matched != nil {
 			matched = slices.Insert(matched, min(at, len(matched)), "")
 		}
+	}
+	if front {
+		insertKeys(head)
+		head++
+	}
+	items, matched, flipAt := insertFlips(items, matched, head, flips)
+	if keys != "" && !front {
+		insertKeys(len(items))
 	}
 	if length == 1 {
 		items = append(items, rawCandidate(s.syls[pos].Text()))
@@ -1387,7 +1403,7 @@ func (s *Session) openAt(pos, length int) bool {
 	if len(items) == 0 {
 		return false
 	}
-	s.cand = &candState{start: pos, length: length, items: items, raw: length == 1, matched: matched, keyLiterals: keyLiterals}
+	s.cand = &candState{start: pos, length: length, items: items, raw: length == 1, matched: matched, keyLiterals: keyLiterals, flips: flipAt}
 	s.cand.labels = s.candidateLabels(s.cand)
 	s.labelSpatial(pos)
 	return true
@@ -1494,6 +1510,9 @@ func (s *Session) selectCandidate(id int) bool {
 	}
 	if s.cand.mixed {
 		return s.selectMixed(id)
+	}
+	if f, ok := s.cand.flips[id]; ok {
+		return s.selectFlip(f)
 	}
 	if s.cand.literal || s.cand.keyLiterals[id] != "" || s.cand.raw && id == len(s.cand.items)-1 {
 		return s.selectLiteral(id)
