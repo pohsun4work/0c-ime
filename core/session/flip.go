@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -12,8 +13,9 @@ import (
 	"github.com/0c-biggo/0c-ime/core/zhuyin"
 )
 
-// ↓ 翻邊（P8）：混打判定之後，↓ 清單翻得回另一邊。
+// ↓ 翻邊（P8）：混打判定之後，↓ 清單翻得回另一邊。同一串按鍵是兩次結算（聲調鍵、空白）之間打的按鍵（市值2萬 的 2j04）。
 //   - 神經判過的字（mixedOrigin.judged）：同一串按鍵的其他切法排在畫面上的字後面（斷 的 2萬、2萬 的 斷）。
+//     前段照字面的（2萬 的 2）Tab 換到整串的清單：修改「2萬」列其他切法的所有字（斷 段 緞…）。
 //   - 照字面留下的英數（ssl、up）：規則組得出的字與注音（孬…、ㄋㄠ）。
 
 const (
@@ -24,7 +26,7 @@ const (
 )
 
 // flipPick 是 ↓ 翻邊的一項：組字區 [start, end) 換成前段 prefix 照字面、後段音節 syl（原按鍵 keys）鎖定成 char；
-// char 是空字串時原樣留下注音（ㄋㄠ）。keep 是畫面上的英數本身，選了不動。
+// char 是空字串時原樣留下注音（ㄋㄠ）。keep 是畫面上的樣子本身（ssl、2萬、說不），選了不動。
 type flipPick struct {
 	start, end int
 	prefix     string
@@ -65,9 +67,9 @@ func (s *Session) judgedKeys(pos int) (start int, all string, cut int, ok bool) 
 	return start, o.prefix + keys, len(o.prefix), true
 }
 
-// judgedFlips：同一串按鍵的其他切法：前段沒有或是詞、數字、標點（mixedWordPrefix），後段有字母、照順序組成一個音節
+// judgedSplits：同一串按鍵的其他切法（還沒選字）：前段沒有或是詞、數字、標點（mixedWordPrefix），後段有字母、照順序組成一個音節
 // （斷 的 2萬、第 的 2億、2萬 的 斷；八 的 1啊 只有數字鍵，要的是 18）。
-func (s *Session) judgedFlips(pos int) []flipPick {
+func (s *Session) judgedSplits(pos int) []flipPick {
 	start, all, cut, ok := s.judgedKeys(pos)
 	if !ok {
 		return nil
@@ -81,7 +83,69 @@ func (s *Session) judgedFlips(pos int) []flipPick {
 			flips = append(flips, flipPick{start: start, end: pos + 1, prefix: all[:at], syl: syls[0], keys: all[at:]})
 		}
 	}
-	return s.chooseFlipChars(flips)
+	return flips
+}
+
+// spanBack：同一串按鍵的清單（openFlipSpan）是從哪份清單 Tab 過來的，再 Tab 回得去。literal 時 at 是照字面清單的位置
+// （市值|2萬 的 2），否則是字的清單的錨點（cycleCandidateLength）。
+type spanBack struct {
+	literal bool
+	at      int
+}
+
+// openFlipSpan：q 是神經判過、前段照字面還在的字（2萬 的 萬）時，開同一串按鍵 [start, q+1) 的清單：畫面上的樣子（選了不動）、
+// 其他切法的所有字（神經選的排第一，其他照前文）與注音。沒有其他切法的字時回 false、不動候選。
+func (s *Session) openFlipSpan(q int, back spanBack, before bool) bool {
+	if q < 0 || q >= len(s.syls) {
+		return false
+	}
+	start, _, cut, ok := s.judgedKeys(q)
+	if !ok || cut == 0 {
+		return false
+	}
+	splits := s.judgedSplits(q)
+	preferred := map[string]string{}
+	for _, f := range s.chooseFlipChars(slices.Clone(splits)) {
+		preferred[f.keys] = f.char
+	}
+	c := &candState{start: start, length: q + 1 - start, before: before, flips: map[int]flipPick{}, span: &back}
+	add := func(f flipPick, text string) {
+		c.flips[len(c.items)] = f
+		c.items = append(c.items, rawCandidate(text))
+	}
+	add(flipPick{keep: true}, s.spanText(start, q+1-start))
+	chars := 0
+	for _, f := range splits {
+		list := s.syllableChars(f.syl, start)
+		if p := preferred[f.keys]; p != "" {
+			list = slices.Insert(slices.DeleteFunc(list, func(c string) bool { return c == p }), 0, p)
+		}
+		for _, char := range list {
+			f.char = char
+			add(f, s.mixedLiteralText(f.prefix)+char)
+		}
+		chars += len(list)
+		f.char = ""
+		add(f, s.mixedLiteralText(f.prefix)+f.syl.Text())
+	}
+	if chars == 0 {
+		return false
+	}
+	s.cand = c
+	return true
+}
+
+// literalPrefixOf：照字面的 [start, start+length) 是神經判過的字 q 的前段（市值2萬 的 2）時回傳 q。
+func (s *Session) literalPrefixOf(start, length int) (int, bool) {
+	q := start + length
+	for q < len(s.syls) && s.literals[q] {
+		q++
+	}
+	if q >= len(s.syls) {
+		return 0, false
+	}
+	from, _, cut, ok := s.judgedKeys(q)
+	return q, ok && cut > 0 && from <= start
 }
 
 // judgedKeysSecond：神經判過的字，原按鍵排在畫面上的字後面（趴 的 q8、r萬 的 j04）。整串是數字鍵開頭、照順序打的注音

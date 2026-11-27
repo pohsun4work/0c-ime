@@ -50,6 +50,7 @@ type candState struct {
 	syllable      *pendingLiteral  // 原樣留下的音節（#109）：選項是同讀音的各聲調，選入後仍是原樣音節
 	chars         int              // 原樣音節自己有字時（#296），items[chars:] 是這個讀音的字，選了換回一般的字；0 表示沒有
 	flips         map[int]flipPick // ↓ 翻邊（P8）：candidate index → 換法（切法 2萬、英數組得出的 孬）
+	span          *spanBack        // 同一串按鍵的清單（修改「2萬」，openFlipSpan）：Tab 回去的清單
 	kind          string
 	direct        bool  // empty composition: selection commits once.
 	ids           []int // stable palette IDs, independent of recent order.
@@ -1203,21 +1204,7 @@ func (s *Session) openCandidates(length int) {
 		pos = max(0, s.cursor-1)
 	}
 	if s.literals[pos] {
-		if p, ok := s.syllableLiteralAt(pos); ok {
-			s.openSyllableLiteral(p)
-			return
-		}
-		if s.openRunFlips(pos) {
-			return
-		}
-		start := s.literalFloor(pos)
-		end := s.literalStep(start, 1)
-		var text strings.Builder
-		for _, r := range s.syls[start:end] {
-			text.WriteString(string(r))
-		}
-		alternatives := literalAlternatives(text.String())
-		s.openSymbols(s.literalKeyAlternatives(alternatives, start, end-start), start, end-start, false)
+		s.openLiteralAt(pos)
 		return
 	}
 	anchor := pos
@@ -1228,6 +1215,25 @@ func (s *Session) openCandidates(length int) {
 		length = 1 // ↓ 一律先開游標旁那一個字（我｜說不上 是「說」、說｜不上 是「不」），Tab 才換更長（P8）
 	}
 	s.openAnchored(anchor, length, before)
+}
+
+// openLiteralAt 開 pos 那格照字面文字的候選：原樣音節的各聲調、英數組得出的字（openRunFlips）、符號的全半形與原按鍵。
+func (s *Session) openLiteralAt(pos int) {
+	if p, ok := s.syllableLiteralAt(pos); ok {
+		s.openSyllableLiteral(p)
+		return
+	}
+	if s.openRunFlips(pos) {
+		return
+	}
+	start := s.literalFloor(pos)
+	end := s.literalStep(start, 1)
+	var text strings.Builder
+	for _, r := range s.syls[start:end] {
+		text.WriteString(string(r))
+	}
+	alternatives := literalAlternatives(text.String())
+	s.openSymbols(s.literalKeyAlternatives(alternatives, start, end-start), start, end-start, false)
 }
 
 // stepCandidate 把要修改的字往前（d=-1，j）或往後（d=1，k）換一個並重開候選（#193，照新酷音）：
@@ -1376,7 +1382,7 @@ func (s *Session) openAt(pos, length int) bool {
 		head++
 	}
 	if length == 1 {
-		for _, f := range s.judgedFlips(pos) {
+		for _, f := range s.chooseFlipChars(s.judgedSplits(pos)) {
 			flipAt[head] = f
 			insertRaw(head, s.mixedLiteralText(f.prefix)+f.char)
 			head++
@@ -1455,26 +1461,48 @@ func shownFirst(items []decode.Candidate, matched []string, shown string, readin
 func (s *Session) pages() int { return (len(s.cand.items) + s.pageSize() - 1) / s.pageSize() }
 
 // 候選開啟時 Tab 切至下一個較長詞長（d=1），最長後回到最短；Shift+Tab 反過來（d=-1）。不接受補全或提交。
+// 單字是神經判過、前段照字面的字（2萬 的 萬）時，單字之後多一步同一串按鍵的清單（修改「2萬」）；
+// 前段的照字面清單（市值|2萬 的 2 / ㄉ）Tab 也換到那份，再 Tab 回來。
 func (s *Session) cycleCandidateLength(d int) {
 	c := s.cand
-	if c == nil || c.literal || c.mixed {
+	if c == nil || c.mixed {
 		return
 	}
-	anchor, maxLen := s.candidateAnchor(c)
-	for i := 1; i <= maxLen; i++ {
-		length := ((c.length-1+d*i)%maxLen+maxLen)%maxLen + 1
-		if s.openAnchored(anchor, length, c.before) {
+	if c.span != nil && c.span.literal {
+		s.openLiteralAt(c.span.at)
+		return
+	}
+	if c.literal {
+		if q, ok := s.literalPrefixOf(c.start, c.length); ok {
+			s.openFlipSpan(q, spanBack{literal: true, at: c.start}, false)
+		}
+		return
+	}
+	anchor, before := c.start, c.before
+	switch {
+	case c.span != nil:
+		anchor = c.span.at
+	case before:
+		anchor = c.start + c.length
+	}
+	maxLen, single := min(decode.MaxLen(s.dec.Lex), len(s.syls)-anchor), anchor
+	if before {
+		maxLen, single = min(decode.MaxLen(s.dec.Lex), anchor), anchor-1
+	}
+	// 步驟 0 是單字，1 是同一串按鍵的清單，k ≥ 2 是 k 個字的詞。
+	step := c.length
+	if c.span != nil {
+		step = 1
+	} else if c.length == 1 {
+		step = 0
+	}
+	n := maxLen + 1
+	for i := 1; i <= n; i++ {
+		next := ((step+d*i)%n + n) % n
+		if next == 1 && s.openFlipSpan(single, spanBack{at: anchor}, before) || next != 1 && s.openAnchored(anchor, max(next, 1), before) {
 			return
 		}
 	}
-}
-
-func (s *Session) candidateAnchor(c *candState) (int, int) {
-	if c.before {
-		end := c.start + c.length
-		return end, min(decode.MaxLen(s.dec.Lex), end)
-	}
-	return c.start, min(decode.MaxLen(s.dec.Lex), len(s.syls)-c.start)
 }
 
 // moveHighlight 把反白往下（d=1）或往上（d=-1）移一項，在同一份清單裡頭尾繞圈、不跨詞長（P8；

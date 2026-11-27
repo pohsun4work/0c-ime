@@ -33,6 +33,8 @@ func splitSession(scores map[string]float64, seen *[]rerank.TextsRequest) *Sessi
 	}
 	lex.Add(lexicon.Entry{Surface: "因", Reading: zhuyin.ParseReading("ㄧㄣ"), PRW: 1}) // 音 的同音字、比較少用
 	sys.SetUni("因", 1e-4)
+	lex.Add(lexicon.Entry{Surface: "段", Reading: zhuyin.ParseReading("ㄉㄨㄢˋ"), PRW: 1}) // 斷 的同音字、比較少用
+	sys.SetUni("段", 1e-4)
 	s := New(personal.NewModel(lex, sys))
 	var words []english.Word
 	for _, w := range []string{"hello", "go", "zip", "up", "upon", "the", "thew", "a", "as"} {
