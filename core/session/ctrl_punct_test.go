@@ -98,3 +98,19 @@ func TestCtrlPunctAfterMixedEnglish(t *testing.T) {
 		t.Fatalf("送出：%+v", snap)
 	}
 }
+
+// 全形標點也照神經選字：插入標點後不退回統計（我井 → 我景），打完 。 就 Enter 送出的是畫面上的字。
+func TestCtrlPunctKeepsNeuralChoice(t *testing.T) {
+	for _, tc := range ctrlPunctKeys {
+		calls := 0
+		s := neuralSession(&calls)
+		typeSyl(s, "ㄨㄛˇ")
+		typeSyl(s, "ㄐㄧㄥˇ")
+		if snap := key(s, tc.key); snap.Text() != "我井"+tc.want {
+			t.Fatalf("%s 之後：%q", tc.key, snap.Text())
+		}
+		if commit := key(s, proto.KeyEnter).Commit; commit != "我井"+tc.want {
+			t.Fatalf("%s 之後 Enter 送出 %q", tc.key, commit)
+		}
+	}
+}

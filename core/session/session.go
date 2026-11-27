@@ -278,8 +278,9 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.untonedRun = nil
 	}
 	_, keypad := proto.KeypadChar(r.Key)
+	_, ctrlPunct := proto.CtrlPunct(r.Key) // 全形標點也是打字：不重排的話插入標點後整段退回統計選字，打完 。 就 Enter 送出的是統計的結果
 	s.mixedSpent, s.mixedAsked = 0, false
-	s.allowRerank = r.Type == proto.Symbol || r.Type == proto.Backspace || r.Type == proto.Key && (len([]rune(r.Key)) == 1 || keypad || r.Key == proto.KeyBackspace)
+	s.allowRerank = r.Type == proto.Symbol || r.Type == proto.Backspace || r.Type == proto.Key && (len([]rune(r.Key)) == 1 || keypad || ctrlPunct || r.Key == proto.KeyBackspace)
 	defer func() { s.allowRerank = false }()
 	if s.allowRerank && s.mixedBusy > 0 {
 		s.mixedBusy--
