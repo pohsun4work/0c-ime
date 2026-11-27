@@ -45,7 +45,7 @@ build\hoshi-eval\hoshi-eval.exe report -new build\hoshi-eval\fork.json -base bui
 |---|---:|---|---|
 | `spec.tsv` | 82 | 規格裡寫得成按鍵的例子，備註寫官方的行為與對應的 Phase | 跟 want 一樣 |
 | `spec-fullwidth.tsv` | 2 | 全形時混打（設定 `fullwidth`） | 跟 want 一樣 |
-| `zh-habit1.tsv` | 200 | 純中文，全形標點（習慣一） | **跟官方逐字一樣**（`# match: baseline`） |
+| `zh-habit1.tsv` | 200 | 純中文，全形標點（習慣一） | **跟前一版逐字一樣**（`# match: baseline`）；P8 起 Ctrl＋標點也照神經選字，跟官方不同（官方按 Ctrl＋標點會退回統計選字） |
 | `zh-habit2.tsv` | 200 | 純中文，不打標點、用空白斷句（習慣二） | **跟官方逐字一樣** |
 | `mixed-habit1.tsv` | 150 | 自寫的混打句，盤古之白＋全形標點 | 跟 want 一樣 |
 | `mixed-habit2.tsv` | 150 | 自寫的混打句，不空格、用空白斷句 | 跟 want 一樣 |
