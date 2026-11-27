@@ -1065,13 +1065,21 @@ func (s *Session) signature() string {
 	if s.Fuzzy.AutoEnabled() { // 自動修正的規則、模式與門檻都決定顯示路徑；關閉時簽章與沒有此功能時相同
 		b.WriteString("fuzzy:" + s.Fuzzy.Key() + ":" + fmt.Sprintf("%v", s.Opt.FuzzyAuto) + "|")
 	}
-	starts := make([]int, 0, len(s.locks))
-	for st := range s.locks {
-		starts = append(starts, st)
+	writeLocks(&b, s.locks)
+	for i := range s.syls {
+		if s.literals[i] {
+			b.WriteString("literal:")
+			b.WriteString(strconv.Itoa(i))
+			b.WriteByte(';')
+		}
 	}
-	sort.Ints(starts)
-	for _, st := range starts {
-		l := s.locks[st]
+	return b.String()
+}
+
+// writeLocks 依位置順序寫入鎖定的全部欄位。
+func writeLocks(b *strings.Builder, locks map[int]decode.Lock) {
+	for _, st := range slices.Sorted(maps.Keys(locks)) {
+		l := locks[st]
 		b.WriteString(strconv.Itoa(st))
 		b.WriteByte(':')
 		b.WriteString(l.Word)
@@ -1085,14 +1093,6 @@ func (s *Session) signature() string {
 		b.WriteString(l.Matched)
 		b.WriteByte(';')
 	}
-	for i := range s.syls {
-		if s.literals[i] {
-			b.WriteString("literal:")
-			b.WriteString(strconv.Itoa(i))
-			b.WriteByte(';')
-		}
-	}
-	return b.String()
 }
 
 func (s *Session) refresh() {

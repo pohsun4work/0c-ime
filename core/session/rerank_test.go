@@ -431,3 +431,28 @@ func TestVariantOnly(t *testing.T) {
 		}
 	}
 }
+
+// P8：手選鎖住的字不動，其餘照常神經選字（以前有任何鎖就整段照統計，到 Enter 為止）。
+func TestNeuralKeepsRerankingAroundLocks(t *testing.T) {
+	calls := 0
+	s := neuralSession(&calls)
+	typeSyl(s, "ㄨㄛˇ")
+	typeSyl(s, "ㄐㄧㄥˇ")
+	got := s.Handle(proto.Request{Type: proto.Candidates, Length: 1})
+	choice := -1
+	for _, c := range got.Candidates.Items {
+		if c.Text == "景" {
+			choice = c.ID
+		}
+	}
+	if choice < 0 {
+		t.Fatal("missing manual choice")
+	}
+	if got = s.Handle(proto.Request{Type: proto.Select, Index: choice}); got.Text() != "我景" {
+		t.Fatalf("manual %+v", got)
+	}
+	before := calls
+	if got = typeSyl(s, "ㄐㄧㄥˇ"); got.Text() != "我景井" || calls == before {
+		t.Fatalf("手選後其餘部分要照常神經選字：%q calls %d → %d", got.Text(), before, calls)
+	}
+}
