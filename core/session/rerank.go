@@ -282,8 +282,7 @@ func (s *Session) rerankSegmentBody(lat input.Lattice, start, end int, shown, be
 		s.rerankCache[key] = entry
 	}
 	decision := entry.decision
-	// 段裡有鎖時不給提示：提示涵蓋整段，接受時不能跨越手選（acceptHint）。
-	if end == len(s.syls) && opt.HintGap > 0 && decision.second >= 0 && decision.gap < opt.HintGap && plainSegments(rows[decision.second].Segments) && len(locks) == 0 {
+	if end == len(s.syls) && opt.HintGap > 0 && decision.second >= 0 && decision.gap < opt.HintGap && plainSegments(rows[decision.second].Segments) {
 		hint := &neuralHint{text: rows[decision.second].Text, replace: rows[decision.winner].Text}
 		for _, g := range rows[decision.second].Segments {
 			g.Start += start
@@ -809,22 +808,42 @@ func plainSegments(segs []decode.Seg) bool {
 	return len(segs) > 0
 }
 
-// acceptHint 把提示候選逐詞鎖定（視同手選），之後解碼必須顯示該候選。
+// acceptHint 把提示候選逐詞鎖定（視同手選），之後解碼必須顯示該候選。提示的詞包住手選的字時（候選都遵守鎖定，
+// 那幾個字一樣，同 decode 的 allowed），手選照舊，只鎖詞裡其餘的字（我在〔我再〕選過「我」：Tab 只換 再）。
 func (s *Session) acceptHint() bool {
 	h := s.hint
 	if h == nil {
 		return false
 	}
+	add := map[int]decode.Lock{}
 	for _, g := range h.segs {
-		for at, lock := range s.locks {
-			if at < g.End && g.Start < at+lock.Len {
+		word := []rune(g.Word)
+		var held []int
+		for at, l := range s.locks {
+			if at >= g.End || at+l.Len <= g.Start {
+				continue
+			}
+			if at < g.Start || at+l.Len > g.End || len(word) != g.End-g.Start || string(word[at-g.Start:at-g.Start+l.Len]) != l.Word {
 				return false // 不跨越既有手選
+			}
+			held = append(held, at)
+		}
+		if len(held) == 0 {
+			add[g.Start] = decode.Lock{Word: g.Word, Len: g.End - g.Start, Suggested: true}
+			continue
+		}
+		slices.Sort(held)
+		from := g.Start
+		for _, at := range append(held, g.End) {
+			if at > from {
+				add[from] = decode.Lock{Word: string(word[from-g.Start : at-g.Start]), Len: at - from, Suggested: true}
+			}
+			if at < g.End {
+				from = at + s.locks[at].Len
 			}
 		}
 	}
-	for _, g := range h.segs {
-		s.locks[g.Start] = decode.Lock{Word: g.Word, Len: g.End - g.Start, Suggested: true}
-	}
+	maps.Copy(s.locks, add)
 	s.hint = nil
 	return true
 }
