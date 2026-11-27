@@ -95,7 +95,7 @@ func TestMixedSwappedVowelsCompose(t *testing.T) {
 }
 
 // #256：介音是 ㄧ、前面的聲母與韻母都是數字鍵的三鍵或兩鍵（20u 的 ㄉㄢㄧ、0u 的 ㄢㄧ）也照位置組字，跟常見注音輸入法的混打一樣：
-// 20u4 是電、10u3 是扁、0u3 是演、8u4 是亞。要「20億」時打 20 按 Enter 再打億，或在電上按 ↓ 選回原按鍵。
+// 20u4 是電、10u3 是扁、0u3 是演、8u4 是亞。要「20億」時打 20 按 ↓ 選原按鍵再打億，或在電上按 ↓ 選回原按鍵。
 func TestMixedSwappedVowelsBeforeYi(t *testing.T) {
 	for _, tc := range []struct{ keys, want string }{
 		{"20u4", "電"}, {"10u4", "變"}, {"20u3", "點"}, {"20u ", "顛"}, {"0u3", "演"}, {"8u4", "亞"}, {"ji320u4", "我電"},

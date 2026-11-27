@@ -78,6 +78,19 @@ func TestMixedInputSyllableLiteral(t *testing.T) {
 	assertNoZhuyinLearned(t, s, "ㄏㄟˊ")
 }
 
+// ↓ 選了帶聲調的原樣注音（co6 的 ㄏㄟˊ）再退格：注音不是按鍵，退回原按鍵，再退格刪原按鍵的最後一鍵。
+func TestMixedPickedToneZhuyinBackspace(t *testing.T) {
+	s := syllableLiteralSession()
+	keys(s, "c", "o", "6")
+	key(s, proto.KeyDown)
+	pickText(t, s, "ㄏㄟˊ")
+	for _, want := range []string{"co6", "co"} {
+		if got := key(s, proto.KeyBackspace).Text(); got != want {
+			t.Fatalf("退格：%q，要 %q", got, want)
+		}
+	}
+}
+
 // #107 客戶回報：ㄟ 自己沒有字，詞庫只有「工口」讀 ㄟ ㄌㄨㄛˊ。ㄟ＋空白曾顯示成「工」（更長的詞的開頭），
 // 接著打 ㄋㄧˇ 接不上，結果卡成「工ㄋㄧˇ」。只能當詞頭、自己沒有字的音節同樣原樣留下注音，
 // 下一個音節能和它成詞時再收回解碼。

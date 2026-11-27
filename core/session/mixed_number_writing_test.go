@@ -105,7 +105,7 @@ func TestMixedDigitWordBeforeNumberPunct(t *testing.T) {
 		{"04", "案"},
 		{"294-3", "戴爾"}, // -3 是 ㄦˇ：標點鍵和聲調鍵組得成字，是中文
 		{"284-6", "大而"},
-		{"53.", "只."},
+		{"53.", "只ㄡ"}, // 結尾的 . 照畫面的讀音送出
 	} {
 		s := numberWritingSession()
 		mixedType(s, tc.keys)
@@ -140,7 +140,7 @@ func TestMixedDigitWordAfterChineseBeforeNumberPunct(t *testing.T) {
 		{"ji3543.5", "我至3.5"},
 		{"ji3546,762", "我至6,762"},
 		{"ji3294-3", "我戴爾"},
-		{"ji353.", "我只."},
+		{"ji353.", "我只ㄡ"},
 	} {
 		s := numberWritingSession()
 		mixedType(s, tc.keys)

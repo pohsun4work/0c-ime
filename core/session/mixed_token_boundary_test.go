@@ -159,7 +159,7 @@ func TestMixedTokenDigitsTurnBackOnNextDigit(t *testing.T) {
 	}
 	s.Handle(proto.Request{Type: proto.Select, Index: snap.Candidates.Items[id].ID})
 	mixedType(s, "0")
-	if got := key(s, proto.KeyEnter).Commit; got != "GT版0" {
+	if got := key(s, proto.KeyEnter).Commit; got != "GT版ㄢ" { // 0 照畫面的讀音送出
 		t.Errorf("選過的字不改回按鍵：%q", got)
 	}
 	for _, tc := range []struct{ keys, want string }{

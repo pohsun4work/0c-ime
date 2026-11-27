@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"slices"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestMixedDisplayIsSpaceResult(t *testing.T) {
 	for _, tc := range []struct{ keys, shown, space string }{
 		{"gjn", "ㄙㄨ", "蘇"}, {"wu//", "ㄊㄧㄥ", "聽"}, {"5wu0", "5ㄊㄧㄢ", "5天"}, {"1qu0", "1ㄆㄧㄢ", "1篇"},
 		{"cpu", "cpu", "cpu "}, {"png", "png", "png "}, // 組不成音節的、字典收的縮寫照英文
-		{"20", "ㄉㄢ", "單"}, // 數字也是（#162），Enter 照樣送出 20
+		{"20", "ㄉㄢ", "單"}, // 數字也是（#162）
 	} {
 		s := swapSession()
 		if got := mixedType(s, tc.keys).Text(); got != tc.shown {
@@ -42,12 +43,12 @@ func TestMixedDisplayIsSpaceResult(t *testing.T) {
 	}
 }
 
-// Tab 換成另一個：修正讀音、數字換成原按鍵（之後的空白就是空白），字典收的縮寫換成修正讀音；
-// 照順序組的注音不是英文詞時不換。照空白的決定顯示的，決定有把握才不跳小視窗（gjn 不必問神經）；
-// 要問神經卻問不到的（20，這裡沒有神經）算沒把握。Tab 都照樣換。
+// Tab 換成小視窗的那一個：數字換成原按鍵（之後的空白就是空白），字典收的縮寫換成修正讀音；沒有小視窗時 Tab 不動。
+// 照空白的決定顯示的，決定有把握時不跳（gjn 不必問神經）；要問神經卻問不到的（20，這裡沒有神經）算沒把握。
+// 照順序組的注音不是英文詞時沒有另一個（wu0）。
 func TestMixedTabSwapsToTheOther(t *testing.T) {
 	for _, tc := range []struct{ keys, popup, tab, space string }{
-		{"gjn", "", "gjn", "gjn "}, {"20", "20", "20", "20 "}, {"png", "ㄕㄣ", "ㄕㄣ", "深"}, {"wu0", "", "ㄊㄧㄢ", "天"},
+		{"gjn", "", "ㄙㄨ", "蘇"}, {"20", "20", "20", "20 "}, {"png", "ㄕㄣ", "ㄕㄣ", "深"}, {"wu0", "", "ㄊㄧㄢ", "天"},
 	} {
 		s := swapSession()
 		if got := mixedType(s, tc.keys); got.Suggestion != tc.popup || tc.popup != "" && got.SuggestedText() != tc.popup {
@@ -80,26 +81,44 @@ func TestMixedTabCompletionStays(t *testing.T) {
 	}
 }
 
-// Tab 是使用者主動選的，換了就定了：不再跳小視窗，再按 Tab 不動（up 換成原按鍵後不換回 ㄧㄣ、也不換成補全 upon）。
+// Tab 是使用者主動選的，換了就不換回去（png 換成 ㄕㄣ、20 換成原按鍵之後 Tab 不動）；換成的英文照樣補全
+// （up 換成原按鍵後跳〔upon〕，收下就定了）。小視窗就是下一次 Tab 換成的樣子。
 func TestMixedTabStays(t *testing.T) {
 	for _, want := range [][]string{
-		{"up", "ㄧㄣ", "up", "up"},
-		{"gjn", "ㄙㄨ", "gjn", "gjn"},
+		{"up", "ㄧㄣ", "up", "upon", "upon"},
 		{"png", "png", "ㄕㄣ", "ㄕㄣ"},
 		{"20", "ㄉㄢ", "20", "20"},
 	} {
 		s := swapSession()
-		got := []string{mixedType(s, want[0]).Text()}
+		prev := mixedType(s, want[0])
+		got := []string{prev.Text()}
 		for range want[2:] {
 			snap := key(s, proto.KeyTab)
-			if snap.Suggestion != "" {
-				t.Errorf("%s Tab 之後還有小視窗 %q", want[0], snap.Suggestion)
+			if popup := cmp.Or(prev.Suggestion, prev.Text()); snap.Text() != popup {
+				t.Errorf("%s Tab 是 %q，小視窗說 %q", want[0], snap.Text(), popup)
 			}
-			got = append(got, snap.Text())
+			got, prev = append(got, snap.Text()), snap
+		}
+		if prev.Suggestion != "" {
+			t.Errorf("%s 最後還有小視窗 %q", want[0], prev.Suggestion)
 		}
 		if !slices.Equal(got, want[1:]) {
 			t.Errorf("%s 連按 Tab：%q，要 %q", want[0], got, want[1:])
 		}
+	}
+}
+
+// ↓ 選的跟 Tab 換的一樣不換回去：up ↓ 選 ㄧㄣ 之後沒有小視窗、Tab 不動（20 ↓ 選 20 見 TestMixedDigitsChosenKeysStay）。
+// 選了原按鍵的英文照樣補全（TestMixedTabCompletionStays）。
+func TestMixedPickedStays(t *testing.T) {
+	s := swapSession()
+	mixedType(s, "up")
+	key(s, proto.KeyDown)
+	if snap := pickText(t, s, "ㄧㄣ"); snap.Suggestion != "" {
+		t.Errorf("↓ 選 ㄧㄣ 之後小視窗 %q", snap.Suggestion)
+	}
+	if got := key(s, proto.KeyTab).Text(); got != "ㄧㄣ" {
+		t.Errorf("↓ 選 ㄧㄣ 之後 Tab：%q", got)
 	}
 }
 
@@ -117,7 +136,7 @@ func TestMixedTabBackspaceTrims(t *testing.T) {
 		{"hel", 1, "hell", "o", "hello "},
 		{"hel", 2, "hel", "pji3", "help我 "},
 		{"up", 1, "u", "", "u "},
-		{"gjn", 1, "gj", "", "gj "},
+		{"20", 1, "2", "", "2 "},
 	} {
 		s := swapSession()
 		mixedType(s, tc.keys)

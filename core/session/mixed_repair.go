@@ -168,18 +168,8 @@ func (s *Session) mixedRepairShown() (int, zhuyin.Syllable, bool) {
 	return at, done, ok
 }
 
-// keysReading：顯示的讀音來自沒有字母的數字、標點鍵（20 的 ㄉㄢ、. 的 ㄡ），只是空白的預覽：
-// 空白以外的定案（Enter、失焦、切英文、點注音鍵）照按鍵（#162、#187）。
-func (s *Session) keysReading() bool {
-	at, _, ok := s.mixedRepairShown()
-	return ok && s.mixed.choice == 0 && !strings.ContainsFunc(s.mixed.raw[at:], unicode.IsLetter)
-}
-
-// mixedShowsZhuyin：待定按鍵在組字區顯示成還沒打完的注音（照順序組的 ㄋㄧ，或修正讀音的 ㄙㄨ）；數字、標點鍵的讀音不算。
+// mixedShowsZhuyin：待定按鍵在組字區顯示成還沒打完的注音（照順序組的 ㄋㄧ，或照空白的決定顯示的 ㄙㄨ、20 的 ㄉㄢ）。
 func (s *Session) mixedShowsZhuyin() bool {
-	if s.keysReading() {
-		return false
-	}
 	if _, phonetic := s.mixedPending(s.mixedText()); phonetic {
 		return true
 	}
@@ -200,7 +190,7 @@ func (s *Session) eraseRepaired() bool {
 		k, _ := layout.Standard.Key(sym)
 		keys = append(keys, k)
 	}
-	s.mixed.raw, s.mixed.choice = string(keys), 0
+	s.mixed.raw, s.mixed.choice, s.mixed.edited = string(keys), 0, s.mixed.chosen // Tab、↓ 選過的退格改過：不跳小視窗
 	s.mixed.assistedPrefix = min(s.mixed.assistedPrefix, at)
 	return true
 }

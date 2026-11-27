@@ -345,9 +345,10 @@ func (s *Session) mixedSpaceAction() (rule, act mixedToneAction, visit *mixedRev
 }
 
 // spaceSure：接空白的決定有把握：規則就決定得了、只有一種切法，或神經贏其他切法 mixedPopupGap 以上。
-// 選過的注音文照習慣（i 的 ㄛ），不看空白的決定。
+// 選過的注音文照習慣（i 的 ㄛ），不看空白的決定。單一個數字鍵（5 的 ㄓ、9 的 ㄞ）多半是正要打中文的第一鍵，也不跳小視窗，
+// 要另一個按 ↓。
 func (s *Session) spaceSure() bool {
-	if s.zhuyinKeyHabit(s.mixed.raw) {
+	if raw := s.mixed.raw; len(raw) == 1 && '0' <= raw[0] && raw[0] <= '9' || s.zhuyinKeyHabit(raw) {
 		return true
 	}
 	s.mixedSpaceAction()
@@ -355,7 +356,7 @@ func (s *Session) spaceSure() bool {
 }
 
 // spaceShown：沒選過的待定按鍵接空白會組成一個中文音節、而組字區本來不會這樣顯示時，回傳切點與音節：修正讀音（gjn 的 ㄙㄨ）、
-// 切成英文＋中文（aq8 的 aㄆㄚ）、數字與單獨的 . ,（10 的 ㄅㄢ、205; 的 20ㄓㄤ、. 的 ㄡ；要數字、句點按 Enter）。
+// 切成英文＋中文（aq8 的 aㄆㄚ）、數字與單獨的 . ,（10 的 ㄅㄢ、205; 的 20ㄓㄤ、. 的 ㄡ；要數字、句點按 ↓ 選原按鍵）。
 // 使用者加的英文詞、選過的注音文照原本的顯示；有字母時整串照順序組成的（su 的 ㄋㄧ）照一般注音顯示，照順序就是注音、
 // 切開是猜的（au/ 打到一半的 名 是 ㄇㄧㄥ，不是 aㄧㄥ）也是。
 func (s *Session) spaceShown() (int, zhuyin.Syllable, bool) {

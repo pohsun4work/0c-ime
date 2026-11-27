@@ -52,9 +52,11 @@ tab-03	ssl{Tab}␣	孬	P6：Tab 換成合併冗餘音的 ㄋㄠ
 tab-04	20␣	單	保留官方（#162）
 tab-05	20{Tab}␣	20␣	P6：Tab 換成原按鍵，空白就是空白
 tab-06	gjn{Enter}	ㄙㄨ	P6：組字區顯示空白的結果 ㄙㄨ，Enter 照畫面送出
-tab-07	gjn{Tab}␣	gjn␣	P6：Tab 換成原按鍵
-tab-08	up{Tab}␣	up␣	P6：照順序組得成字的英文詞，Tab 換成原按鍵
+tab-07	gjn{Down}{pick:gjn}␣	gjn␣	P7.5：↓ 選原按鍵（有把握時沒有小視窗，Tab 不動）
+tab-08	up{Down}{pick:up}␣	up␣	P7.5：照順序組得成字的英文詞，↓ 選原按鍵
 tab-09	cpu{Enter}	cpu	P6：怎麼補都組不成音節的照英文顯示；官方 ㄏㄧㄣ
+tab-10	gjn{Tab}␣	蘇	P7.5：有把握、沒有小視窗時 Tab 不動
+tab-11	20{Enter}	ㄉㄢ	P7.5：數字的讀音 Enter 也照畫面送出
 sym-01	<	<	P4：Shift+, 打半形
 sym-02	[	[	P4；官方預設「
 sym-03	]	]	P4；官方預設」
