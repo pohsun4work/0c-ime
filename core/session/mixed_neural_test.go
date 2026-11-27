@@ -23,7 +23,8 @@ func splitSession(scores map[string]float64, seen *[]rerank.TextsRequest) *Sessi
 	lex, sys := lexicon.NewMem(), lm.NewMem()
 	for _, e := range []struct{ w, r string }{
 		{"我", "ㄨㄛˇ"}, {"你", "ㄋㄧˇ"}, {"央", "ㄧㄤ"}, {"允", "ㄩㄣˇ"}, {"分", "ㄈㄣ"}, {"嗯", "ㄣ"}, {"誰", "ㄕㄟˊ"}, {"音", "ㄧㄣ"},
-		{"停", "ㄊㄧㄥˊ"}, {"營", "ㄧㄥˊ"}, {"趴", "ㄆㄚ"},
+		{"停", "ㄊㄧㄥˊ"}, {"營", "ㄧㄥˊ"}, {"趴", "ㄆㄚ"}, {"班", "ㄅㄢ"}, {"之", "ㄓ"}, {"張", "ㄓㄤ"}, {"萬", "ㄨㄢˋ"},
+		{"斷", "ㄉㄨㄢˋ"}, {"正", "ㄓㄥˋ"},
 	} {
 		lex.Add(lexicon.Entry{Surface: e.w, Reading: zhuyin.ParseReading(e.r), PRW: 1})
 		sys.SetUni(e.w, 1e-3)
@@ -268,5 +269,94 @@ func TestMixedSpaceRetriesUndecided(t *testing.T) {
 	fail, s.mixedBusy = false, 0
 	if got := key(s, " ").Text(); got != "up " {
 		t.Errorf("空白再問神經：%q", got)
+	}
+}
+
+// 只有數字的待定按鍵（10␣ 的 班 對 10）、數字接注音（205;␣ 的 20張）、數字鍵開頭的整個音節（2j04 的 斷 對 2萬）也交給神經比。
+func TestMixedNeuralDigits(t *testing.T) {
+	for _, tc := range []struct {
+		name, keys string
+		scores     map[string]float64
+		want       string
+	}{
+		{"沒有評分器照規則", "10 ", nil, "班"},
+		{"數字照字面", "10 ", map[string]float64{"10": 0, "班": -10}, "10 "},
+		{"數字出字", "10 ", map[string]float64{"班": 0, "10": -10}, "班"},
+		// 緊接在中文後面、規則出中文的照規則（要數字多半用數字鍵盤）；規則照字面的照樣比（205; 對 20張）。
+		{"中文後面的數字照規則", "ji310 ", map[string]float64{"10": 0, "班": -10}, "我班"},
+		{"中文後面的數字鍵開頭照規則", "ji32j04", map[string]float64{"2萬": 0, "斷": -10}, "我斷"},
+		{"數字接注音", "ji3205; ", map[string]float64{"20張": 0, "205;": -10}, "我20張"},
+		{"數字鍵開頭的音節", "2j04", map[string]float64{"2萬": 0, "斷": -10}, "2萬"},
+		{"數字鍵開頭照規則", "2j04", map[string]float64{"斷": 0, "2萬": -10}, "斷"},
+		// 之 先贏；接著打的 分 讓 5 分 比較好時換回數字，空白還回來。
+		{"回頭換回數字", "5 zp ", map[string]float64{"之": 0, "5": -5, "5 分": 0, "之分": -10}, "5 分"},
+		{"數字寫法照規則", "15/4", map[string]float64{"1正": 0, "15/4": -10}, "15/4"},
+		// 後面 10␣ 的 班 也等著回頭比時，mp3 的 允 照樣等：接著打的 班 讓 mp3 翻回來（下載了 mp3 但）。
+		{"回頭比同時記兩個", "mp3 10 ", map[string]float64{"允": 0, "mp3": -5, "班": 0, "10": -3, "mp3 班": 0, "允 班": -10}, "mp3 班"},
+	} {
+		if got := repairCommit(splitSession(tc.scores, nil), tc.keys); got != tc.want {
+			t.Errorf("%s：%q 送出 %q，要 %q", tc.name, tc.keys, got, tc.want)
+		}
+	}
+	// 純中文沒有數字鍵開頭的切法時照舊不問。
+	var seen []rerank.TextsRequest
+	if repairCommit(splitSession(map[string]float64{}, &seen), "ji3"); len(seen) != 0 {
+		t.Errorf("ji3 不該問神經：%+v", seen)
+	}
+}
+
+// 回頭比同時最多等 mixedRevisitSlots 個決定，多的放掉最有把握的；前面的換掉時後面的跟著移，下一鍵照樣比。
+func TestMixedNeuralRevisitSlots(t *testing.T) {
+	s := splitSession(map[string]float64{"允": 0, "mp3": -5, "班": 0, "10": -3, "之": 0, "5": -2}, nil)
+	mixedType(s, "mp3 10  5 ")
+	var raws []string
+	for _, v := range s.mixedRevisits {
+		raws = append(raws, v.raw)
+	}
+	if !slices.Equal(raws, []string{"10", "5"}) {
+		t.Errorf("要放掉贏最多的 允：留著 %q", raws)
+	}
+	// 我 讓 mp3 翻回來（班 往後移兩格），你 再讓 10 翻回來。
+	s = splitSession(map[string]float64{"允": 0, "mp3": -5, "班": 0, "10": -3, "mp3 班我": 0, "允 班我": -10, "班我你": -10, "10 我你": 0}, nil)
+	if got := repairCommit(s, "mp3 10 ji3su3"); got != "mp3 10 我你" {
+		t.Errorf("前面換掉後面跟著移：送出 %q", got)
+	}
+}
+
+// 這一鍵已經為決定問過神經時，回頭比留到下一鍵（同一鍵評分、換字、官方重排加起來會超過期限）。
+func TestMixedNeuralRevisitWaitsAskedKey(t *testing.T) {
+	var seen []rerank.TextsRequest
+	s := splitSession(map[string]float64{"允": 0, "mp3": -5}, &seen)
+	mixedType(s, "mp3 mp")
+	n := len(seen)
+	if mixedType(s, "3"); len(seen) != n+1 {
+		t.Fatalf("決定的那一鍵只問一次：問了 %d 次", len(seen)-n)
+	}
+	if mixedType(s, "ji3"); len(seen) != n+3 {
+		t.Errorf("下一鍵兩個決定都回頭比：問了 %d 次", len(seen)-n-1)
+	}
+}
+
+// 數字的讀音提示與 Tab 照空白的決定：神經判成數字時沒有提示，Tab 換成注音、再按換回；判成中文時照 #162 提示 ㄅㄢ、Tab 固定成數字。
+func TestMixedDigitsHintFollowsSpace(t *testing.T) {
+	s := splitSession(map[string]float64{"10": 0, "班": -10}, nil)
+	if snap := mixedType(s, "10"); snap.Text() != "10" || snap.ReadingHint != nil || snap.Suggestion != "ㄅㄢ" {
+		t.Fatalf("判成數字：顯示 %q、提示 %+v、小視窗 %q", snap.Text(), snap.ReadingHint, snap.Suggestion)
+	}
+	for i, want := range []string{"ㄅㄢ", "10", "ㄅㄢ"} {
+		if got := key(s, proto.KeyTab).Text(); got != want {
+			t.Errorf("第 %d 次 Tab：%q，要 %q", i+1, got, want)
+		}
+	}
+	if got := key(s, " ").Text(); got != "班" {
+		t.Errorf("Tab 換成注音後空白：%q", got)
+	}
+
+	s = splitSession(map[string]float64{"班": 0, "10": -10}, nil)
+	if snap := mixedType(s, "10"); snap.ReadingHint == nil || snap.ReadingHint.Text != "ㄅㄢ" || snap.Suggestion != "10" {
+		t.Fatalf("判成中文：提示 %+v、小視窗 %q", snap.ReadingHint, snap.Suggestion)
+	}
+	if got := key(s, proto.KeyTab); got.Text() != "10" || got.ReadingHint != nil {
+		t.Errorf("Tab 固定成數字：%q %+v", got.Text(), got.ReadingHint)
 	}
 }
