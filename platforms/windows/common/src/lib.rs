@@ -141,6 +141,9 @@ pub struct UiMessage {
     pub kind: String,
     #[serde(default)]
     pub title: String,
+    /// 每頁最多幾個候選：直排清單打開時照一整頁決定放游標上方還是下方。舊 DLL 沒送時為 0。
+    #[serde(default)]
+    pub page_size: usize,
     /// Tab 提示：按 Tab 之後組字區結尾變成的樣子（另 → 另外、png → ㄕㄣ）。
     pub suggestion: String,
     /// 核心的一次性提示（例如「已加入詞庫：世傑」，#123），畫在最上面；幾秒後或下一鍵後消失。

@@ -92,27 +92,48 @@ func TestDownEnglishRunFullWidth(t *testing.T) {
 	}
 }
 
-// 前段照字面的字（我2萬 的 萬）Tab 換到同一串按鍵的清單：修改「2萬」列另一種切法的所有字（神經選的 段 排第一），
-// 從 2、萬 開都一樣，再 Tab 回原來那份；選 段 → 我段。
+// 同一串按鍵的清單照「修改字詞的位置」只往一個方向包：句尾和前方模式從 萬 多一步、後方模式從照字面的 2 換過去，再 Tab 回來；
+// 2|萬 兩種模式都不包 2，照字面清單換不過去就沒有標題。
 func TestTabFlipSpan(t *testing.T) {
 	scores := map[string]float64{"2萬": 0, "段": -5, "斷": -10}
+	title := func(w string) string { return "修改「" + w + "」 · Tab 切換詞長" }
 	for _, tc := range []struct {
-		name  string
-		lefts int
-		first string
-	}{{"萬|", 0, "萬"}, {"2|萬", 1, "萬"}, {"|2萬", 2, "2"}} {
+		name          string
+		keys          string
+		before        bool
+		lefts         int
+		first, header string
+		span          bool
+	}{
+		{"萬|", "ji32j04", false, 0, "萬", title("萬"), true},
+		{"前方 萬|", "ji32j04", true, 0, "萬", title("萬"), true},
+		{"前方 萬|我", "ji32j04ji3", true, 1, "萬", title("萬"), true},
+		{"|2萬", "ji32j04", false, 2, "2", title("2"), true},
+		{"後方 2|萬", "ji32j04", false, 1, "萬", title("萬"), false},
+		{"前方 2|萬", "ji32j04", true, 1, "2", "", false},
+	} {
 		s := splitSession(scores, nil)
-		if got := mixedType(s, "ji32j04").Text(); got != "我2萬" {
-			t.Fatalf("ji32j04 → %q", got)
-		}
+		s.CandidateBeforeCursor = tc.before
+		mixedType(s, tc.keys)
 		for range tc.lefts {
 			key(s, proto.KeyLeft)
 		}
-		if got := itemTexts(key(s, proto.KeyDown)); len(got) == 0 || got[0] != tc.first {
-			t.Fatalf("%s ↓：%q，要 %s 開頭", tc.name, got, tc.first)
+		snap := key(s, proto.KeyDown)
+		if got := itemTexts(snap); len(got) == 0 || got[0] != tc.first || snap.Candidates.Title != tc.header {
+			t.Fatalf("%s ↓：%q %q，要 %s 開頭、標題 %q", tc.name, snap.Candidates.Title, got, tc.first, tc.header)
 		}
-		snap := key(s, proto.KeyTab)
-		if got := itemTexts(snap); !slices.Equal(got, []string{"2萬", "段", "斷", "ㄉㄨㄢˋ"}) || snap.Candidates.Title != "修改「2萬」 · Tab 切換詞長" {
+		snap = key(s, proto.KeyTab)
+		if !tc.span {
+			if got := itemTexts(snap); s.cand == nil || s.cand.span != nil || len(got) == 0 || got[0] != tc.first {
+				t.Errorf("%s ↓ Tab 不該包到 2萬：%q", tc.name, got)
+			}
+			continue
+		}
+		want := []string{"2萬", "段", "斷", "ㄉㄨㄢˋ"}
+		if tc.keys != "ji32j04" {
+			want = []string{"2萬", "斷", "段", "ㄉㄨㄢˋ"} // 後面有 我，斷 段 照前後文排
+		}
+		if got := itemTexts(snap); !slices.Equal(got, want) || snap.Candidates.Title != title("2萬") {
 			t.Fatalf("%s ↓ Tab：%q %q", tc.name, snap.Candidates.Title, got)
 		}
 		if got := itemTexts(key(s, proto.KeyTab)); len(got) == 0 || got[0] != tc.first {
@@ -130,6 +151,18 @@ func TestTabFlipSpan(t *testing.T) {
 	key(s, proto.KeyEscape)
 	if commit := key(s, proto.KeyEnter).Commit; commit != "我段" {
 		t.Errorf("選 段 送出 %q", commit)
+	}
+}
+
+// 原按鍵只在同一串按鍵裡才列：萬我 是 j04｜ji3 兩串，沒有詞就不開這個詞長（官方行為）。
+func TestRawKeysSameRunOnly(t *testing.T) {
+	s := splitSession(map[string]float64{"2萬": 0, "段": -5}, nil)
+	mixedType(s, "ji32j04ji3")
+	key(s, proto.KeyLeft)
+	key(s, proto.KeyLeft)
+	key(s, proto.KeyDown)
+	if got := itemTexts(key(s, proto.KeyTab)); s.cand == nil || s.cand.length != 1 || len(got) == 0 || got[0] != "萬" {
+		t.Errorf("我2|萬我 ↓ Tab：%q，不該開只有 j04ji3 的清單", got)
 	}
 }
 

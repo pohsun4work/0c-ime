@@ -48,7 +48,15 @@ const WM_ZUIN_REFLOW: u32 = WM_APP + 2;
 /// 標示加詞範圍時的說明（marking）不計時，留到標示結束。
 const NOTICE_TIMER: usize = 0x0c01;
 
-type State = RefCell<Option<UiMessage>>;
+/// 畫著的訊息；above 是開著的直排清單放在游標上方還是下方，打開時照一整頁決定，清單開著、游標同一行時 Tab 換詞長、
+/// 翻頁都不換邊（P8：2 / ㄉ 兩列放下方、Tab 到九列的 修改「2萬」 跳到上方）。
+#[derive(Default)]
+struct Shown {
+    message: Option<UiMessage>,
+    above: Option<bool>,
+}
+
+type State = RefCell<Shown>;
 
 /// 註冊候選窗的視窗類別；wndproc 由呼叫端提供（DLL 要在裡面攔 panic），內容交給 [`handle`]。
 pub fn register_class(instance: HINSTANCE, class: PCWSTR, wndproc: WNDPROC) {
@@ -89,7 +97,7 @@ pub fn create(instance: HINSTANCE, class: PCWSTR, owner: Option<HWND>) -> window
             &corner as *const _ as *const c_void,
             std::mem::size_of_val(&corner) as u32,
         );
-        let state: Box<State> = Box::new(RefCell::new(None));
+        let state: Box<State> = Box::new(RefCell::default());
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as _); // `as _`：32 位元版是 SetWindowLongW（i32）
         Ok(hwnd)
     }
@@ -101,7 +109,7 @@ fn with_state<R>(hwnd: HWND, f: impl FnOnce(&State) -> R) -> Option<R> {
 }
 
 fn current(hwnd: HWND) -> Option<UiMessage> {
-    with_state(hwnd, |s| s.borrow().clone()).flatten()
+    with_state(hwnd, |s| s.borrow().message.clone()).flatten()
 }
 
 struct Theme {
@@ -491,6 +499,14 @@ fn grid_font(m: &UiMessage, t: &Theme) -> HFONT {
     }
 }
 
+/// 直排清單一整頁的高度：量好的 height 補上這頁少的候選列、頁尾與標題列（舊 DLL 沒送每頁候選數時當 10）。
+fn full_page_height(m: &UiMessage, t: &Theme, height: i32) -> i32 {
+    let missing = if m.page_size == 0 { 10 } else { m.page_size }.saturating_sub(m.candidates.len()) as i32;
+    let footer = if m.pages > 1 { 0 } else { t.small_row };
+    let title = if header_lines(m).is_empty() { t.heading_row } else { 0 };
+    height + missing * t.row + footer + title
+}
+
 // 單欄 Emoji 仍用彩色格子；量測、繪製與滑鼠命中必須採同一份幾何。
 fn uses_grid(m: &UiMessage) -> bool {
     m.columns > 1 || m.kind == "emoji"
@@ -747,10 +763,10 @@ pub fn present(hwnd: HWND, m: UiMessage) {
         if !m.show || !has_content(&m) {
             let other = with_state(hwnd, |s| {
                 let mut state = s.borrow_mut();
-                if state.as_ref().map(|current| current.owner != m.owner).unwrap_or(false) {
+                if state.message.as_ref().is_some_and(|current| current.owner != m.owner) {
                     return true;
                 }
-                *state = None;
+                *state = Shown::default();
                 false
             });
             if other != Some(true) {
@@ -767,13 +783,13 @@ pub fn present(hwnd: HWND, m: UiMessage) {
         // （照常組字、可用數字鍵選字），不出視窗；無邊框視窗由 DWM 合成，照常顯示（見 yields_to）。
         if exclusive_fullscreen(foreground) {
             let _ = KillTimer(Some(hwnd), NOTICE_TIMER);
-            with_state(hwnd, |s| *s.borrow_mut() = None);
+            with_state(hwnd, |s| *s.borrow_mut() = Shown::default());
             let _ = ShowWindow(hwnd, SW_HIDE);
             return;
         }
         let dpi = GetDpiForWindow(hwnd);
         let t = theme(dpi, compact(&m));
-        // 位置：游標下方；放不下就放上方；不超出該螢幕的工作區。
+        // 位置：游標下方；放不下就放上方（直排清單照一整頁、開著時不換邊，見 Shown）；不超出該螢幕的工作區。
         let monitor = MonitorFromPoint(POINT { x: m.x, y: m.y }, MONITOR_DEFAULTTONEAREST);
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
@@ -795,18 +811,36 @@ pub fn present(hwnd: HWND, m: UiMessage) {
         height += t.pad;
         width = width.max(t.row * 3);
         // Emoji 的單欄退回也使用同一個彩色字型路徑。
-        if uses_grid(&m) {
+        let grid = uses_grid(&m);
+        if grid {
             (width, height) = grid_size(&m, info.rcWork.right - info.rcWork.left, &t, hdc);
         }
         ReleaseDC(Some(hwnd), hdc);
-        let bounds = placement::place(m.x, m.y, m.h, t.gap, width, height, info.rcWork);
+        let list = !m.candidates.is_empty() && !grid;
+        let kept = with_state(hwnd, |s| {
+            let s = s.borrow();
+            s.above
+                .filter(|_| s.message.as_ref().is_some_and(|p| p.owner == m.owner && p.y == m.y && p.h == m.h))
+        })
+        .flatten();
+        let work = info.rcWork;
+        let above = match kept {
+            Some(above) if list && placement::fits(m.y, m.h, t.gap, height, above, work) => above,
+            _ => !placement::fits(m.y, m.h, t.gap, if list { full_page_height(&m, &t, height) } else { height }, false, work),
+        };
+        let bounds = placement::place(m.x, m.y, m.h, t.gap, width, height, above, work);
         // 提示幾秒後自動收起（WM_TIMER）；每次新的提示重新計時，沒有提示或標示中的說明就不計時。
         if notice_expires(&m) {
             SetTimer(Some(hwnd), NOTICE_TIMER, NOTICE_MS, None);
         } else {
             let _ = KillTimer(Some(hwnd), NOTICE_TIMER);
         }
-        with_state(hwnd, |s| *s.borrow_mut() = Some(m));
+        with_state(hwnd, |s| {
+            *s.borrow_mut() = Shown {
+                message: Some(m),
+                above: list.then_some(above),
+            }
+        });
         let _ = SetWindowPos(
             hwnd,
             Some(HWND_TOPMOST),

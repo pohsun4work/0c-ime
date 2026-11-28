@@ -165,13 +165,15 @@ func (s *Session) shiftMixedKeys(at, delta int) {
 	s.mixedKeys = shiftKeys(s.mixedKeys, at, delta)
 }
 
+// originalMixedKeys：[pos, pos+length) 是同一串按鍵打的時回傳原按鍵；中間有音節結算（億美 的 u4｜ao3）就不是想打的英數，回空字串。
 func (s *Session) originalMixedKeys(pos, length int) string {
 	var keys strings.Builder
 	for at := pos; at < pos+length; at++ {
-		if s.mixedKeys[at] == "" {
+		k := s.mixedKeys[at]
+		if k == "" || at < pos+length-1 && settles(k) {
 			return ""
 		}
-		keys.WriteString(s.mixedKeys[at])
+		keys.WriteString(k)
 	}
 	return keys.String()
 }
@@ -1464,7 +1466,7 @@ func (s *Session) positionalKeysIn(pos, length int) bool {
 		if keys == "" {
 			continue
 		}
-		if sym, ok := layout.Standard.Symbol(rune(keys[len(keys)-1])); keys[len(keys)-1] == ' ' || ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
+		if settles(keys) {
 			keys = keys[:len(keys)-1]
 		}
 		if keys != "" && !s.keysInSyllableOrder(keys) {
@@ -1472,6 +1474,15 @@ func (s *Session) positionalKeysIn(pos, length int) bool {
 		}
 	}
 	return false
+}
+
+// settles：按鍵以聲調鍵（含一聲的空白）結尾，同一串按鍵到這個音節為止。
+func settles(keys string) bool {
+	if keys == "" {
+		return false
+	}
+	sym, ok := layout.Standard.Symbol(rune(keys[len(keys)-1]))
+	return ok && zhuyin.ClassOf(sym) == zhuyin.Tone
 }
 
 // digitAfterAlnumKeys（#249）：at 是數字鍵開頭打出的字，緊接在照字面的數字後面（h264 的 2k7、Q2 的 2k7，mixedAfterAlnum 從數字裡切開）：

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/0c-biggo/0c-ime/core/english"
@@ -67,15 +68,15 @@ func TestMixedPositionalKeysOnFirstPage(t *testing.T) {
 	}
 }
 
-// #274：照位置組出的字在詞裡（cl3k27 的「好的」）時，↓ 先開的單字清單 k27 排第二，Tab 換成的詞清單第二個是整串原按鍵。
+// #274：照位置組出的字在詞裡（cl3k27 的「好的」）時，↓ 先開的單字清單 k27 排第二；Tab 換成的詞清單跨 cl3｜k27 兩串，不列整串原按鍵（P8）。
 func TestMixedPositionalKeysInWordOnFirstPage(t *testing.T) {
 	s := positionalKeysSession()
 	mixedType(s, "cl3k27")
 	if got := itemTexts(key(s, proto.KeyDown)); len(got) < 2 || got[0] != "的" || got[1] != "k27" {
 		t.Errorf("cl3k27 按 ↓：%q，要第一個 的、第二個 k27", got)
 	}
-	if got := itemTexts(key(s, proto.KeyTab)); len(got) < 2 || got[0] != "好的" || got[1] != "cl3k27" {
-		t.Fatalf("cl3k27 按 ↓ Tab：%q，要第一個 好的、第二個 cl3k27", got)
+	if got := itemTexts(key(s, proto.KeyTab)); len(got) == 0 || got[0] != "好的" || slices.Contains(got, "cl3k27") {
+		t.Fatalf("cl3k27 按 ↓ Tab：%q，要 好的 開頭、沒有 cl3k27", got)
 	}
 }
 

@@ -1461,8 +1461,8 @@ func shownFirst(items []decode.Candidate, matched []string, shown string, readin
 func (s *Session) pages() int { return (len(s.cand.items) + s.pageSize() - 1) / s.pageSize() }
 
 // 候選開啟時 Tab 切至下一個較長詞長（d=1），最長後回到最短；Shift+Tab 反過來（d=-1）。不接受補全或提交。
-// 單字是神經判過、前段照字面的字（2萬 的 萬）時，單字之後多一步同一串按鍵的清單（修改「2萬」）；
-// 前段的照字面清單（市值|2萬 的 2 / ㄉ）Tab 也換到那份，再 Tab 回來。
+// 同一串按鍵的清單（修改「2萬」）照「修改字詞的位置」只往一個方向包：前方模式（含句尾）從 萬 的單字多一步，
+// 後方模式從前段的照字面清單（市值|2萬 的 2 / ㄉ）換過去，再 Tab 回來；市值2|萬 兩種模式都不包 2。
 func (s *Session) cycleCandidateLength(d int) {
 	c := s.cand
 	if c == nil || c.mixed {
@@ -1473,21 +1473,16 @@ func (s *Session) cycleCandidateLength(d int) {
 		return
 	}
 	if c.literal {
-		if q, ok := s.literalPrefixOf(c.start, c.length); ok {
-			s.openFlipSpan(q, spanBack{literal: true, at: c.start}, false)
+		if q, ok := s.flipFromLiteral(); ok {
+			s.openFlipSpan(q, spanBack{literal: true, at: c.start})
 		}
 		return
 	}
 	anchor, before := c.start, c.before
-	switch {
-	case c.span != nil:
-		anchor = c.span.at
-	case before:
-		anchor = c.start + c.length
-	}
-	maxLen, single := min(decode.MaxLen(s.dec.Lex), len(s.syls)-anchor), anchor
+	maxLen := min(decode.MaxLen(s.dec.Lex), len(s.syls)-anchor)
 	if before {
-		maxLen, single = min(decode.MaxLen(s.dec.Lex), anchor), anchor-1
+		anchor = c.start + c.length
+		maxLen = min(decode.MaxLen(s.dec.Lex), anchor)
 	}
 	// 步驟 0 是單字，1 是同一串按鍵的清單，k ≥ 2 是 k 個字的詞。
 	step := c.length
@@ -1499,7 +1494,7 @@ func (s *Session) cycleCandidateLength(d int) {
 	n := maxLen + 1
 	for i := 1; i <= n; i++ {
 		next := ((step+d*i)%n + n) % n
-		if next == 1 && s.openFlipSpan(single, spanBack{at: anchor}, before) || next != 1 && s.openAnchored(anchor, max(next, 1), before) {
+		if next == 1 && before && s.openFlipSpan(anchor-1, spanBack{}) || next != 1 && s.openAnchored(anchor, max(next, 1), before) {
 			return
 		}
 	}
@@ -1823,17 +1818,18 @@ func (s *Session) snapshot() proto.Snapshot {
 		tail(len([]rune(h.replace)), h.text) // 神經次佳候選，按 Tab 才接受
 	}
 	if s.cand != nil {
-		cl := &proto.CandidateList{Page: s.candidatePage(), Pages: s.pages(), Start: s.cand.start, Length: s.cand.length, Highlight: s.cand.cursor % s.pageSize(), Columns: s.candidateColumns(), Kind: s.cand.kind}
+		cl := &proto.CandidateList{Page: s.candidatePage(), Pages: s.pages(), Start: s.cand.start, Length: s.cand.length, Highlight: s.cand.cursor % s.pageSize(), Columns: s.candidateColumns(), Kind: s.cand.kind, PageSize: s.pageSize()}
 		if cl.Columns == 1 {
 			cl.Columns = 0
 		}
 		if s.cand.english {
-			cl.Title = "按 Tab 補全或修正拼字 · Esc 關閉"
+			cl.Title, cl.PageSize = "按 Tab 補全或修正拼字 · Esc 關閉", englishCandidateLimit
 		}
 		if cl.Kind != "" {
 			cl.Title = s.paletteTitle()
 		}
-		if !s.cand.literal && !s.cand.mixed && cl.Length > 0 {
+		// 照字面清單只有 Tab 換得到同一串按鍵的清單時才有標題（市值|2萬 的 2 / ㄉ）。
+		if _, span := s.flipFromLiteral(); !s.cand.mixed && cl.Length > 0 && (!s.cand.literal || span) {
 			cl.Title = "修改「" + s.candidateText() + "」 · Tab 切換詞長"
 		}
 		// 選字鍵含 j、k（asdfghjkl;）時它們是選字，不是換字。
