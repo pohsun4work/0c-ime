@@ -7,7 +7,7 @@ import (
 )
 
 // #193：候選窗開著時，小寫 j 往前、k 往後換要修改的字（照新酷音），不必 Esc → ← → 再開候選。
-// 新位置照 ↓ 開候選的規則：前方／後方模式、優先用現有分詞；已在頭尾時不動。
+// 新位置照 ↓ 開候選的規則：前方／後方模式、先開單字（P8）；已在頭尾時不動。
 
 func jkSession(before bool) *Session {
 	s := cursorSession()
@@ -66,11 +66,10 @@ func TestCandidateJKFromSentenceEndInAfterCursorMode(t *testing.T) {
 	jkWalk(t, s, "kjjk", [][2]int{{2, 1}, {1, 1}, {0, 1}, {1, 1}})
 }
 
-// 有現成分詞時 j／k 一次換一個詞，換到的詞照設定的那一側開（#193 BD-0e2d73 回信）：前方模式游標在詞後、
-// 選結束在游標的詞；後方模式游標在詞前、選從游標開始的詞。兩種模式走過的詞一樣，跟把游標放在詞的那一側再按 ↓ 相同。
-// 以前一次只移一個字，前方模式從「風景」按 j 會停在「風」（詞的前半），後方模式從句尾的「好」按 j 會停在「景」（詞的後半），
-// 從後面往前改時每個兩字詞都要多按一次，而且開出來的範圍跟 ↓ 的起點不同。
-func TestCandidateJKStepsWholeWordsOnTheSettingSide(t *testing.T) {
+// ↓ 一律先開單字（P8），j／k 也一次換一個字、照設定的那一側開：前方模式游標在字後，後方模式游標在字前，
+// 跟把游標放在那裡再按 ↓ 相同（官方 #193 BD-0e2d73 一次換一個詞，是配合 ↓ 先開現有分詞）。
+// Tab 換成詞之後，j／k 換到詞前、詞後的那個字。
+func TestCandidateJKStepsOneCharacterOnTheSettingSide(t *testing.T) {
 	setup := func(before bool) *Session {
 		s := cursorSession()
 		for _, syl := range []string{"ㄨㄛˇ", "ㄈㄥ", "ㄐㄧㄥˇ", "ㄏㄠˇ"} {
@@ -94,38 +93,38 @@ func TestCandidateJKStepsWholeWordsOnTheSettingSide(t *testing.T) {
 			t.Fatalf("before=%v cursor %d, want %d on the setting side of %+v", s.CandidateBeforeCursor, c.Cursor.Rune, at, c.Candidates)
 		}
 	}
-	// 後方模式從頭往後：我 → 風景 → 好，尾端不動；再往前回到 風景 → 我。
+	// 後方模式從頭往後：我 → 風 → 景 → 好，尾端不動；再往前回到 景 → 風。
 	s := setup(false)
 	s.Handle(proto.Request{Type: proto.Cursor, To: 0})
 	cursorRange(t, key(s, proto.KeyDown), 0, 1)
-	walk(t, s, "kkkjj", [][2]int{{1, 2}, {3, 1}, {3, 1}, {1, 2}, {0, 1}})
+	walk(t, s, "kkkkjj", [][2]int{{1, 1}, {2, 1}, {3, 1}, {3, 1}, {2, 1}, {1, 1}})
 
-	// 後方模式打完一句在句尾開候選（照規則改前方的詞）：j 換到前一個詞「風景」、游標放到詞前，不是「景」。
+	// 後方模式打完一句在句尾開候選（前方的字）：j 換到前一個字「景」、游標放到字前。
 	s = setup(false)
 	s.Handle(proto.Request{Type: proto.Cursor, To: 4})
 	cursorRange(t, key(s, proto.KeyDown), 3, 1)
-	walk(t, s, "jjj", [][2]int{{1, 2}, {0, 1}, {0, 1}})
+	walk(t, s, "jjjj", [][2]int{{2, 1}, {1, 1}, {0, 1}, {0, 1}})
 
-	// 前方模式從句尾往前：好 → 風景 → 我，頭不動；再往後回到 風景 → 好，尾端不動。
+	// 前方模式從句尾往前：好 → 景 → 風 → 我，頭不動；再往後回到 風 → 景。
 	s = setup(true)
 	s.Handle(proto.Request{Type: proto.Cursor, To: 4})
 	cursorRange(t, key(s, proto.KeyDown), 3, 1)
-	walk(t, s, "jjjkkk", [][2]int{{1, 2}, {0, 1}, {0, 1}, {1, 2}, {3, 1}, {3, 1}})
-	key(s, "j")
-	snap := cursorChoose(t, s, s.snapshot(), "風井")
+	walk(t, s, "jjjjkk", [][2]int{{2, 1}, {1, 1}, {0, 1}, {0, 1}, {1, 1}, {2, 1}})
+	snap := cursorChoose(t, s, s.snapshot(), "井")
 	if snap.Text() != "我風井好" || snap.Cursor.Rune != 3 {
 		t.Fatalf("%+v", snap)
 	}
 
-	// 游標在詞中間時 ↓ 照舊選半個詞；j／k 從那裡換到相鄰的整個詞。
-	s = setup(true)
-	s.Handle(proto.Request{Type: proto.Cursor, To: 2})
-	cursorRange(t, key(s, proto.KeyDown), 1, 1)
-	walk(t, s, "kj", [][2]int{{1, 2}, {0, 1}})
-	s = setup(false)
-	s.Handle(proto.Request{Type: proto.Cursor, To: 2})
-	cursorRange(t, key(s, proto.KeyDown), 2, 1)
-	walk(t, s, "jk", [][2]int{{1, 2}, {3, 1}})
+	// Tab 換成詞之後，j／k 換到詞前、詞後的那個字。
+	for _, before := range []bool{false, true} {
+		for _, k := range []string{"k", "j"} {
+			s = setup(before)
+			s.Handle(proto.Request{Type: proto.Cursor, To: map[bool]int{false: 1, true: 3}[before]}) // 詞前／詞後
+			key(s, proto.KeyDown)
+			cursorRange(t, key(s, proto.KeyTab), 1, 2)
+			walk(t, s, k, [][2]int{map[string][2]int{"k": {3, 1}, "j": {0, 1}}[k]})
+		}
+	}
 }
 
 // 標點、英文等原樣文字整段算一格，換到它時跟 ↓ 一樣開符號候選。

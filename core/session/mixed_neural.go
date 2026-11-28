@@ -307,6 +307,7 @@ func (s *Session) replaceMixed(v *mixedRevisit, sp mixedSplit) {
 	} else {
 		s.insertMixedPrefix(v.raw[:sp.at], false, false)
 		s.insertMixedSyllables(sp.syls, v.raw[sp.at:]+v.key)
+		s.markJudged(v.start, v.raw[:sp.at])
 	}
 	s.allowRerank = allow
 	for _, o := range s.mixedRevisits {
@@ -412,8 +413,8 @@ func (s *Session) mixedNeuralWanted(act mixedToneAction, raw, key string) bool {
 	if full := s.literalNumberBefore() + strings.TrimSuffix(raw+key, " "); act.kind != mixedToneSyllable && numberLike(full) && strings.ContainsAny(full, ".,:/-") {
 		return false
 	}
-	// 數字鍵緊接在中文後面、規則整串組成中文的照規則（帶個 10␣ 是 班、可是要 2j04 是 斷）：要數字多半用數字鍵盤打。
-	if act.kind == mixedToneSyllable && act.at == 0 && raw[0] >= '0' && raw[0] <= '9' && s.mixedAfterChinese() {
+	// 純數字緊接在中文後面、規則整串組成中文的照規則（帶個 10␣ 是 班、上 10␣ 是 上班）；後面有注音字母的（可是要 2j04 的 斷 對 2萬）照樣問。
+	if act.kind == mixedToneSyllable && act.at == 0 && raw[0] >= '0' && raw[0] <= '9' && !strings.ContainsFunc(raw, unicode.IsLetter) && s.mixedAfterChinese() {
 		return false
 	}
 	if !strings.ContainsFunc(raw, unicode.IsLetter) {

@@ -113,6 +113,9 @@ func (s *Session) englishKey(k string) (handled bool, commit string, active bool
 	return false, commit, true
 }
 
+// englishCandidateLimit：英文自動補字最多幾項，也是快照的每頁候選數。
+const englishCandidateLimit = 6
+
 func (s *Session) refreshEnglishCandidates() {
 	if !s.englishWord || s.englishDismissed || s.mixed.accepted != "" || s.private || s.paused || len(s.mixed.raw) < 2 {
 		if s.cand != nil && s.cand.english {
@@ -124,20 +127,19 @@ func (s *Session) refreshEnglishCandidates() {
 		return
 	}
 	c := &candState{start: s.cursor, mixed: true, english: true}
-	const limit = 6
 	// Request one extra prefix because an exact match is not a completion.
 	var prefixes, corrections []english.Candidate
 	seen := map[string]bool{}
 	// 「我的詞」排在字典前面，照詞條字面（#247）。只差大小寫也算建議（pcloud → pCloud），
 	// 和打的完全相同才不是；ls 和 LS 是兩個詞，兩個都列。
-	for _, word := range s.vocabEnglishWords(s.mixed.raw, limit+1) {
-		if word != s.mixed.raw && len(prefixes) < limit {
+	for _, word := range s.vocabEnglishWords(s.mixed.raw, englishCandidateLimit+1) {
+		if word != s.mixed.raw && len(prefixes) < englishCandidateLimit {
 			prefixes = append(prefixes, english.Candidate{Text: word})
 			seen[strings.ToLower(word)] = true
 		}
 	}
-	for _, word := range s.englishPrefix(s.mixed.raw, limit+1+len(prefixes)) {
-		if len(prefixes) == limit {
+	for _, word := range s.englishPrefix(s.mixed.raw, englishCandidateLimit+1+len(prefixes)) {
+		if len(prefixes) == englishCandidateLimit {
 			break
 		}
 		if folded := strings.ToLower(word.Text); len(word.Text) > len(s.mixed.raw) && !seen[folded] {
@@ -149,7 +151,7 @@ func (s *Session) refreshEnglishCandidates() {
 	// corrections while keeping prefix completion first for an unfinished word.
 	// 親手加進「我的詞」的拼法和字典、學到的拼法一樣不修正。
 	if !s.vocabEnglish(s.mixed.raw) {
-		for _, word := range s.englishCorrections(s.mixed.raw, limit+3) {
+		for _, word := range s.englishCorrections(s.mixed.raw, englishCandidateLimit+3) {
 			folded := strings.ToLower(word.Text)
 			if !seen[folded] {
 				seen[folded] = true
@@ -160,7 +162,7 @@ func (s *Session) refreshEnglishCandidates() {
 			}
 		}
 	}
-	prefixCount := min(len(prefixes), limit-len(corrections))
+	prefixCount := min(len(prefixes), englishCandidateLimit-len(corrections))
 	for _, word := range prefixes[:prefixCount] {
 		c.items = append(c.items, rawCandidate(word.Text))
 	}

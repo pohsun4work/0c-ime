@@ -305,7 +305,7 @@ func (s *Session) openSyllableLiteral(p pendingLiteral) {
 
 // syllableChars 依 at 前一個字的語境排序，列出完整音節 syl 自己的字；只能當詞頭（#107）或沒打聲調的（#150）沒有。
 func (s *Session) syllableChars(syl zhuyin.Syllable, at int) []string {
-	if syl.Untoned() || len(s.model.Source().Exact([]zhuyin.Syllable{syl})) == 0 {
+	if !s.hasSyllableChars(syl) {
 		return nil
 	}
 	left, _ := s.zhuyinLeft(at)
@@ -315,6 +315,11 @@ func (s *Session) syllableChars(syl zhuyin.Syllable, at int) []string {
 		out = append(out, c.Entry.Surface)
 	}
 	return out
+}
+
+// hasSyllableChars：syllableChars 有沒有字，不排序。
+func (s *Session) hasSyllableChars(syl zhuyin.Syllable) bool {
+	return !syl.Untoned() && len(s.model.Source().Exact([]zhuyin.Syllable{syl})) > 0
 }
 
 // selectSyllableChar 把原樣音節換回一般音節並鎖定選的字 word，原按鍵（5␣）照舊記在這格，↓ 第二項仍是它。

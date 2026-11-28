@@ -20,6 +20,7 @@ import (
 	"github.com/0c-biggo/0c-ime/core/input"
 	"github.com/0c-biggo/0c-ime/core/inputstyle"
 	"github.com/0c-biggo/0c-ime/core/layout"
+	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/personal"
 	"github.com/0c-biggo/0c-ime/core/proto"
 	"github.com/0c-biggo/0c-ime/core/punct"
@@ -34,46 +35,32 @@ type candState struct {
 	start, length int
 	before        bool // 前方模式：詞長變動仍以原來的尾端為界，向左延伸
 	items         []decode.Candidate
-	cursor        int             // 反白的候選（items 的索引）；頁碼由它推得
-	literal       bool            // 符號候選：插入或替換字面文字，不作為詞彙學習
-	pending       bool            // 選取後消耗尚未完成的注音；取消時保留
-	raw           bool            // 一音節漢字候選的最後一項是原樣注音
-	matched       []string        // 與 items 等長（或 nil）：近音候選在詞庫中的讀音，原音為空字串
-	labels        []string        // 開啟候選時算一次的顯示原因；不隨反白或翻頁改變
-	english       bool            // 英文模式的自動補字候選
-	mixed         bool            // 尚未定案的中英按鍵候選，保留原始按鍵
-	keyLiterals   map[int]string  // candidate index → original physical keys for a phonetic span
-	mixedChars    map[int]string  // 中英按鍵候選裡的中文字（#146）：candidate index → 字，讀音是 mixedSyl
-	mixedAt       int             // mixedChars 的按鍵從待定按鍵的這個位置起，前段照字面
-	mixedSyl      zhuyin.Syllable // mixedChars 的讀音
-	syllable      *pendingLiteral // 原樣留下的音節（#109）：選項是同讀音的各聲調，選入後仍是原樣音節
-	chars         int             // 原樣音節自己有字時（#296），items[chars:] 是這個讀音的字，選了換回一般的字；0 表示沒有
+	cursor        int              // 反白的候選（items 的索引）；頁碼由它推得
+	literal       bool             // 符號候選：插入或替換字面文字，不作為詞彙學習
+	pending       bool             // 選取後消耗尚未完成的注音；取消時保留
+	raw           bool             // 一音節漢字候選的最後一項是原樣注音
+	matched       []string         // 與 items 等長（或 nil）：近音候選在詞庫中的讀音，原音為空字串
+	labels        []string         // 開啟候選時算一次的顯示原因；不隨反白或翻頁改變
+	english       bool             // 英文模式的自動補字候選
+	mixed         bool             // 尚未定案的中英按鍵候選，保留原始按鍵
+	keyLiterals   map[int]string   // candidate index → original physical keys for a phonetic span
+	mixedChars    map[int]string   // 中英按鍵候選裡的中文字（#146）：candidate index → 字，讀音是 mixedSyl
+	mixedAt       int              // mixedChars 的按鍵從待定按鍵的這個位置起，前段照字面
+	mixedSyl      zhuyin.Syllable  // mixedChars 的讀音
+	syllable      *pendingLiteral  // 原樣留下的音節（#109）：選項是同讀音的各聲調，選入後仍是原樣音節
+	chars         int              // 原樣音節自己有字時（#296），items[chars:] 是這個讀音的字，選了換回一般的字；0 表示沒有
+	flips         map[int]flipPick // ↓ 翻邊（P8）：candidate index → 換法（切法 2萬、英數組得出的 孬）
+	span          *spanBack        // 同一串按鍵的清單（修改「2萬」，openFlipSpan）：Tab 回去的清單
 	kind          string
 	direct        bool  // empty composition: selection commits once.
 	ids           []int // stable palette IDs, independent of recent order.
-	// split > 0 時是混合清單（#161）：items[:split] 是 start/length 的詞，items[split:] 接著列
-	// 游標那個字（位置 single）的單字候選，翻頁就看得到，不必先按 Tab 換到單字。
-	split  int
-	single int
 }
 
 func (s *Session) candidatePage() int { return s.cand.cursor / s.pageSize() }
 
-// span 回報第 id 項候選替換的組字範圍：混合清單的單字項目只替換游標那個字。
-func (c *candState) span(id int) (start, length int) {
-	if c.split > 0 && id >= c.split {
-		return c.single, 1
-	}
-	return c.start, c.length
-}
-
-// hasExact 回報目前詞長是否有原音候選（非近音）；混合清單接在後面的單字不算。
+// hasExact 回報目前詞長是否有原音候選（非近音）。
 func (c *candState) hasExact() bool {
-	n := len(c.items)
-	if c.split > 0 {
-		n = c.split
-	}
-	for i := range n {
+	for i := range c.items {
 		if i >= len(c.matched) || c.matched[i] == "" {
 			return true
 		}
@@ -140,7 +127,7 @@ type Session struct {
 	englishSpaceCommit    bool // 英文模式這個字是按空白送出的：後面還會接著打，不是單獨打完的一串（#328）
 	mixed                 pendingKeys
 	mixedKeys             map[int]string      // completed phonetic position → original keys, retained until edited/committed
-	mixedOrigins          map[int]mixedOrigin // literal positions: independently typed vs system-assisted
+	mixedOrigins          map[int]mixedOrigin // 字面文字：使用者打的或系統補的；音節：選過的注音文、神經判過的（P8）
 	mixedRevisits         []*mixedRevisit     // 神經比過、之後帶著後文再比一次的混打決定（P7，最多 mixedRevisitSlots 個）
 	mixedSpent            time.Duration       // 這個請求裡 P7 花掉的時間（每鍵預算 mixedNeuralDeadline）
 	mixedAsked            bool                // 這個請求裡已經為決定問過神經：回頭比留到下一鍵
@@ -292,8 +279,9 @@ func (s *Session) Handle(r proto.Request) proto.Snapshot {
 		s.untonedRun = nil
 	}
 	_, keypad := proto.KeypadChar(r.Key)
+	_, ctrlPunct := proto.CtrlPunct(r.Key) // 全形標點也是打字：不重排的話插入標點後整段退回統計選字，打完 。 就 Enter 送出的是統計的結果
 	s.mixedSpent, s.mixedAsked = 0, false
-	s.allowRerank = r.Type == proto.Symbol || r.Type == proto.Backspace || r.Type == proto.Key && (len([]rune(r.Key)) == 1 || keypad || r.Key == proto.KeyBackspace)
+	s.allowRerank = r.Type == proto.Symbol || r.Type == proto.Backspace || r.Type == proto.Key && (len([]rune(r.Key)) == 1 || keypad || ctrlPunct || r.Key == proto.KeyBackspace)
 	defer func() { s.allowRerank = false }()
 	if s.allowRerank && s.mixedBusy > 0 {
 		s.mixedBusy--
@@ -603,7 +591,7 @@ func (s *Session) key(k string) (handled bool, commit string) {
 		case proto.KeyHome:
 			s.cand.cursor = 0 // 第一個候選（#106）
 		case proto.KeyEnd:
-			s.cand.cursor = len(s.cand.items) - 1 // 清單的最後一個候選（混合清單是單字的原樣注音）
+			s.cand.cursor = len(s.cand.items) - 1 // 清單的最後一個候選
 		case proto.KeyTab:
 			switch s.InputStyle.CandidateTab {
 			case "grid":
@@ -1065,13 +1053,21 @@ func (s *Session) signature() string {
 	if s.Fuzzy.AutoEnabled() { // 自動修正的規則、模式與門檻都決定顯示路徑；關閉時簽章與沒有此功能時相同
 		b.WriteString("fuzzy:" + s.Fuzzy.Key() + ":" + fmt.Sprintf("%v", s.Opt.FuzzyAuto) + "|")
 	}
-	starts := make([]int, 0, len(s.locks))
-	for st := range s.locks {
-		starts = append(starts, st)
+	writeLocks(&b, s.locks)
+	for i := range s.syls {
+		if s.literals[i] {
+			b.WriteString("literal:")
+			b.WriteString(strconv.Itoa(i))
+			b.WriteByte(';')
+		}
 	}
-	sort.Ints(starts)
-	for _, st := range starts {
-		l := s.locks[st]
+	return b.String()
+}
+
+// writeLocks 依位置順序寫入鎖定的全部欄位。
+func writeLocks(b *strings.Builder, locks map[int]decode.Lock) {
+	for _, st := range slices.Sorted(maps.Keys(locks)) {
+		l := locks[st]
 		b.WriteString(strconv.Itoa(st))
 		b.WriteByte(':')
 		b.WriteString(l.Word)
@@ -1085,14 +1081,6 @@ func (s *Session) signature() string {
 		b.WriteString(l.Matched)
 		b.WriteByte(';')
 	}
-	for i := range s.syls {
-		if s.literals[i] {
-			b.WriteString("literal:")
-			b.WriteString(strconv.Itoa(i))
-			b.WriteByte(';')
-		}
-	}
-	return b.String()
 }
 
 func (s *Session) refresh() {
@@ -1216,61 +1204,42 @@ func (s *Session) openCandidates(length int) {
 		pos = max(0, s.cursor-1)
 	}
 	if s.literals[pos] {
-		if p, ok := s.syllableLiteralAt(pos); ok {
-			s.openSyllableLiteral(p)
-			return
-		}
-		start := s.literalFloor(pos)
-		end := s.literalStep(start, 1)
-		var text strings.Builder
-		for _, r := range s.syls[start:end] {
-			text.WriteString(string(r))
-		}
-		alternatives := literalAlternatives(text.String())
-		s.openSymbols(s.literalKeyAlternatives(alternatives, start, end-start), start, end-start, false)
+		s.openLiteralAt(pos)
 		return
 	}
 	anchor := pos
 	if before {
 		anchor = pos + 1
 	}
-	open := func(length int) bool { return s.openAnchored(anchor, length, before) }
-	if length > 0 {
-		open(length)
-		return
+	if length == 0 {
+		length = 1 // ↓ 一律先開游標旁那一個字（我｜說不上 是「說」、說｜不上 是「不」），Tab 才換更長（P8）
 	}
-	// 以游標所指的現有分詞為優先。前方模式選詞首到游標，後方模式選游標到詞尾；
-	// 游標在詞的兩端時可重選整詞，Tab 與上下鍵保留其他詞長。
-	s.refresh()
-	for _, g := range s.path {
-		if g.Start <= pos && pos < g.End {
-			length := g.End - pos
-			if before {
-				length = anchor - g.Start
-			}
-			if open(length) {
-				return
-			}
-		}
-	}
-	// 沒有現成分詞時由最長的詞長找起。只有「也有原音候選」的詞長才算數，所以與沒有模糊音時
-	// 選同一個詞長；只有近音的詞長仍可用 Tab 或方向鍵切換進入。
-	maxLen := min(decode.MaxLen(s.dec.Lex), len(s.syls)-pos)
-	if before {
-		maxLen = min(decode.MaxLen(s.dec.Lex), anchor)
-	}
-	for l := maxLen; l >= 1; l-- {
-		if open(l) && (l == 1 || s.cand.hasExact()) {
-			return
-		}
-	}
+	s.openAnchored(anchor, length, before)
 }
 
-// stepCandidate 把要修改的詞往前（d=-1，j）或往後（d=1，k）換一個並重開候選（#193，照新酷音）：
-// 不必 Esc、←／→、再 ↓。換到的是緊鄰目前候選範圍的那個詞（現有分詞；標點等原樣文字整段算一個），
-// 游標放到「修改字詞的位置」那一側再照 ↓ 的規則開窗：前方模式放在詞尾、選結束在游標的詞，
-// 後方模式放在詞首、選從游標開始的詞。兩種模式走過的詞一樣，換到的範圍都跟把游標放在那裡按 ↓ 相同，
-// 不會停在詞的一半（以前一次移一個字，前方模式按 j 從「風景」到「風」、後方模式從句尾的「好」到「景」，BD-0e2d73）。
+// openLiteralAt 開 pos 那格照字面文字的候選：原樣音節的各聲調、英數組得出的字（openRunFlips）、符號的全半形與原按鍵。
+func (s *Session) openLiteralAt(pos int) {
+	if p, ok := s.syllableLiteralAt(pos); ok {
+		s.openSyllableLiteral(p)
+		return
+	}
+	if s.openRunFlips(pos) {
+		return
+	}
+	start := s.literalFloor(pos)
+	end := s.literalStep(start, 1)
+	var text strings.Builder
+	for _, r := range s.syls[start:end] {
+		text.WriteString(string(r))
+	}
+	alternatives := literalAlternatives(text.String())
+	s.openSymbols(s.literalKeyAlternatives(alternatives, start, end-start), start, end-start, false)
+}
+
+// stepCandidate 把要修改的字往前（d=-1，j）或往後（d=1，k）換一個並重開候選（#193，照新酷音）：
+// 不必 Esc、←／→、再 ↓。換到的是緊鄰目前候選範圍的那個字（標點等原樣文字整段算一個），
+// 游標放到「修改字詞的位置」那一側再照 ↓ 的規則開窗（前方模式在字後、後方模式在字前）。
+// ↓ 一律先開單字（P8），所以一次換一個字（官方 BD-0e2d73 一次換一個詞是配合 ↓ 先開現有分詞）。
 // 後方模式在句尾開的前方候選也照後方模式往前換。已在頭尾時不動。
 // 只用於改字的候選：Emoji／顏文字、中英混打的按鍵候選、注音打到一半的符號候選都不套用。
 func (s *Session) stepCandidate(d int) {
@@ -1286,38 +1255,13 @@ func (s *Session) stepCandidate(d int) {
 	case d < 0 && s.CandidateBeforeCursor:
 		s.cursor = start
 	case d < 0:
-		s.cursor = s.unitStart(start - 1)
+		s.cursor = s.literalFloor(start - 1)
 	case s.CandidateBeforeCursor:
-		s.cursor = s.unitEnd(end)
+		s.cursor = s.literalStep(s.literalFloor(end), 1)
 	default:
 		s.cursor = end
 	}
 	s.openCandidates(0)
-}
-
-// unitStart／unitEnd：位置 pos 那個字所在的詞（現有分詞；原樣文字是 literalStep 的一格）的起點與終點。
-func (s *Session) unitStart(pos int) int {
-	if s.literals[pos] {
-		return s.literalFloor(pos)
-	}
-	for _, g := range s.path {
-		if g.Start <= pos && pos < g.End {
-			return g.Start
-		}
-	}
-	return pos
-}
-
-func (s *Session) unitEnd(pos int) int {
-	if s.literals[pos] {
-		return s.literalStep(s.literalFloor(pos), 1)
-	}
-	for _, g := range s.path {
-		if g.Start <= pos && pos < g.End {
-			return g.End
-		}
-	}
-	return pos + 1
 }
 
 // canStepCandidate：目前的候選是改字的候選，j／k 會換前後一個字（stepCandidate）。快照的 StepKeys 也依它判斷，
@@ -1335,49 +1279,18 @@ func (s *Session) candidateBefore() bool {
 	return s.CandidateBeforeCursor || s.cursor >= len(s.syls)
 }
 
-// openAnchored 保留查詢方向；切換詞長時不把前方模式的尾端當成詞首。
-// 詞長超過一個字時，詞的候選後面接著列游標那個字的單字（#161）：後方模式是詞的第一個字，
-// 前方模式是最後一個字，都是緊貼游標的那個字，Tab 換詞長時也不變。
+// openAnchored 保留查詢方向；切換詞長時不把前方模式的尾端當成詞首。每份清單只列這個詞長的候選
+// （拿掉官方 #161 接在詞後面的單字）。
 func (s *Session) openAnchored(anchor, length int, before bool) bool {
-	pos, single := anchor, anchor
+	pos := anchor
 	if before {
 		pos -= length
-		single = anchor - 1
 	}
 	if !s.openAt(pos, length) {
 		return false
 	}
-	if length > 1 {
-		s.appendSingles(single)
-	}
 	s.cand.before = before
 	return true
-}
-
-// appendSingles 把位置 at 的單字候選接在目前詞長的候選後面，成為一張清單（#161）。
-// 兩段各自查詢、各自算顯示原因，所以排序、近音附註、原始按鍵與原樣注音都與單獨開啟時相同。
-func (s *Session) appendSingles(at int) {
-	words := s.cand
-	if !s.openAt(at, 1) {
-		s.cand = words
-		return
-	}
-	singles := s.cand
-	s.cand = words
-	split := len(words.items)
-	if words.matched != nil || singles.matched != nil {
-		matched := make([]string, split+len(singles.items))
-		copy(matched, words.matched)
-		copy(matched[split:], singles.matched)
-		words.matched = matched
-	}
-	words.items = append(words.items, singles.items...)
-	words.labels = append(words.labels, singles.labels...)
-	for id, keys := range singles.keyLiterals {
-		words.keyLiterals[split+id] = keys
-	}
-	words.raw = singles.raw // 最後一項是單字的原樣注音
-	words.split, words.single = split, at
 }
 
 func (s *Session) openAt(pos, length int) bool {
@@ -1437,94 +1350,160 @@ func (s *Session) openAt(pos, length int) bool {
 	if len(near) > 0 {
 		items, matched = mergeFuzzy(items, near, nearMatched)
 	}
+	// 第一個是畫面上的字、反白在它上面，↓ 直接 Enter 畫面不變；其他照統計（P8：官方照統計排，畫面上是神經選的字時不在第一個）。
+	// 畫面上的字不是詞時（說不上 的「說不」）只在畫面上同一個詞裡才補上；只有近音的詞長不補（開模糊音不改原音候選）。
+	exact := len(items) > 0 && (matched == nil || slices.Contains(matched, ""))
+	added := false // 補上的不是詞（說不）：選了照畫面不動，不鎖也不學
+	if shown, inWord, ok := s.shownWord(pos, length); ok && (exact || inWord) {
+		items, matched, added = shownFirst(items, matched, shown, s.syls[pos:pos+length])
+	}
+	if len(items) == 0 && length > 1 {
+		return false // 沒有詞的詞長（果事物、億美元、賺快）Tab 跳過，不開只有原按鍵的清單
+	}
 	// Keep physical keys recoverable without creating Chinese-word preferences.
 	// The ordinary raw-zhuyin candidate remains last for existing clients.
-	keyLiterals := map[int]string{}
-	if keys := s.originalMixedKeys(pos, length); keys != "" {
-		// 只用數字鍵出的字（#134 的 5 之、#162 的 20 單）要數字的人多；照位置組出的字（#274：i16 博、k27 的、u2/4 定）
-		// 是引擎替使用者改的順序，同音字多時原按鍵在最後一頁找不到；型號後面數字鍵開頭的字（#249：h264 的、Q2 的）
-		// 前面的數字也可能還是型號。這些原按鍵都排第二個，第一個仍是目前的字。
-		at := len(items)
-		if at > 1 && (length == 1 && (s.digitWordKeys(pos) || s.digitAfterAlnumKeys(pos)) || s.positionalKeysIn(pos, length)) {
-			at = 1
-		}
-		keyLiterals[at] = keys
-		items = slices.Insert(items, at, rawCandidate(keys))
+	// 排在畫面上的字後面的：神經判過的字（趴 的 q8、教 的 url，P8 翻邊）；只用數字鍵出的字（#134 的 5 之、#162 的 20 單）
+	// 要數字的人多；照位置組出的字（#274：i16 博、k27 的、u2/4 定）是引擎替使用者改的順序，同音字多時原按鍵在最後一頁找不到；
+	// 型號後面數字鍵開頭的字（#249：h264 的、Q2 的）前面的數字也可能還是型號。再來是神經判過的字的其他切法（斷 → 2萬 → 段…）。
+	insertRaw := func(at int, text string) {
+		items = slices.Insert(items, at, rawCandidate(text))
 		if matched != nil {
 			matched = slices.Insert(matched, min(at, len(matched)), "")
 		}
 	}
+	head := min(1, len(items))
+	keyLiterals, flipAt := map[int]string{}, map[int]flipPick{}
+	if added {
+		flipAt[0] = flipPick{keep: true}
+	}
+	keys := s.originalMixedKeys(pos, length)
+	front := keys != "" && (length == 1 && (s.judgedKeysSecond(pos) || s.digitWordKeys(pos) || s.digitAfterAlnumKeys(pos)) || s.positionalKeysIn(pos, length))
+	if front {
+		keyLiterals[head] = keys
+		insertRaw(head, keys)
+		head++
+	}
 	if length == 1 {
-		items = append(items, rawCandidate(s.syls[pos].Text()))
-		if matched != nil {
-			matched = append(matched, "")
+		for _, f := range s.chooseFlipChars(s.judgedSplits(pos)) {
+			flipAt[head] = f
+			insertRaw(head, s.mixedLiteralText(f.prefix)+f.char)
+			head++
 		}
 	}
-	if len(items) == 0 {
-		return false
+	if keys != "" && !front {
+		keyLiterals[len(items)] = keys
+		insertRaw(len(items), keys)
 	}
-	s.cand = &candState{start: pos, length: length, items: items, raw: length == 1, matched: matched, keyLiterals: keyLiterals}
+	if length == 1 {
+		insertRaw(len(items), s.syls[pos].Text())
+	}
+	s.cand = &candState{start: pos, length: length, items: items, raw: length == 1, matched: matched, keyLiterals: keyLiterals, flips: flipAt}
 	s.cand.labels = s.candidateLabels(s.cand)
 	s.labelSpatial(pos)
 	return true
 }
 
+// shownWord 是畫面上 [pos, pos+length) 的字，inWord 表示整段在畫面上同一個詞裡；跨音、修正、
+// 字數跟音節數不同（尾端補全）的詞不能照原樣鎖定，回 false。
+func (s *Session) shownWord(pos, length int) (shown string, inWord, ok bool) {
+	var text []rune
+	segs := 0
+	for _, g := range s.path {
+		if g.End <= pos || g.Start >= pos+length {
+			continue
+		}
+		word := []rune(g.Word)
+		if g.Correction || g.Matched != "" || len(word) != g.End-g.Start {
+			return "", false, false
+		}
+		text = append(text, word[max(0, pos-g.Start):min(len(word), pos+length-g.Start)]...)
+		segs++
+	}
+	return string(text), segs == 1, len(text) == length
+}
+
+// shownFirst 把畫面上的字 shown 移到第一個（有原音的那一項就用它，只有近音就用近音那一項）；
+// 不在清單裡（說不上 的「說不」不是詞）時補上，added 是 true。
+func shownFirst(items []decode.Candidate, matched []string, shown string, reading []zhuyin.Syllable) (_ []decode.Candidate, _ []string, added bool) {
+	at := -1
+	for i, c := range items {
+		if c.Entry.Surface != shown {
+			continue
+		}
+		if at < 0 {
+			at = i
+		}
+		if i >= len(matched) || matched[i] == "" {
+			at = i
+			break
+		}
+	}
+	if at == 0 {
+		return items, matched, false
+	}
+	c, m := decode.Candidate{Entry: lexicon.Entry{Surface: shown, Reading: slices.Clone(reading)}}, ""
+	if at > 0 {
+		c = items[at]
+		items = slices.Delete(items, at, at+1)
+		if at < len(matched) {
+			m = matched[at]
+			matched = slices.Delete(matched, at, at+1)
+		}
+	}
+	items = slices.Insert(items, 0, c)
+	if matched != nil {
+		matched = slices.Insert(matched, 0, m)
+	}
+	return items, matched, at < 0
+}
+
 func (s *Session) pages() int { return (len(s.cand.items) + s.pageSize() - 1) / s.pageSize() }
 
 // 候選開啟時 Tab 切至下一個較長詞長（d=1），最長後回到最短；Shift+Tab 反過來（d=-1）。不接受補全或提交。
+// 同一串按鍵的清單（修改「2萬」）照「修改字詞的位置」只往一個方向包：前方模式（含句尾）從 萬 的單字多一步，
+// 後方模式從前段的照字面清單（市值|2萬 的 2 / ㄉ）換過去，再 Tab 回來；市值2|萬 兩種模式都不包 2。
 func (s *Session) cycleCandidateLength(d int) {
 	c := s.cand
-	if c == nil || c.literal || c.mixed {
+	if c == nil || c.mixed {
 		return
 	}
-	anchor, maxLen := s.candidateAnchor(c)
-	for i := 1; i <= maxLen; i++ {
-		length := ((c.length-1+d*i)%maxLen+maxLen)%maxLen + 1
-		if s.openAnchored(anchor, length, c.before) {
+	if c.span != nil && c.span.literal {
+		s.openLiteralAt(c.span.at)
+		return
+	}
+	if c.literal {
+		if q, ok := s.flipFromLiteral(); ok {
+			s.openFlipSpan(q, spanBack{literal: true, at: c.start})
+		}
+		return
+	}
+	anchor, before := c.start, c.before
+	maxLen := min(decode.MaxLen(s.dec.Lex), len(s.syls)-anchor)
+	if before {
+		anchor = c.start + c.length
+		maxLen = min(decode.MaxLen(s.dec.Lex), anchor)
+	}
+	// 步驟 0 是單字，1 是同一串按鍵的清單，k ≥ 2 是 k 個字的詞。
+	step := c.length
+	if c.span != nil {
+		step = 1
+	} else if c.length == 1 {
+		step = 0
+	}
+	n := maxLen + 1
+	for i := 1; i <= n; i++ {
+		next := ((step+d*i)%n + n) % n
+		if next == 1 && before && s.openFlipSpan(anchor-1, spanBack{}) || next != 1 && s.openAnchored(anchor, max(next, 1), before) {
 			return
 		}
 	}
 }
 
-func (s *Session) candidateAnchor(c *candState) (int, int) {
-	if c.before {
-		end := c.start + c.length
-		return end, min(decode.MaxLen(s.dec.Lex), end)
-	}
-	return c.start, min(decode.MaxLen(s.dec.Lex), len(s.syls)-c.start)
-}
-
-// moveHighlight 把反白往下（d=1）或往上（d=-1）移一項。各詞長的候選視為由長到短接在一起的
-// 一份清單：走過目前詞長的尾端就接到較短的詞長，走過開頭就回到較長的；頭尾相接，
-// 所以方向鍵永遠有反應（使用者回報：上下鍵不能移動，像是卡死）。
-// 混合清單已經含單字（#161），所以從多字詞長出發時跳過「只有單字」的詞長，往上回到較長詞長時
-// 停在它的最後一個詞，都不重複走一次單字。
+// moveHighlight 把反白往下（d=1）或往上（d=-1）移一項，在同一份清單裡頭尾繞圈、不跨詞長（P8；
+// 官方走過尾端會接到別的詞長）。換詞長用 Tab。
 func (s *Session) moveHighlight(d int) {
 	c := s.cand
-	if c.literal || c.mixed {
-		c.cursor = (c.cursor + d + len(c.items)) % len(c.items)
-		return
-	}
-	if n := c.cursor + d; n >= 0 && n < len(c.items) {
-		c.cursor = n
-		return
-	}
-	anchor, maxLen := s.candidateAnchor(c)
-	for i := 1; i <= maxLen; i++ { // i == maxLen 時回到原詞長：只有這一種詞長有候選
-		l := ((c.length-1-d*i)%maxLen+maxLen)%maxLen + 1
-		if l == 1 && c.split > 0 {
-			continue
-		}
-		if s.openAnchored(anchor, l, c.before) {
-			if d < 0 {
-				s.cand.cursor = len(s.cand.items) - 1
-				if s.cand.split > 0 {
-					s.cand.cursor = s.cand.split - 1 // 停在較長詞長的最後一個詞，不再走一次單字
-				}
-			}
-			return
-		}
-	}
+	c.cursor = (c.cursor + d + len(c.items)) % len(c.items)
 }
 
 // selectCandidate 鎖定選取的詞。手動選取是硬條件；被換掉的原區段記下來供學習使用。
@@ -1543,10 +1522,13 @@ func (s *Session) selectCandidate(id int) bool {
 	if s.cand.mixed {
 		return s.selectMixed(id)
 	}
+	if f, ok := s.cand.flips[id]; ok {
+		return s.selectFlip(f)
+	}
 	if s.cand.literal || s.cand.keyLiterals[id] != "" || s.cand.raw && id == len(s.cand.items)-1 {
 		return s.selectLiteral(id)
 	}
-	start, length := s.cand.span(id)
+	start, length := s.cand.start, s.cand.length
 	c, end := s.cand.items[id].Entry, start+length
 	lock := decode.Lock{Word: c.Surface, Len: length}
 	if id < len(s.cand.matched) {
@@ -1770,8 +1752,8 @@ func (s *Session) snapshot() proto.Snapshot {
 		pending = s.mixedText()
 	}
 	split := pending != ""
-	if s.mixed.raw != "" && s.fullWidth && !s.english {
-		pending = s.fullWidthText(pending) // 全形時打到一半的英數也照全形顯示（insertMixedLiteral）
+	if s.mixed.raw != "" {
+		pending = s.mixedLiteralText(pending) // 全形時打到一半的英數也照全形顯示（insertMixedLiteral）
 	}
 	pendingSegment := proto.Segment{Text: pending, Style: proto.StylePending}
 	for _, g := range s.path {
@@ -1835,19 +1817,18 @@ func (s *Session) snapshot() proto.Snapshot {
 		tail(len([]rune(h.replace)), h.text) // 神經次佳候選，按 Tab 才接受
 	}
 	if s.cand != nil {
-		// 範圍跟著反白：混合清單反白單字時，外殼標示與標題都只指游標那個字（#161）。
-		start, length := s.cand.span(s.cand.cursor)
-		cl := &proto.CandidateList{Page: s.candidatePage(), Pages: s.pages(), Start: start, Length: length, Highlight: s.cand.cursor % s.pageSize(), Columns: s.candidateColumns(), Kind: s.cand.kind}
+		cl := &proto.CandidateList{Page: s.candidatePage(), Pages: s.pages(), Start: s.cand.start, Length: s.cand.length, Highlight: s.cand.cursor % s.pageSize(), Columns: s.candidateColumns(), Kind: s.cand.kind, PageSize: s.pageSize()}
 		if cl.Columns == 1 {
 			cl.Columns = 0
 		}
 		if s.cand.english {
-			cl.Title = "按 Tab 補全或修正拼字 · Esc 關閉"
+			cl.Title, cl.PageSize = "按 Tab 補全或修正拼字 · Esc 關閉", englishCandidateLimit
 		}
 		if cl.Kind != "" {
 			cl.Title = s.paletteTitle()
 		}
-		if !s.cand.literal && !s.cand.mixed && cl.Length > 0 {
+		// 照字面清單只有 Tab 換得到同一串按鍵的清單時才有標題（市值|2萬 的 2 / ㄉ）。
+		if _, span := s.flipFromLiteral(); !s.cand.mixed && cl.Length > 0 && (!s.cand.literal || span) {
 			cl.Title = "修改「" + s.candidateText() + "」 · Tab 切換詞長"
 		}
 		// 選字鍵含 j、k（asdfghjkl;）時它們是選字，不是換字。

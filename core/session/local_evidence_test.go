@@ -153,14 +153,13 @@ func TestCandidateStartsAtCurrentSegmentRatherThanUnrelatedLongWord(t *testing.T
 	if c == nil || c.Length != 1 {
 		t.Fatalf("應直接重選畫面上的心：%+v", c)
 	}
-	c = key(s, proto.KeyUp).Candidates
-	if c == nil || c.Length != 2 {
-		t.Fatalf("較長詞仍須可選：%+v", c)
-	}
-	if a := key(s, proto.KeyTab); a.Candidates == nil || a.Candidates.Length != 1 || a.Commit != "" {
-		t.Fatal("Tab 只切詞長", a)
+	if c = key(s, proto.KeyUp).Candidates; c == nil || c.Length != 1 {
+		t.Fatalf("↑ 不換詞長：%+v", c)
 	}
 	if a := key(s, proto.KeyTab); a.Candidates == nil || a.Candidates.Length != 2 || a.Commit != "" {
+		t.Fatal("較長詞用 Tab 選", a)
+	}
+	if a := key(s, proto.KeyTab); a.Candidates == nil || a.Candidates.Length != 1 || a.Commit != "" {
 		t.Fatal(a)
 	}
 }

@@ -169,7 +169,8 @@ func TestUndoKeyInCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	typeReadingLocal(s, "ㄕˋ ㄐㄧㄝˊ")
-	snap := key(s, proto.KeyDown)
+	key(s, proto.KeyDown)
+	snap := key(s, proto.KeyTab)
 	if snap.Candidates == nil || snap.Candidates.Items[0].Text != "世傑" {
 		t.Fatalf("%+v", snap.Candidates)
 	}
@@ -264,7 +265,8 @@ func TestCandidateNoteForCustomWord(t *testing.T) {
 	s.Fuzzy = fuzzy.Config{}.With(fuzzy.SSh, fuzzy.Select) // 模糊音預設開著：近音附註不能蓋掉「我的詞彙」（Fcitx5 驗收）
 	s.model.VocabAdd([]vocab.Entry{{Text: "世傑", Readings: []string{"ㄕˋ ㄐㄧㄝˊ"}}}, vocab.SourceManual)
 	typeReadingLocal(s, "ㄕˋ ㄐㄧㄝˊ")
-	snap := key(s, proto.KeyDown)
+	key(s, proto.KeyDown)
+	snap := key(s, proto.KeyTab)
 	if snap.Candidates.Items[0].Text != "世傑" || snap.Candidates.Items[0].Note != "我的詞彙" {
 		t.Fatalf("%+v", snap.Candidates.Items)
 	}

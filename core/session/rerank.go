@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,7 +41,7 @@ type neuralHint struct {
 
 // rerankPath 僅在本次輸入事件的同步決策窗口內執行。沒有背景回呼可寫入 session。
 // 字面符號（標點、英數）是解碼邊界：兩側各段獨立排序，段前已顯示的文字（含標點）接在
-// 已確認前文之後當作前文。任一手選／敏感狀態仍整次保留原解碼，不跨越保護邊界。
+// 已確認前文之後當作前文。手選、接受的補全等鎖定的範圍不動，其餘照常排序（候選都遵守鎖定）；私密、暫停等敏感狀態整次保留原解碼。
 // 單音節段（例：已提交「有下載失敗」後單獨打 ㄇㄚ）只在套件宣告 TextWeight 時以 ModeText
 // 評分：句尾助詞常被打成一聲，讀音會偏向「媽」，改由前文決定。
 func (s *Session) rerankPath() {
@@ -69,7 +70,7 @@ func (s *Session) rerankPath() {
 // 非同步評分器第一次遇到某段時先回錯誤（「還在算」，rerankSegment 不快取失敗），在背景算完後由外殼呼叫這裡；
 // 重解時 rerankSegment 再問一次評分器，命中外殼自己的快取。
 //
-// 只在 rerankAllowed（不看 allowRerank）時做：有候選開著、有手選鎖、私密、暫停、英文時不做；不動鎖、候選、游標與學習。
+// 只在 rerankAllowed（不看 allowRerank）時做：有候選開著、私密、暫停、英文時不做；不動鎖、候選、游標與學習。
 // 神經畫面保留規則：開評分器時簽章不含模型世代，別的欄位的學習不換掉已顯示文字（signature）。
 // 清掉 pathSig 重解會用目前的模型，所以顯示的 path 解出之後模型變過（pathGen != model.Gen）就不重排，
 // 等下一次修改音節時照常採用最新模型與評分。
@@ -87,14 +88,23 @@ func (s *Session) Rescore() bool {
 }
 
 func (s *Session) rerankAllowed() bool {
-	return s.Rerank.Scorer != nil && s.allowRerank && s.comp.Empty() && s.cand == nil && !s.private && !s.paused && !s.english && len(s.locks) == 0
+	return s.Rerank.Scorer != nil && s.allowRerank && s.comp.Empty() && s.cand == nil && !s.private && !s.paused && !s.english
 }
 
 // rerankable：段落長度在模型範圍內，讀音評分器讀得懂（rerank.Options.Readable）：沒打聲調的音節（#150）
 // 只送給接受未知聲調的評分器，簡拼與評分器字表外的基底在本機就照統計引擎，不送出去等它回退。
+// 有跨音手選的段照統計：鎖住的詞不是打出的讀音，近音不送進評分器（F33）。
 func (s *Session) rerankable(start, end int) bool {
 	n := end - start
-	return (n >= 2 && n <= 32 || n == 1 && s.Rerank.TextWeight > 0) && s.Rerank.Readable(s.syls[start:end])
+	if !(n >= 2 && n <= 32 || n == 1 && s.Rerank.TextWeight > 0) || !s.Rerank.Readable(s.syls[start:end]) {
+		return false
+	}
+	for _, l := range s.locksIn(start, end) {
+		if l.Matched != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // segMemo 記下某段上次跑完時的輸入摘要、提示與套用的 winner 段。摘要相同就重放，不重跑 N-best。
@@ -186,6 +196,8 @@ func (s *Session) segRerankDigest(start, end int, shown, before string) string {
 		}
 	}
 	b.WriteByte('|')
+	writeLocks(&b, s.locksIn(start, end))
+	b.WriteByte('|')
 	b.WriteString(shown)
 	b.WriteByte('|')
 	b.WriteString(before)
@@ -210,15 +222,17 @@ func (s *Session) rerankSegmentBody(lat input.Lattice, start, end int, shown, be
 	if cross {
 		return nil, true // 顯示段跨越邊界：契約不一致，不偷換
 	}
+	// 與 decodeWithLiterals 同樣帶著段內鎖定與當次手選證據，候選都遵守鎖定。
+	locks := s.locksIn(start, end)
 	s.configureDocumentContext(start)
-	s.dec.Evidence = nil
+	s.dec.Evidence = s.localEvidence(start)
 	s.configureCorrections(start, end, true)
-	rows, _ := s.dec.NBest(lat[start:end], nil, s.Opt.PrefixAware, 8)
+	rows, _ := s.dec.NBest(lat[start:end], locks, s.Opt.PrefixAware, 8)
 	if first < 0 || len(rows) == 0 || rows[0].Text != shown {
 		return nil, true
 	} // 搜尋契約不一致時不得偷換首選。
-	rows = s.extendShown(lat, start, end, rows)
-	rows = s.expandNeutral(lat, start, end, rows)
+	rows = s.extendShown(lat, start, end, rows, locks)
+	rows = s.expandNeutral(lat, start, end, rows, locks)
 	// 含評分器字表外字元的候選先拿掉，其他候選照常評分；顯示中的路徑本身有這種字時整段照統計引擎。
 	rows, encodable := opt.KeepEncodable(rows)
 	if !encodable {
@@ -326,11 +340,12 @@ const extendShownK = 2
 // 已被神經改對的前段可能不在新一鍵的候選中，模型只能挑別的組合而把前段換回。
 // 這裡把上次顯示的段內詞（讀音未變者）逐詞鎖定另取 N-best 附在後面：一組連最後一詞也鎖，
 // 一組放開最後一詞（它可能與新音節合成長詞，例：做→做事）。原首選仍是 rows[0]，覆寫規則不變。
-func (s *Session) extendShown(lat input.Lattice, start, end int, rows []decode.Hypothesis) []decode.Hypothesis {
+// held 是段內的鎖定（段內位置）：照樣帶著，跟鎖定重疊的詞不另外鎖。
+func (s *Session) extendShown(lat input.Lattice, start, end int, rows []decode.Hypothesis, held map[int]decode.Lock) []decode.Hypothesis {
 	var inside []decode.Seg
 	for _, g := range s.shownPath {
 		if g.Start >= start && g.End <= end && g.End <= len(s.shownSyls) && !g.Partial && !g.Correction && g.Matched == "" &&
-			slices.Equal(s.shownSyls[g.Start:g.End], s.syls[g.Start:g.End]) {
+			slices.Equal(s.shownSyls[g.Start:g.End], s.syls[g.Start:g.End]) && !overlapsLock(held, autoBlock{g.Start - start, g.End - start}) {
 			inside = append(inside, g)
 		}
 	}
@@ -340,13 +355,13 @@ func (s *Session) extendShown(lat input.Lattice, start, end int, rows []decode.H
 	}
 	out := slices.Clone(rows)
 	for _, words := range [][]decode.Seg{inside, inside[:max(len(inside)-1, 0)]} {
-		locks := map[int]decode.Lock{}
+		locks := maps.Clone(held)
 		for _, g := range words {
 			if g.End < end { // 至少留一個音節給延伸
 				locks[g.Start-start] = decode.Lock{Word: g.Word, Len: g.End - g.Start}
 			}
 		}
-		if len(locks) == 0 {
+		if len(locks) == len(held) {
 			continue
 		}
 		extra, _ := s.dec.NBest(lat[start:end], locks, s.Opt.PrefixAware, extendShownK)
@@ -370,7 +385,7 @@ func (s *Session) extendShown(lat input.Lattice, start, end int, rows []decode.H
 // 不在原清單的候選扣 NeutralExpand 後附在後面。原首選仍是 rows[0]，覆寫規則不變；
 // 評分器以打出讀音與輕聲讀音分別評分取大（套件宣告 neutral_expand_penalty）。
 // 沒打聲調的末音節不擴充：它的音節格本來就含輕聲。
-func (s *Session) expandNeutral(lat input.Lattice, start, end int, rows []decode.Hypothesis) []decode.Hypothesis {
+func (s *Session) expandNeutral(lat input.Lattice, start, end int, rows []decode.Hypothesis, locks map[int]decode.Lock) []decode.Hypothesis {
 	opt := s.Rerank
 	last := s.syls[end-1]
 	if opt.NeutralExpand <= 0 || end-start > 32 || last.Untoned() || last.ToneOf() == 5 || !opt.NeutralBases[last.Base()] {
@@ -382,7 +397,7 @@ func (s *Session) expandNeutral(lat input.Lattice, start, end int, rows []decode
 	syls[len(syls)-1] = last.WithTone(5)
 	penalty := s.dec.CorrectionPenalty
 	s.dec.CorrectionPenalty = s.model.CorrectionPenalty(syls, nil)
-	extra, _ := s.dec.NBest(neutral, nil, s.Opt.PrefixAware, 8)
+	extra, _ := s.dec.NBest(neutral, locks, s.Opt.PrefixAware, 8)
 	s.dec.CorrectionPenalty = penalty
 	seen := map[string]bool{}
 	for _, r := range rows {
@@ -793,22 +808,42 @@ func plainSegments(segs []decode.Seg) bool {
 	return len(segs) > 0
 }
 
-// acceptHint 把提示候選逐詞鎖定（視同手選），之後解碼必須顯示該候選。
+// acceptHint 把提示候選逐詞鎖定（視同手選），之後解碼必須顯示該候選。提示的詞包住手選的字時（候選都遵守鎖定，
+// 那幾個字一樣，同 decode 的 allowed），手選照舊，只鎖詞裡其餘的字（我在〔我再〕選過「我」：Tab 只換 再）。
 func (s *Session) acceptHint() bool {
 	h := s.hint
 	if h == nil {
 		return false
 	}
+	add := map[int]decode.Lock{}
 	for _, g := range h.segs {
-		for at, lock := range s.locks {
-			if at < g.End && g.Start < at+lock.Len {
+		word := []rune(g.Word)
+		var held []int
+		for at, l := range s.locks {
+			if at >= g.End || at+l.Len <= g.Start {
+				continue
+			}
+			if at < g.Start || at+l.Len > g.End || len(word) != g.End-g.Start || string(word[at-g.Start:at-g.Start+l.Len]) != l.Word {
 				return false // 不跨越既有手選
+			}
+			held = append(held, at)
+		}
+		if len(held) == 0 {
+			add[g.Start] = decode.Lock{Word: g.Word, Len: g.End - g.Start, Suggested: true}
+			continue
+		}
+		slices.Sort(held)
+		from := g.Start
+		for _, at := range append(held, g.End) {
+			if at > from {
+				add[from] = decode.Lock{Word: string(word[from-g.Start : at-g.Start]), Len: at - from, Suggested: true}
+			}
+			if at < g.End {
+				from = at + s.locks[at].Len
 			}
 		}
 	}
-	for _, g := range h.segs {
-		s.locks[g.Start] = decode.Lock{Word: g.Word, Len: g.End - g.Start, Suggested: true}
-	}
+	maps.Copy(s.locks, add)
 	s.hint = nil
 	return true
 }

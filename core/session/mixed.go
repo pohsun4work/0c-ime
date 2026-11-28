@@ -732,19 +732,27 @@ func (s *Session) finishMixedTone(key string) bool {
 	}
 	var act mixedToneAction
 	var visit *mixedRevisit
+	var gap float64
 	if key == " " && s.mixed.choice == 0 {
 		_, act, visit = s.mixedSpaceAction() // 組字區照著顯示的那個決定
+		gap = s.spaceMemo.gap
 	} else {
-		act, visit, _, _ = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
+		act, visit, gap, _ = s.neuralMixedTone(s.decideMixedTone(raw, key, sym), raw, key, sym)
 	}
 	if visit != nil && act.kind == mixedToneLiteral {
 		act = mixedToneAction{kind: mixedToneSpace} // 照原樣接空白（同 mixedKey）在這裡打，才記得到回頭比的位置
 	}
+	// 神經比過兩種以上的切法（gap 是有限的正數；規則自己決定的是 +Inf，沒問到的是 0）才算判過，↓ 才翻邊。
+	judged := act.kind == mixedToneSyllable && gap > 0 && !math.IsInf(gap, 1)
 	before := len(s.syls)
 	if !s.applyMixedTone(act, key, sym) {
 		return false
 	}
-	if added := len(s.syls) - before; visit != nil && added > 0 && s.cursor == len(s.syls) {
+	added := len(s.syls) - before
+	if judged {
+		s.markJudged(s.cursor-added, raw[:act.at])
+	}
+	if visit != nil && added > 0 && s.cursor == len(s.syls) {
 		v := *visit // spaceMemo 留著的那份不跟著改
 		v.start, v.syls, v.checked = s.cursor-added, slices.Clone(s.syls[s.cursor-added:]), len(s.syls)
 		s.keepRevisit(&v)
@@ -1456,7 +1464,7 @@ func (s *Session) positionalKeysIn(pos, length int) bool {
 		if keys == "" {
 			continue
 		}
-		if sym, ok := layout.Standard.Symbol(rune(keys[len(keys)-1])); keys[len(keys)-1] == ' ' || ok && zhuyin.ClassOf(sym) == zhuyin.Tone {
+		if settles(keys) {
 			keys = keys[:len(keys)-1]
 		}
 		if keys != "" && !s.keysInSyllableOrder(keys) {
@@ -1464,6 +1472,15 @@ func (s *Session) positionalKeysIn(pos, length int) bool {
 		}
 	}
 	return false
+}
+
+// settles：按鍵以聲調鍵（含一聲的空白）結尾。
+func settles(keys string) bool {
+	if keys == "" {
+		return false
+	}
+	sym, ok := layout.Standard.Symbol(rune(keys[len(keys)-1]))
+	return ok && zhuyin.ClassOf(sym) == zhuyin.Tone
 }
 
 // digitAfterAlnumKeys（#249）：at 是數字鍵開頭打出的字，緊接在照字面的數字後面（h264 的 2k7、Q2 的 2k7，mixedAfterAlnum 從數字裡切開）：
@@ -1971,17 +1988,17 @@ func (s *Session) englishCorrections(text string, limit int) []english.Candidate
 }
 
 // zhuyinKey 非零時，這格是單一注音鍵＋空白留下的注音符號，提交時據以更新選過的注音文（zhuyin_keys.go，#208）。
+// judged 非空時，這格是神經判過的混打音節（判定時的讀音），prefix 是同一串按鍵照字面留在它前面的前段，↓ 據以列其他切法（flip.go）。
 type mixedOrigin struct {
 	assisted, explicit bool
 	zhuyinKey          zhuyinKeyOrigin
+	judged             zhuyin.Syllable
+	prefix             string
 }
 
 func (s *Session) insertMixedLiteral(text string, assisted, explicit bool) {
 	at := s.cursor
-	if s.fullWidth && !s.english {
-		text = s.fullWidthText(text) // 全形時混打照常，英數與空白照微軟打全形（hello␣ → ｈｅｌｌｏ　）
-	}
-	s.insertLiteral(text)
+	s.insertLiteral(s.mixedLiteralText(text)) // 全形時英數與空白照微軟打全形（hello␣ → ｈｅｌｌｏ　）
 	if s.mixedOrigins == nil {
 		s.mixedOrigins = map[int]mixedOrigin{}
 	}

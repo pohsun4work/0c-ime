@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0c-biggo/0c-ime/core/decode"
 	"github.com/0c-biggo/0c-ime/core/lexicon"
 	"github.com/0c-biggo/0c-ime/core/lm"
 	"github.com/0c-biggo/0c-ime/core/personal"
@@ -269,6 +270,41 @@ func TestNeuralHintShowsCloseSecondAndTabLocksIt(t *testing.T) {
 	}
 }
 
+// 同一段有手選時照樣提示：手選的字提示裡一樣（候選都遵守鎖定），Tab 只換其他的字，手選的字還是手選（P8）。
+func TestNeuralHintAroundManualPick(t *testing.T) {
+	s := hintSession(100)
+	typeSyl(s, "ㄨㄛˇ")
+	key(s, proto.KeyDown)
+	s.Handle(proto.Request{Type: proto.Select, Index: 0}) // 選畫面上的「我」：鎖定
+	pick := s.locks[0]
+	snap := typeSyl(s, "ㄐㄧㄥˇ")
+	if snap.SuggestionEdit == nil || snap.Suggestion == snap.Text() {
+		t.Fatalf("有手選的段沒有提示：%+v", snap)
+	}
+	want := snap.SuggestionEdit.Text
+	if after := key(s, proto.KeyTab); after.Text() != want || s.locks[0] != pick {
+		t.Fatalf("Tab：%q 要 %q，手選 %v → %v", after.Text(), want, pick, s.locks[0])
+	}
+}
+
+// 提示的詞包住手選的字（decode 允許「我再」包住鎖定的「我」）：手選照舊，只鎖其餘的字；手選的字跟提示不同、
+// 或手選跨出提示的詞時不接受。
+func TestAcceptHintKeepsManualPickInsideWord(t *testing.T) {
+	pick := decode.Lock{Word: "我", Len: 1}
+	hint := neuralHint{text: "我再", replace: "我在", segs: []decode.Seg{{Start: 0, End: 2, Word: "我再"}}}
+	s := newSession()
+	s.locks, s.hint = map[int]decode.Lock{0: pick}, &hint
+	if !s.acceptHint() || len(s.locks) != 2 || s.locks[0] != pick || s.locks[1] != (decode.Lock{Word: "再", Len: 1, Suggested: true}) {
+		t.Fatalf("包住手選的提示：%v", s.locks)
+	}
+	for _, locks := range []map[int]decode.Lock{{0: {Word: "你", Len: 1}}, {1: {Word: "再見", Len: 2}}} {
+		s.locks, s.hint = locks, &hint
+		if s.acceptHint() || s.hint == nil {
+			t.Errorf("跟手選衝突的提示不該接受：%v", locks)
+		}
+	}
+}
+
 func TestNeuralHintDisabledAtZeroGap(t *testing.T) {
 	s := hintSession(0)
 	typeSyl(s, "ㄨㄛˇ")
@@ -429,5 +465,30 @@ func TestVariantOnly(t *testing.T) {
 		if got := variantOnly(tc.a, tc.b); got != tc.want {
 			t.Errorf("%s／%s：%v", tc.a, tc.b, got)
 		}
+	}
+}
+
+// P8：手選鎖住的字不動，其餘照常神經選字（以前有任何鎖就整段照統計，到 Enter 為止）。
+func TestNeuralKeepsRerankingAroundLocks(t *testing.T) {
+	calls := 0
+	s := neuralSession(&calls)
+	typeSyl(s, "ㄨㄛˇ")
+	typeSyl(s, "ㄐㄧㄥˇ")
+	got := s.Handle(proto.Request{Type: proto.Candidates, Length: 1})
+	choice := -1
+	for _, c := range got.Candidates.Items {
+		if c.Text == "景" {
+			choice = c.ID
+		}
+	}
+	if choice < 0 {
+		t.Fatal("missing manual choice")
+	}
+	if got = s.Handle(proto.Request{Type: proto.Select, Index: choice}); got.Text() != "我景" {
+		t.Fatalf("manual %+v", got)
+	}
+	before := calls
+	if got = typeSyl(s, "ㄐㄧㄥˇ"); got.Text() != "我景井" || calls == before {
+		t.Fatalf("手選後其餘部分要照常神經選字：%q calls %d → %d", got.Text(), before, calls)
 	}
 }

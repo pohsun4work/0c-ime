@@ -223,8 +223,8 @@ func (s *Session) styleKey(k string) (handled bool, commit string, done bool) {
 	return false, "", false
 }
 
-// cycleStyleCandidate 是 ↑：照微軟，游標處的字詞直接換成下一個候選、不開候選窗，連按接著換。
-// 先換整個詞；詞沒有別的候選時換游標旁那個字（混合清單後段的單字）。原始按鍵與原樣注音不在輪換裡
+// cycleStyleCandidate 是 ↑：照微軟，游標處的字直接換成 ↓ 清單的下一個候選、不開候選窗，連按接著換
+// （↓ 先開游標旁那一個字，所以換的也是那個字）。原始按鍵與原樣注音不在輪換裡
 // （「我們很好」↑ 不會變回 cp3cl3）。全形符號照 ↓ 清單的順序換下一個全形；半形符號、英數、
 // 還沒定案的混打按鍵與原樣音節不動。
 func (s *Session) cycleStyleCandidate() {
@@ -243,14 +243,7 @@ func (s *Session) cycleStyleCandidate() {
 	if c == nil || c.mixed || c.english || c.syllable != nil {
 		return
 	}
-	words := len(c.items)
-	if c.split > 0 {
-		words = c.split
-	}
-	ids, at := s.cycleChoices(c, 0, words)
-	if len(ids) < 2 && c.split > 0 {
-		ids, at = s.cycleChoices(c, c.split, len(c.items))
-	}
+	ids, at := s.cycleChoices(c)
 	if continuing {
 		at = slices.Index(ids, c.cursor)
 	}
@@ -260,16 +253,14 @@ func (s *Session) cycleStyleCandidate() {
 	id := ids[(max(at, 0)+1)%len(ids)]
 	c.cursor = id
 	s.cand, s.styleCycle = c, c
-	start, length := c.span(id)
+	start, length := c.start, c.length
 	cursor, advance, before := s.cursor, s.AdvanceAfterSelect, len(s.syls)
 	s.AdvanceAfterSelect = false
 	s.selectCandidate(s.candidateID(id))
 	s.AdvanceAfterSelect = advance
 	// 全形符號的字數不一定一樣（——／—、……／…）：之後的輪換與游標照換上去的長度。
 	grown := len(s.syls) - before
-	if c.split == 0 || id < c.split {
-		c.length += grown
-	}
+	c.length += grown
 	if cursor >= start+length {
 		cursor += grown
 	} else if cursor > start {
@@ -278,16 +269,16 @@ func (s *Session) cycleStyleCandidate() {
 	s.cursor = cursor
 }
 
-// cycleChoices 列出 items[lo:hi] 裡 ↑ 輪得到的項目，以及目前顯示的那一項在其中的位置（不在其中時是 -1）。
-func (s *Session) cycleChoices(c *candState, lo, hi int) (ids []int, at int) {
-	current := s.spanText(c.span(lo))
+// cycleChoices 列出 ↑ 輪得到的項目，以及目前顯示的那一項在其中的位置（不在其中時是 -1）。
+func (s *Session) cycleChoices(c *candState) (ids []int, at int) {
+	current := s.spanText(c.start, c.length)
 	if c.literal && !fullWidthSymbol(current) {
 		return nil, -1
 	}
 	at = -1
-	for id := lo; id < hi; id++ {
+	for id := range c.items {
 		text := c.items[id].Entry.Surface
-		if c.keyLiterals[id] != "" || c.raw && id == len(c.items)-1 || c.literal && !fullWidthSymbol(text) {
+		if _, flip := c.flips[id]; flip || c.keyLiterals[id] != "" || c.raw && id == len(c.items)-1 || c.literal && !fullWidthSymbol(text) {
 			continue
 		}
 		if text == current && at < 0 {

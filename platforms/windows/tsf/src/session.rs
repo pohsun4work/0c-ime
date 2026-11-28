@@ -32,6 +32,7 @@ pub struct Snapshot {
     pub columns: usize,
     pub candidate_kind: String,
     pub candidate_title: String,
+    pub page_size: usize,
     pub page: i64,
     pub pages: i64,
     pub highlight: i64,
@@ -579,6 +580,7 @@ fn parse(reply: &Value) -> Snapshot {
         s.columns = c["columns"].as_u64().unwrap_or(0).min(10) as usize;
         s.candidate_kind = c["kind"].as_str().unwrap_or("").to_string();
         s.candidate_title = c["title"].as_str().unwrap_or("").to_string();
+        s.page_size = c["page_size"].as_u64().unwrap_or(0).min(10) as usize;
         s.page = c["page"].as_i64().unwrap_or(0);
         s.pages = c["pages"].as_i64().unwrap_or(0);
         s.highlight = c["highlight"].as_i64().unwrap_or(0);
@@ -678,12 +680,13 @@ mod parse_tests {
     #[test]
     fn candidate_notes_line_up_with_candidates() {
         let reply: Value = serde_json::from_str(
-            r#"{"snapshot":{"handled":true,"candidates":{"page":0,"pages":1,"highlight":0,
+            r#"{"snapshot":{"handled":true,"candidates":{"page":0,"pages":1,"highlight":0,"page_size":9,
                 "items":[{"id":0,"text":"吃"},{"id":1,"text":"痴","note":"近音 ㄔ"}]}}}"#,
         )
         .unwrap();
         let s = parse(&reply);
         assert_eq!(s.candidates.len(), 2);
+        assert_eq!(s.page_size, 9);
         assert_eq!(
             s.candidate_notes,
             vec!["".to_string(), "近音 ㄔ".to_string()]

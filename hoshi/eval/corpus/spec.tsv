@@ -74,3 +74,13 @@ sym-09	=	=	P11：不開 Emoji
 sym-10	ji3$wu0␣	我$天	P4；官方 我$wu0␣
 sym-11	$su3	$你	P4
 sym-12	$20␣	$20␣	P4：緊接在後面的數字照數字留
+dn-01	dk3g4ul42j042ji␣	可是要2萬多	P8：數字接注音字母交給神經；官方 可是要斷多
+dn-02	g4562u4ao3m06	市值2億美元	P8；官方 市值第美元
+dn-03	ji3ap72jo4284bp6	我們2位大人	P8；官方 我們對大人
+dn-04	dk3g4ul42j042ji␣{Left}{Left}{Down}{Enter}	可是要2萬多	P8：↓ 第一個是畫面上的字，直接 Enter 不變；官方第一個是統計首選
+dn-05	z0␣1u0␣{Left}{Down}{Down}{Enter}	翻編	P8：一般中文 ↓ 第二個是統計首選
+dn-06	284e945j04dj94fu06{Left}{Left}{Left}{Down}{Down}{Enter}	大概5萬塊錢	P8：↓ 第二個是切法，選了其餘照常神經；官方 大概賺快錢、↓ 沒有 5萬
+dn-07	dk3g4ul42j042ji␣{Left}{Left}{Down}{Down}{Enter}	可是要斷多	P8：切出來的字 ↓ 第二個翻回去
+dn-08	ji3aq8␣{Down}{Down}{Enter}	我aq8␣	P8：判成中文 ↓ 第二個是原按鍵；官方在第 2 頁
+dn-09	ji3ssl␣{Down}{pick:孬}	我孬	P8：判成英文 ↓ 列規則組得出的中文；官方 ↓ 只有 s
+dn-10	go␣up␣{Down}{pick:ㄧㄣ}	go␣ㄧㄣ	P8：判成英文 ↓ 最後是注音

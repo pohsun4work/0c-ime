@@ -199,6 +199,8 @@ type CandidateList struct {
 	Columns   int    `json:"columns,omitempty"` // 0/1: legacy vertical; 2..5: row-major grid; 9/10: one horizontal page.
 	Kind      string `json:"kind,omitempty"`    // emoji / kaomoji; absent for ordinary candidates.
 	Title     string `json:"title,omitempty"`
+	// PageSize：每頁最多幾個候選；外殼照一整頁決定直排清單放游標上方還是下方。
+	PageSize int `json:"page_size,omitempty"`
 	// StepKeys：這是改字的候選，小寫 j／k 把要修改的字換到前一個／後一個字（#193）。外殼據此顯示「J K 換字」；
 	// 舊核心沒有這個欄位，也沒有 j／k 換字。
 	StepKeys bool `json:"step_keys,omitempty"`

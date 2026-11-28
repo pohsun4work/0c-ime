@@ -609,6 +609,7 @@ impl TextService_Impl {
             columns: snapshot.columns,
             kind: snapshot.candidate_kind.clone(),
             title: snapshot.candidate_title.clone(),
+            page_size: snapshot.page_size,
             suggestion: snapshot.suggestion.clone(),
             notice,
             marking: snapshot.marking(),

@@ -74,8 +74,8 @@ func (s *Session) decodeAroundUnreadable() map[int]string {
 		for end < len(lat) && !s.literals[end] && readable(end) {
 			end++
 		}
-		s.configureDocumentContext(start) // 左邊是原樣注音時 start > 0，沒有文件前文
-		s.dec.Evidence = nil
+		s.configureDocumentContext(start)       // 左邊是原樣注音時 start > 0，沒有文件前文
+		s.dec.Evidence = s.localEvidence(start) // 同 decodeWithLiterals 與神經重排（rerankSegmentBody）
 		s.configureCorrections(start, end, false)
 		part := s.dec.Decode(lat[start:end], s.locksIn(start, end), s.Opt.PrefixAware)
 		for _, g := range part {

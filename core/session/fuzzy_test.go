@@ -91,9 +91,6 @@ func listCandidates(s *Session, from, length int) []proto.CandidateItem {
 	for p := 1; p < snap.Candidates.Pages; p++ {
 		items = append(items, s.Handle(proto.Request{Type: proto.Page, Index: p}).Candidates.Items...)
 	}
-	if s.cand.split > 0 {
-		items = items[:s.cand.split] // 只比對這個詞長的候選；混合清單接在後面的單字另有測試（#161）
-	}
 	return items
 }
 
@@ -752,7 +749,12 @@ func TestFuzzyOverlappingLockDoesNotChangeExactCandidateOrder(t *testing.T) {
 	want := exactOnly(listCandidates(fresh, 1, 1))
 	s := build()
 	fzSelect(t, s, 0, 2, "知世")
-	if got := exactOnly(listCandidates(s, 1, 1)); !slices.Equal(got, want) {
+	// 第一個是畫面上的字（P8）：比較時兩邊都拿掉它，其餘照統計的次序。
+	got := exactOnly(listCandidates(s, 1, 1))
+	shown := s.spanText(1, 1)
+	got = slices.DeleteFunc(got, func(w string) bool { return w == shown })
+	want = slices.DeleteFunc(want, func(w string) bool { return w == shown })
+	if !slices.Equal(got, want) {
 		t.Fatalf("鎖定重疊時原音候選次序不得受鎖定讀音影響\n%v\n%v", want, got)
 	}
 }

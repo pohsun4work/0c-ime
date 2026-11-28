@@ -249,7 +249,7 @@ func (s *Session) selectLiteral(id int) bool {
 		s.comp.Reset()
 	}
 	// 先移除被選區間，再逐字插入；游標停在新符號後，可直接繼續輸入。
-	start, length := c.span(id) // 混合清單的原樣注音只替換游標那個字（#161）
+	start, length := c.start, c.length
 	s.cursor = start + length
 	// 原樣音節按 ↓ 又選回它自己：什麼都沒換，原按鍵（↓ 第二項）與選過的注音文紀錄都留著（#208）。
 	if c.syllable != nil && text == c.syllable.syllable().Text() {

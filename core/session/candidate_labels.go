@@ -20,41 +20,29 @@ func (s *Session) candidateLabels(c *candState) []string {
 		return labels
 	}
 	// 只用選取範圍外、完整且相鄰的已顯示詞；不跨標點、不拿被替換的詞當前文。
-	// 混合清單（#161）的兩段替換範圍不同，各自找鄰詞。
-	type neighbors struct{ left, right, document string }
+	var left, right, documentLeft string
 	documentWeight := s.Opt.DocumentContextWeight
-	around := map[[2]int]neighbors{}
-	neighborsOf := func(start, length int) neighbors {
-		if n, ok := around[[2]int{start, length}]; ok {
-			return n
+	for _, g := range s.path {
+		if g.Partial || s.literals[g.Start] {
+			continue
 		}
-		var n neighbors
-		for _, g := range s.path {
-			if g.Partial || s.literals[g.Start] {
-				continue
-			}
-			if g.End == start {
-				n.left = g.Word
-			}
-			if g.Start == start+length {
-				n.right = g.Word
-			}
+		if g.End == c.start {
+			left = g.Word
 		}
-		if start == 0 && documentWeight > 0 && documentWeight <= 1 && !s.DocumentContextOff {
-			if word := s.contextLeft(0); word != lm.BOS {
-				n.document = word
-			}
+		if g.Start == c.start+c.length {
+			right = g.Word
 		}
-		around[[2]int{start, length}] = n
-		return n
+	}
+	if c.start == 0 && documentWeight > 0 && documentWeight <= 1 && !s.DocumentContextOff {
+		if word := s.contextLeft(0); word != lm.BOS {
+			documentLeft = word
+		}
 	}
 	for i, candidate := range c.items {
 		if len(candidate.Entry.Reading) == 0 || i < len(c.matched) && c.matched[i] != "" {
 			continue // 原樣注音、符號及近音候選保留原提示
 		}
 		word := candidate.Entry.Surface
-		n := neighborsOf(c.span(i))
-		left, right, documentLeft := n.left, n.right, n.document
 		if !s.private && !s.paused && s.model.WordEvidence(word) >= personalLabelEvidence {
 			labels[i] = proto.CandidatePersonal
 			continue
