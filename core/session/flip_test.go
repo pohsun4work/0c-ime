@@ -154,8 +154,8 @@ func TestTabFlipSpan(t *testing.T) {
 	}
 }
 
-// 原按鍵只在同一串按鍵裡才列：萬我 是 j04｜ji3 兩串，沒有詞就不開這個詞長（官方行為）。
-func TestRawKeysSameRunOnly(t *testing.T) {
+// 沒有詞的詞長 Tab 跳過：萬我 只有原按鍵 j04ji3，不開這份清單。
+func TestTabSkipsLengthWithOnlyRawKeys(t *testing.T) {
 	s := splitSession(map[string]float64{"2萬": 0, "段": -5}, nil)
 	mixedType(s, "ji32j04ji3")
 	key(s, proto.KeyLeft)

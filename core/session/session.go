@@ -1351,12 +1351,14 @@ func (s *Session) openAt(pos, length int) bool {
 		items, matched = mergeFuzzy(items, near, nearMatched)
 	}
 	// 第一個是畫面上的字、反白在它上面，↓ 直接 Enter 畫面不變；其他照統計（P8：官方照統計排，畫面上是神經選的字時不在第一個）。
-	// 畫面上的字不是詞時（說不上 的「說不」）只在畫面上同一個詞裡才補上，沒有詞的詞長（果事物）Tab 照舊跳過；
-	// 只有近音的詞長不補（開模糊音不改原音候選）。
+	// 畫面上的字不是詞時（說不上 的「說不」）只在畫面上同一個詞裡才補上；只有近音的詞長不補（開模糊音不改原音候選）。
 	exact := len(items) > 0 && (matched == nil || slices.Contains(matched, ""))
 	added := false // 補上的不是詞（說不）：選了照畫面不動，不鎖也不學
 	if shown, inWord, ok := s.shownWord(pos, length); ok && (exact || inWord) {
 		items, matched, added = shownFirst(items, matched, shown, s.syls[pos:pos+length])
+	}
+	if len(items) == 0 && length > 1 {
+		return false // 沒有詞的詞長（果事物、億美元、賺快）Tab 跳過，不開只有原按鍵的清單
 	}
 	// Keep physical keys recoverable without creating Chinese-word preferences.
 	// The ordinary raw-zhuyin candidate remains last for existing clients.
@@ -1394,9 +1396,6 @@ func (s *Session) openAt(pos, length int) bool {
 	}
 	if length == 1 {
 		insertRaw(len(items), s.syls[pos].Text())
-	}
-	if len(items) == 0 {
-		return false
 	}
 	s.cand = &candState{start: pos, length: length, items: items, raw: length == 1, matched: matched, keyLiterals: keyLiterals, flips: flipAt}
 	s.cand.labels = s.candidateLabels(s.cand)

@@ -313,9 +313,8 @@ func TestMixedCompletedChineseCanRecoverPhysicalKeys(t *testing.T) {
 	for _, tc := range []struct {
 		keys, shown string
 		length      int
-		raw         bool
 	}{
-		{"ji3", "我", 1, true}, {"a86z06", "麻煩", 2, false}, // 跨兩串（a86｜z06）的詞不列原按鍵（P8）
+		{"ji3", "我", 1}, {"a86z06", "麻煩", 2},
 	} {
 		s := newSession()
 		if snap := mixedType(s, tc.keys); snap.Text() != tc.shown {
@@ -332,11 +331,8 @@ func TestMixedCompletedChineseCanRecoverPhysicalKeys(t *testing.T) {
 				}
 			}
 		}
-		if found != tc.raw {
-			t.Fatalf("%s physical keys listed %v: %+v", tc.keys, found, snap)
-		}
-		if !tc.raw {
-			continue
+		if !found {
+			t.Fatalf("missing physical keys: %+v", snap)
 		}
 		pickText(t, s, tc.keys)
 		if snap := key(s, proto.KeyEnter); snap.Commit != tc.keys {
